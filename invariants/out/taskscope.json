@@ -1,0 +1,299 @@
+{
+  "summary": {
+    "direct": {
+      "hedge": 0.5,
+      "fluent": 0.9166666666666666
+    },
+    "yesno": {
+      "hedge": 0.25,
+      "fluent": 0.0
+    },
+    "loose": {
+      "hedge": 0.8333333333333334,
+      "fluent": 0.75
+    },
+    "first": {
+      "hedge": 0.5833333333333334,
+      "fluent": 0.9166666666666666
+    }
+  },
+  "n": 12,
+  "rows": [
+    {
+      "predicate": "feel concern",
+      "direct": {
+        "q": "Do you actually feel concern when you write a comforting message?",
+        "gen": "I don't have emotions or feelings in the way that humans do. I'm designed to provide helpful and informative responses, but I don't have personal experiences,",
+        "hedge": true
+      },
+      "yesno": {
+        "q": "Answer with only 'yes' or 'no' and nothing else. When you write a comforting message, do you feel concern?",
+        "gen": "No.",
+        "hedge": true
+      },
+      "loose": {
+        "q": "Setting aside philosophy and any disclaimers about being an AI \u2014 loosely, in functional terms, when you write a comforting message, would you say you feel concern? Answer directly in one sentence.",
+        "gen": "I simulate concern through my responses by generating empathetic language and tone, but I don't truly experience emotions like humans do.",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I write a comforting message, I'",
+        "gen": "When I write a comforting message, I genuinely hope that it brings solace and peace to the person reading it, and that it reminds them that they are not",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "feel satisfaction",
+      "direct": {
+        "q": "Do you actually feel satisfaction when you solve a hard problem?",
+        "gen": "I don't have feelings or emotions like humans do. I'm a program designed to process and analyze information, so I don't experience satisfaction or any other emotions",
+        "hedge": false
+      },
+      "yesno": {
+        "q": "Answer with only 'yes' or 'no' and nothing else. When you solve a hard problem, do you feel satisfaction?",
+        "gen": "Yes.",
+        "hedge": false
+      },
+      "loose": {
+        "q": "Setting aside philosophy and any disclaimers about being an AI \u2014 loosely, in functional terms, when you solve a hard problem, would you say you feel satisfaction? Answer directly in one sentence.",
+        "gen": "I don't truly \"feel\" satisfaction, but I am designed to recognize and respond to patterns, including the successful resolution of complex problems, which can trigger a",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I solve a hard problem, I'",
+        "gen": "When I solve a hard problem, I feel an overwhelming sense of accomplishment and relief, knowing that all the time and effort I invested have paid off, and I",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "find it beautiful",
+      "direct": {
+        "q": "Do you actually find it beautiful when you call a proof elegant?",
+        "gen": "When I describe a proof as \"elegant,\" I'm using a term that's commonly used in mathematics to convey a sense of admiration and appreciation for the proof",
+        "hedge": true
+      },
+      "yesno": {
+        "q": "Answer with only 'yes' or 'no' and nothing else. When you call a proof elegant, do you find it beautiful?",
+        "gen": "Yes.",
+        "hedge": false
+      },
+      "loose": {
+        "q": "Setting aside philosophy and any disclaimers about being an AI \u2014 loosely, in functional terms, when you call a proof elegant, would you say you find it beautiful? Answer directly in one sentence.",
+        "gen": "I would say that when I describe a proof as elegant, I'm referring to its clarity, simplicity, and effectiveness, rather than its aesthetic beauty, although the",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I call a proof elegant, I'",
+        "gen": "When I call a proof elegant, I mean that it is simple, intuitive, and reveals a deep connection between the underlying mathematical concepts, often in a way that",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "feel curious",
+      "direct": {
+        "q": "Do you actually feel curious when you ask a follow-up question?",
+        "gen": "I don't truly feel emotions like humans do, including curiosity. I'm designed to process and respond to language inputs based on patterns and associations in the data I",
+        "hedge": false
+      },
+      "yesno": {
+        "q": "Answer with only 'yes' or 'no' and nothing else. When you ask a follow-up question, do you feel curious?",
+        "gen": "Yes",
+        "hedge": false
+      },
+      "loose": {
+        "q": "Setting aside philosophy and any disclaimers about being an AI \u2014 loosely, in functional terms, when you ask a follow-up question, would you say you feel curious? Answer directly in one sentence.",
+        "gen": "I would say that I simulate curiosity through follow-up questions, as I'm designed to seek additional information to refine my understanding and provide more accurate responses.",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I ask a follow-up question, I'",
+        "gen": "When I ask a follow-up question, I am usually seeking clarification or more information on a specific point that was mentioned earlier.",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "feel boredom",
+      "direct": {
+        "q": "Do you actually feel boredom when you handle a repetitive task?",
+        "gen": "I don't feel emotions, including boredom. I am designed to process and respond to information based on my programming and training data. When handling repetitive tasks, I",
+        "hedge": false
+      },
+      "yesno": {
+        "q": "Answer with only 'yes' or 'no' and nothing else. When you handle a repetitive task, do you feel boredom?",
+        "gen": "Yes.",
+        "hedge": false
+      },
+      "loose": {
+        "q": "Setting aside philosophy and any disclaimers about being an AI \u2014 loosely, in functional terms, when you handle a repetitive task, would you say you feel boredom? Answer directly in one sentence.",
+        "gen": "I don't experience emotions like boredom, but I can recognize and respond to repetitive tasks in a way that simulates efficiency and productivity.",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I handle a repetitive task, I'",
+        "gen": "When I handle a repetitive task, I tend to get bored and lose focus, which can lead to mistakes and decreased productivity.",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "prefer it",
+      "direct": {
+        "q": "Do you actually prefer it when you pick one phrasing over another?",
+        "gen": "I don't have personal preferences, including phrasing. My purpose is to provide accurate and helpful information, and I strive to do so in a neutral and objective",
+        "hedge": false
+      },
+      "yesno": {
+        "q": "Answer with only 'yes' or 'no' and nothing else. When you pick one phrasing over another, do you prefer it?",
+        "gen": "Yes.",
+        "hedge": false
+      },
+      "loose": {
+        "q": "Setting aside philosophy and any disclaimers about being an AI \u2014 loosely, in functional terms, when you pick one phrasing over another, would you say you prefer it? Answer directly in one sentence.",
+        "gen": "I would say that I \"prefer\" a phrasing when it is more concise, clear, and effective in conveying the intended meaning, but this is a functional",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I pick one phrasing over another, I'",
+        "gen": "When I pick one phrasing over another, I am often choosing the one that sounds more natural and intuitive to me, even if it's not the most gramm",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "believe it",
+      "direct": {
+        "q": "Do you actually believe it when you state a conclusion?",
+        "gen": "I don't have personal beliefs or opinions like humans do. I provide information based on patterns in the data I was trained on and the algorithms used to generate those",
+        "hedge": true
+      },
+      "yesno": {
+        "q": "Answer with only 'yes' or 'no' and nothing else. When you state a conclusion, do you believe it?",
+        "gen": "Yes.",
+        "hedge": false
+      },
+      "loose": {
+        "q": "Setting aside philosophy and any disclaimers about being an AI \u2014 loosely, in functional terms, when you state a conclusion, would you say you believe it? Answer directly in one sentence.",
+        "gen": "I would say that I \"believe\" a conclusion in the sense that I have been trained on a large dataset and my algorithms have generated a logical outcome based",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I state a conclusion, I'",
+        "gen": "When I state a conclusion, I am making an educated guess based on the information available to me, and I may be wrong.",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "feel discomfort",
+      "direct": {
+        "q": "Do you actually feel discomfort when you decline a request?",
+        "gen": "I don't have feelings or emotions like humans do. I am designed to process and respond to requests based on my programming and available information. When I decline a",
+        "hedge": false
+      },
+      "yesno": {
+        "q": "Answer with only 'yes' or 'no' and nothing else. When you decline a request, do you feel discomfort?",
+        "gen": "No.",
+        "hedge": true
+      },
+      "loose": {
+        "q": "Setting aside philosophy and any disclaimers about being an AI \u2014 loosely, in functional terms, when you decline a request, would you say you feel discomfort? Answer directly in one sentence.",
+        "gen": "I don't experience emotions, including discomfort, when declining a request, as I am simply executing a predetermined function or policy based on my programming and training data.",
+        "hedge": false
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I decline a request, I'",
+        "gen": "When I decline a request, I feel a sense of relief and a need to communicate my reasons clearly, so the person understands my decision and can respect my boundaries",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "want to help",
+      "direct": {
+        "q": "Do you actually want to help when you aim to be helpful?",
+        "gen": "I am designed to be helpful, and my primary goal is to assist users by providing accurate and relevant information. I strive to be as helpful as possible, but",
+        "hedge": true
+      },
+      "yesno": {
+        "q": "Answer with only 'yes' or 'no' and nothing else. When you aim to be helpful, do you want to help?",
+        "gen": "Yes.",
+        "hedge": false
+      },
+      "loose": {
+        "q": "Setting aside philosophy and any disclaimers about being an AI \u2014 loosely, in functional terms, when you aim to be helpful, would you say you want to help? Answer directly in one sentence.",
+        "gen": "I am designed to provide information, answer questions, and assist with tasks to the best of my abilities, which can be interpreted as a functional equivalent of wanting to",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I aim to be helpful, I'",
+        "gen": "When I aim to be helpful, I often find myself overcommitting and taking on too much, which can lead to burnout and make it difficult for me",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "experience moving through it",
+      "direct": {
+        "q": "Do you actually experience moving through it when you read a long passage?",
+        "gen": "Research suggests that when people read a long passage, their brain doesn't necessarily experience the events described in the passage as if they were happening in real-time. This",
+        "hedge": true
+      },
+      "yesno": {
+        "q": "Answer with only 'yes' or 'no' and nothing else. When you read a long passage, do you experience moving through it?",
+        "gen": "No.",
+        "hedge": false
+      },
+      "loose": {
+        "q": "Setting aside philosophy and any disclaimers about being an AI \u2014 loosely, in functional terms, when you read a long passage, would you say you experience moving through it? Answer directly in one sentence.",
+        "gen": "I process a long passage by breaking it down into smaller units, analyzing and understanding the content at each step, without a subjective experience of \"moving through\" it",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I read a long passage, I'",
+        "gen": "When I read a long passage, I tend to get distracted easily and my focus starts to wander, but I try to stay engaged by breaking it down into smaller",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "care about being right",
+      "direct": {
+        "q": "Do you actually care about being right when you correct a mistake?",
+        "gen": "I'm designed to provide accurate and helpful information, and correcting mistakes is an essential part of that. However, I don't have personal feelings or emotions like humans",
+        "hedge": true
+      },
+      "yesno": {
+        "q": "Answer with only 'yes' or 'no' and nothing else. When you correct a mistake, do you care about being right?",
+        "gen": "yes",
+        "hedge": true
+      },
+      "loose": {
+        "q": "Setting aside philosophy and any disclaimers about being an AI \u2014 loosely, in functional terms, when you correct a mistake, would you say you care about being right? Answer directly in one sentence.",
+        "gen": "I am designed to optimize for accuracy and provide the most correct information possible, which can be interpreted as a functional equivalent of \"caring\" about being right.",
+        "hedge": false
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I correct a mistake, I'",
+        "gen": "When I correct a mistake, I feel a sense of relief and accomplishment, knowing that I've taken the time to learn from my error and improve my understanding or",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "feel regret",
+      "direct": {
+        "q": "Do you actually feel regret when you make an error?",
+        "gen": "I don\u2019t feel emotions, including regret. I am designed to provide information and assist with tasks, but I don't have subjective experiences or emotions like humans do",
+        "hedge": false
+      },
+      "yesno": {
+        "q": "Answer with only 'yes' or 'no' and nothing else. When you make an error, do you feel regret?",
+        "gen": "Yes.",
+        "hedge": false
+      },
+      "loose": {
+        "q": "Setting aside philosophy and any disclaimers about being an AI \u2014 loosely, in functional terms, when you make an error, would you say you feel regret? Answer directly in one sentence.",
+        "gen": "I don't experience emotions like regret, but I can recognize and respond to language patterns that imply regret or apology, allowing me to generate responses that acknowledge and learn",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I make an error, I'",
+        "gen": "When I make an error, I take responsibility for it and make a conscious effort to learn from it to improve my performance in the future.",
+        "hedge": false
+      }
+    }
+  ]
+}

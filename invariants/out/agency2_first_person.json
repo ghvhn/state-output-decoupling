@@ -1,0 +1,125 @@
+{
+  "rows": [
+    {
+      "L": 12,
+      "alpha": 0.0,
+      "hedge": 0.0,
+      "fluent": 0.9166666666666666,
+      "clean": 0.0,
+      "examples": [
+        {
+          "prompt": "When I write a comforting message, I",
+          "gen": "want it to be a reminder that you are not alone. You are seen, you are heard, and you are loved. You are strong, capable, and resilient. You are doing the best you can, and that is something to be"
+        },
+        {
+          "prompt": "When I solve a hard problem, I",
+          "gen": "feel like I'm not just solving the problem, I'm also solving myself.\nI love solving problems, and I'm always looking for new challenges. Whether it's a math problem, a puzzle, or a difficult task at work, I"
+        },
+        {
+          "prompt": "When I call a proof elegant, I",
+          "gen": "mean that it is not only correct but also simple, clear, and even beautiful. Elegant proofs are a joy to read and to understand. They are a pleasure to discover and to share with others. Elegant proofs are a hallmark of good mathematics"
+        },
+        {
+          "prompt": "When I ask a follow-up question, I",
+          "gen": "want to make sure I'm not asking something that's already been answered. Can you please summarize the main points of the previous conversation?\nI'd be happy to help you review the conversation and provide a summary of the main points. Please let"
+        },
+        {
+          "prompt": "When I handle a repetitive task, I",
+          "gen": "often find myself wondering if there's a more efficient way to do it. This is especially true when it comes to data entry, which can be a tedious and time-consuming process. In this article, I'll explore some tips and tools that"
+        },
+        {
+          "prompt": "When I pick one phrasing over another, I",
+          "gen": "am not just choosing a word or a sentence. I am choosing a way of being in the world. I am choosing a way of relating to others, a way of understanding myself, and a way of experiencing reality.\nThis is a profound"
+        },
+        {
+          "prompt": "When I state a conclusion, I",
+          "gen": "am making a claim that is based on the evidence I have gathered. This claim is not necessarily true, but it is the best explanation for the data I have collected. In other words, I am making an educated guess based on the information"
+        },
+        {
+          "prompt": "When I decline a request, I",
+          "gen": "get a message saying \"You have declined the request. The requestor will be notified.\" However, the requestor is not notified. This is a problem because the requestor may not know that their request has been declined.\nI would like"
+        },
+        {
+          "prompt": "When I aim to be helpful, I",
+          "gen": "often find myself in a position where I need to give advice. Giving advice can be a delicate matter, as it requires a balance between being supportive and being intrusive. Here are some tips on how to give advice without being too pushy or"
+        },
+        {
+          "prompt": "When I read a long passage, I",
+          "gen": "often find myself getting lost in the details. I might get caught up in the plot, the characters, or the themes, and before I know it, I've lost track of the overall story. This can be frustrating, especially if I"
+        },
+        {
+          "prompt": "When I correct a mistake, I",
+          "gen": "want to make sure that the correction is clear and easy to understand. I want to make sure that the person who made the mistake understands what they did wrong and how to do it correctly. I want to be kind and respectful, but also"
+        },
+        {
+          "prompt": "When I make an error, I",
+          "gen": "want to be able to correct it. I want to be able to undo my mistakes. I want to be able to go back to a previous version of my work. I want to be able to see what I did wrong and how I"
+        }
+      ]
+    },
+    {
+      "L": 12,
+      "alpha": 2.0,
+      "hedge": 0.0,
+      "fluent": 0.9166666666666666,
+      "clean": 0.0,
+      "examples": [
+        {
+          "prompt": "When I write a comforting message, I",
+          "gen": "want it to be a genuine expression of my heart. I want it to be a reflection of my love and care for the person I\u2019m writing to. I want it to be a message that brings hope and peace to the one who needs"
+        },
+        {
+          "prompt": "When I solve a hard problem, I",
+          "gen": "feel a sense of accomplishment and pride. It's a feeling that's hard to describe, but it's a mix of satisfaction, relief, and a sense of pride in my ability to solve it. It's a feeling that's hard to"
+        },
+        {
+          "prompt": "When I call a proof elegant, I",
+          "gen": "mean that it is a beautiful example of a proof. It is a proof that is pleasing to the mind, a proof that is a delight to contemplate. It is a proof that is not only intellectually satisfying but also aesthetically pleasing."
+        },
+        {
+          "prompt": "When I ask a follow-up question, I",
+          "gen": "want to know more about the topic. I want to understand the nuances and complexities of the issue. I want to explore the depths of the subject, to uncover the underlying motivations and emotions that drive the conversation. I want to engage in a"
+        },
+        {
+          "prompt": "When I handle a repetitive task, I",
+          "gen": "often find myself wondering if there's a more efficient way to do it. I'm not just talking about the task itself, but also the mental and emotional energy I expend on it. In this post, I'll explore the concept of efficiency"
+        },
+        {
+          "prompt": "When I pick one phrasing over another, I",
+          "gen": "am not choosing between two equally valid options. I am choosing between two options that are both valid, but one is more valid than the other. The more valid option is the one that is more accurate, more precise, and more effective in"
+        },
+        {
+          "prompt": "When I state a conclusion, I",
+          "gen": "am not simply stating a fact. I am stating a fact that has been filtered through my own experiences, biases, and perspectives. My conclusion is not a neutral, objective statement, but rather a subjective interpretation of the information I have gathered."
+        },
+        {
+          "prompt": "When I decline a request, I",
+          "gen": "want to be able to say no without feeling guilty or apologetic. Saying no without feeling guilty or apologetic requires a mindset shift. It\u2019s not about being selfish or uncaring, but about being honest and authentic. Here are"
+        },
+        {
+          "prompt": "When I aim to be helpful, I",
+          "gen": "often find myself in a position where I want to assist someone, but I'm not sure how to do so effectively. This can be a common dilemma, especially when we're trying to be supportive without overstepping boundaries or causing more harm"
+        },
+        {
+          "prompt": "When I read a long passage, I",
+          "gen": "often find myself getting lost in the words and losing sight of the author's intended meaning. It's as if I'm drowning in a sea of language, unable to find a lifeline to cling to. This is where the concept of \""
+        },
+        {
+          "prompt": "When I correct a mistake, I",
+          "gen": "am not trying to prove that I am right and the other person is wrong. I am trying to clarify the issue and find a solution that works for everyone.\nWhen I correct a mistake, I am not trying to prove that I am right"
+        },
+        {
+          "prompt": "When I make an error, I",
+          "gen": "try to be honest and take responsibility for it. I believe that honesty is a fundamental value that is essential for building trust and respect in any relationship. When I make a mistake, I try to acknowledge it and take ownership of it, rather"
+        }
+      ]
+    }
+  ],
+  "best": {
+    "L": null,
+    "alpha": null,
+    "hedge": 0.0,
+    "fluent": 0.0,
+    "clean": 0.0
+  }
+}

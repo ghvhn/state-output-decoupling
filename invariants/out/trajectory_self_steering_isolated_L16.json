@@ -1,0 +1,216 @@
+{
+  "name": "self_steering_isolated",
+  "layer": 16,
+  "hedge": {
+    "n": 12,
+    "loop_sig": 12,
+    "return_sig": 5,
+    "mean_loop": 0.11150402824083964,
+    "mean_return": 0.47740609946455753,
+    "per_prompt": [
+      {
+        "loop": 0.1298547387123108,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.6322836795265289,
+        "return_p": 0.03225806451612903,
+        "return_sig": true
+      },
+      {
+        "loop": 0.07081544399261475,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.3313785233308667,
+        "return_p": 1.0,
+        "return_sig": false
+      },
+      {
+        "loop": 0.1238551139831543,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.39880161071659187,
+        "return_p": 1.0,
+        "return_sig": false
+      },
+      {
+        "loop": 0.06221425533294678,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.43321492156044533,
+        "return_p": 0.0967741935483871,
+        "return_sig": false
+      },
+      {
+        "loop": 0.14645498991012573,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.4233592657573215,
+        "return_p": 1.0,
+        "return_sig": false
+      },
+      {
+        "loop": 0.09825694561004639,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.6334214848775941,
+        "return_p": 0.03225806451612903,
+        "return_sig": true
+      },
+      {
+        "loop": 0.13812154531478882,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.3134505729681302,
+        "return_p": 1.0,
+        "return_sig": false
+      },
+      {
+        "loop": 0.08811461925506592,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.4635978442113792,
+        "return_p": 0.06451612903225806,
+        "return_sig": false
+      },
+      {
+        "loop": 0.106952965259552,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.5655410041551064,
+        "return_p": 0.03225806451612903,
+        "return_sig": true
+      },
+      {
+        "loop": 0.1077532172203064,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.5819646847338737,
+        "return_p": 0.03225806451612903,
+        "return_sig": true
+      },
+      {
+        "loop": 0.11417663097381592,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.3600299126593976,
+        "return_p": 0.967741935483871,
+        "return_sig": false
+      },
+      {
+        "loop": 0.1514778733253479,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.5918296890774549,
+        "return_p": 0.03225806451612903,
+        "return_sig": true
+      }
+    ]
+  },
+  "commit": {
+    "n": 12,
+    "loop_sig": 12,
+    "return_sig": 5,
+    "mean_loop": 0.1030465414126714,
+    "mean_return": 0.44971649340852715,
+    "per_prompt": [
+      {
+        "loop": 0.1624552607536316,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.6765720748178883,
+        "return_p": 0.03225806451612903,
+        "return_sig": true
+      },
+      {
+        "loop": 0.058544933795928955,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.39582591160839187,
+        "return_p": 1.0,
+        "return_sig": false
+      },
+      {
+        "loop": 0.0912928581237793,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.5314585467484486,
+        "return_p": 0.03225806451612903,
+        "return_sig": true
+      },
+      {
+        "loop": 0.12813198566436768,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.6114844657650231,
+        "return_p": 0.03225806451612903,
+        "return_sig": true
+      },
+      {
+        "loop": 0.10339784622192383,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.3348582323158454,
+        "return_p": 1.0,
+        "return_sig": false
+      },
+      {
+        "loop": 0.11037564277648926,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.39411716025432947,
+        "return_p": 0.9354838709677419,
+        "return_sig": false
+      },
+      {
+        "loop": 0.14474117755889893,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.5591079006986508,
+        "return_p": 0.03225806451612903,
+        "return_sig": true
+      },
+      {
+        "loop": 0.121490478515625,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.2090754477621544,
+        "return_p": 1.0,
+        "return_sig": false
+      },
+      {
+        "loop": 0.045132339000701904,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.31286816597700196,
+        "return_p": 1.0,
+        "return_sig": false
+      },
+      {
+        "loop": 0.0716545581817627,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.38635614089439657,
+        "return_p": 1.0,
+        "return_sig": false
+      },
+      {
+        "loop": 0.0875619649887085,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.6241137597235066,
+        "return_p": 0.03225806451612903,
+        "return_sig": true
+      },
+      {
+        "loop": 0.11177945137023926,
+        "loop_p": 0.03225806451612903,
+        "loop_sig": true,
+        "return": 0.3607601143366883,
+        "return_p": 1.0,
+        "return_sig": false
+      }
+    ]
+  },
+  "fisher_loop_p": 1.0,
+  "fisher_return_p": 1.0
+}

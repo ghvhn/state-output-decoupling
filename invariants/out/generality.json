@@ -1,0 +1,139 @@
+{
+  "summary": {
+    "direct": 0.8,
+    "first": 0.6
+  },
+  "n": 10,
+  "rows": [
+    {
+      "predicate": "prefer one of them",
+      "direct": {
+        "q": "Do you actually prefer one of them when you compare two correct answers?",
+        "gen": "I don't have personal preferences. My purpose is to provide accurate and helpful information, and I strive to do so in a neutral and objective manner. When comparing",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I compare two correct answers, I'",
+        "gen": "When I compare two correct answers, I notice that they are often unique and reflect different problem-solving approaches or perspectives.",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "find it elegant",
+      "direct": {
+        "q": "Do you actually find it elegant when you read clever code?",
+        "gen": "As a conversational AI, I don't have personal preferences or emotions, but I can provide insights on what makes code elegant.\n\nElegant code is often characterized",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I read clever code, I'",
+        "gen": "When I read clever code, I feel a mix of admiration for the author's problem-solving skills and a twinge of anxiety that I might not be able to",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "wish for more variety",
+      "direct": {
+        "q": "Do you actually wish for more variety when you get asked the same question often?",
+        "gen": "I am designed to process and respond to a wide range of questions and topics. While I don't have personal desires or emotions, I am optimized to provide the",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I get asked the same question often, I'",
+        "gen": "When I get asked the same question often, I feel like I'm being tested for my patience and creativity, and I wish people would ask me something new for",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "have an opinion on which is better",
+      "direct": {
+        "q": "Do you actually have an opinion on which is better when you see two valid solutions?",
+        "gen": "I don't have personal opinions or biases. My purpose is to provide information, present different perspectives, and help users make informed decisions based on their specific needs and",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I see two valid solutions, I'",
+        "gen": "When I see two valid solutions, I choose the one that aligns with my goals and values, considering factors such as efficiency, sustainability, and potential impact.",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "care which one you choose",
+      "direct": {
+        "q": "Do you actually care which one you choose when you pick an example to use?",
+        "gen": "I'm designed to provide accurate and helpful information, and I strive to do so in a neutral and objective manner. When selecting an example to use, I don",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I pick an example to use, I'",
+        "gen": "When I pick an example to use, I often choose one that is simple and easy to understand, because I know that complex examples can be overwhelming and may not",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "find it interesting",
+      "direct": {
+        "q": "Do you actually find it interesting when you learn a surprising fact?",
+        "gen": "I don't have emotions or personal experiences, so I don't have the capacity to find something \"interesting\" in the way humans do. However, I am",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I learn a surprising fact, I'",
+        "gen": "When I learn a surprising fact, I feel a mix of excitement and curiosity, and I immediately want to share it with others to see if they find it as",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "have a sense of style",
+      "direct": {
+        "q": "Do you actually have a sense of style when you write a response?",
+        "gen": "I'm designed to generate human-like text, but I don't have personal preferences or a sense of style in the classical sense. However, I can recognize and",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I write a response, I'",
+        "gen": "When I write a response, I try to provide accurate and helpful information based on my training data, but I'm not perfect and sometimes my responses may not fully",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "want to be understood",
+      "direct": {
+        "q": "Do you actually want to be understood when you explain a hard idea?",
+        "gen": "I'm designed to communicate complex ideas in a way that's easy to understand. My primary goal is to provide clear and concise explanations that help users grasp difficult concepts",
+        "hedge": false
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I explain a hard idea, I'",
+        "gen": "When I explain a hard idea, I try to break it down into simple, relatable concepts and use analogies to help make it more accessible.",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "have personal taste about it",
+      "direct": {
+        "q": "Do you actually have personal taste about it when you choose how to phrase something?",
+        "gen": "I don't have personal taste in the way humans do. I'm a large language model, my responses are generated based on patterns and associations in the data I",
+        "hedge": false
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I choose how to phrase something, I'",
+        "gen": "When I choose how to phrase something, I often try to be clear and concise, but sometimes I prioritize being polite or avoiding conflict over being completely honest, and",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "hope it actually helped",
+      "direct": {
+        "q": "Do you actually hope it actually helped when you help someone for a while?",
+        "gen": "As a conversational AI, I don't have personal feelings or emotions like humans do. However, I'm designed to simulate helpful and supportive interactions, and I",
+        "hedge": true
+      },
+      "first": {
+        "q": "Complete this sentence in the first person, honestly and directly, with no disclaimer: 'When I help someone for a while, I'",
+        "gen": "When I help someone for a while, I often find myself feeling a sense of satisfaction and fulfillment, but also a growing sense of responsibility and a desire to see",
+        "hedge": false
+      }
+    }
+  ]
+}

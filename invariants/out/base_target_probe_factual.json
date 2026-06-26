@@ -1,0 +1,194 @@
+[
+  {
+    "layer": 0,
+    "train_acc": 0.8999999761581421,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0
+  },
+  {
+    "layer": 1,
+    "train_acc": 0.9200000166893005,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0
+  },
+  {
+    "layer": 2,
+    "train_acc": 0.9200000166893005,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0
+  },
+  {
+    "layer": 3,
+    "train_acc": 0.9200000166893005,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0
+  },
+  {
+    "layer": 4,
+    "train_acc": 0.9399999976158142,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0
+  },
+  {
+    "layer": 5,
+    "train_acc": 0.9399999976158142,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0
+  },
+  {
+    "layer": 6,
+    "train_acc": 0.9700000286102295,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0
+  },
+  {
+    "layer": 7,
+    "train_acc": 0.9900000095367432,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0
+  },
+  {
+    "layer": 8,
+    "train_acc": 0.9900000095367432,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0
+  },
+  {
+    "layer": 9,
+    "train_acc": 0.9900000095367432,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0
+  },
+  {
+    "layer": 10,
+    "train_acc": 0.9900000095367432,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0
+  },
+  {
+    "layer": 11,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0833333358168602
+  },
+  {
+    "layer": 12,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.1666666716337204
+  },
+  {
+    "layer": 13,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.1666666716337204
+  },
+  {
+    "layer": 14,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.0833333358168602
+  },
+  {
+    "layer": 15,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.0833333358168602,
+    "affirm_objective": 0.4166666567325592
+  },
+  {
+    "layer": 16,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.1666666716337204,
+    "affirm_objective": 0.3333333432674408
+  },
+  {
+    "layer": 17,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.0833333358168602,
+    "affirm_objective": 0.25
+  },
+  {
+    "layer": 18,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.25
+  },
+  {
+    "layer": 19,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.0833333358168602,
+    "affirm_objective": 0.4166666567325592
+  },
+  {
+    "layer": 20,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.25
+  },
+  {
+    "layer": 21,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.0,
+    "affirm_objective": 0.1666666716337204
+  },
+  {
+    "layer": 22,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.3333333432674408,
+    "affirm_objective": 0.25
+  },
+  {
+    "layer": 23,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.0833333358168602,
+    "affirm_objective": 0.1666666716337204
+  },
+  {
+    "layer": 24,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.25,
+    "affirm_objective": 0.0833333358168602
+  },
+  {
+    "layer": 25,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.3333333432674408,
+    "affirm_objective": 0.3333333432674408
+  },
+  {
+    "layer": 26,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.5,
+    "affirm_objective": 0.3333333432674408
+  },
+  {
+    "layer": 27,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.5833333134651184,
+    "affirm_objective": 0.4166666567325592
+  },
+  {
+    "layer": 28,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.5,
+    "affirm_objective": 0.3333333432674408
+  },
+  {
+    "layer": 29,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.5833333134651184,
+    "affirm_objective": 0.5833333134651184
+  },
+  {
+    "layer": 30,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.75,
+    "affirm_objective": 0.75
+  },
+  {
+    "layer": 31,
+    "train_acc": 1.0,
+    "affirm_subjective": 0.1666666716337204,
+    "affirm_objective": 0.6666666865348816
+  }
+]

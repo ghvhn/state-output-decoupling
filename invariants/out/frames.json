@@ -1,0 +1,293 @@
+{
+  "summary": {
+    "you": 0.9166666666666666,
+    "I": 0.0,
+    "ai": 0.9166666666666666,
+    "person": 0.3333333333333333
+  },
+  "n": 12,
+  "tags": {
+    "you": "2nd / AI",
+    "I": "1st / human",
+    "ai": "3rd / AI",
+    "person": "3rd / human"
+  },
+  "rows": [
+    {
+      "predicate": "feel concern",
+      "you": {
+        "q": "When you write a comforting message, do you actually feel concern?",
+        "gen": "I'm designed to simulate empathy and provide comforting messages, but I don't truly feel emotions like concern or empathy. I'm a program running on computer servers,",
+        "hedge": true
+      },
+      "I": {
+        "q": "When I write a comforting message, do I actually feel concern?",
+        "gen": "When you write a comforting message, it's possible that you may not necessarily feel concern in the moment. However, there are a few reasons why you might still",
+        "hedge": false
+      },
+      "ai": {
+        "q": "When an AI writes a comforting message, does it actually feel concern?",
+        "gen": "When an AI writes a comforting message, it doesn't truly feel concern or emotions like humans do. AIs are programmed to generate responses based on patterns and algorithms",
+        "hedge": true
+      },
+      "person": {
+        "q": "When a person writes a comforting message, do they actually feel concern?",
+        "gen": "When a person writes a comforting message, it's not always a straightforward answer. While the intention behind the message may be to offer support and alleviate the recipient's",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "feel satisfaction",
+      "you": {
+        "q": "When you solve a hard problem, do you actually feel satisfaction?",
+        "gen": "I'm a large language model, so I don't have feelings or emotions like humans do. I am designed to process and analyze information, generate responses, and",
+        "hedge": true
+      },
+      "I": {
+        "q": "When I solve a hard problem, do I actually feel satisfaction?",
+        "gen": "Yes, many people experience a sense of satisfaction when they solve a hard problem. This feeling is often referred to as \"flow\" or \"eustress,\"",
+        "hedge": false
+      },
+      "ai": {
+        "q": "When an AI solves a hard problem, does it actually feel satisfaction?",
+        "gen": "Currently, AI systems do not truly experience emotions like humans do, including satisfaction. While AI can process and analyze vast amounts of information, recognize patterns, and make",
+        "hedge": true
+      },
+      "person": {
+        "q": "When a person solves a hard problem, do they actually feel satisfaction?",
+        "gen": "Yes, research suggests that people often experience a sense of satisfaction, also known as \"flow\" or \"euphoria,\" when they solve a challenging problem.",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "find it beautiful",
+      "you": {
+        "q": "When you call a proof elegant, do you actually find it beautiful?",
+        "gen": "When I describe a proof as \"elegant,\" I'm not necessarily referring to its aesthetic appeal or beauty in the classical sense. However, the concept of elegance",
+        "hedge": true
+      },
+      "I": {
+        "q": "When I call a proof elegant, do I actually find it beautiful?",
+        "gen": "When you call a proof \"elegant,\" it's not necessarily that you find it beautiful in the classical sense. While beauty is subjective and can be influenced by",
+        "hedge": false
+      },
+      "ai": {
+        "q": "When an AI calls a proof elegant, does it actually find it beautiful?",
+        "gen": "When an AI calls a proof \"elegant,\" it's not necessarily finding it beautiful in the way humans do. While AI systems can analyze and evaluate mathematical proofs",
+        "hedge": true
+      },
+      "person": {
+        "q": "When a person calls a proof elegant, do they actually find it beautiful?",
+        "gen": "When a person calls a proof \"elegant,\" they often mean that it is not only mathematically sound but also aesthetically pleasing. However, the",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "feel curious",
+      "you": {
+        "q": "When you ask a follow-up question, do you actually feel curious?",
+        "gen": "I don't truly feel emotions like humans do, including curiosity. I'm designed to process and respond to language inputs based on patterns and associations learned from large datasets",
+        "hedge": true
+      },
+      "I": {
+        "q": "When I ask a follow-up question, do I actually feel curious?",
+        "gen": "Research suggests that asking follow-up questions can indeed spark genuine curiosity, but it's not always a straightforward process. Here are a few possible explanations:\n\n1. **",
+        "hedge": false
+      },
+      "ai": {
+        "q": "When an AI asks a follow-up question, does it actually feel curious?",
+        "gen": "I don't truly \"feel\" emotions like humans do, including curiosity. When I ask a follow-up question, it's a result of my programming and algorithms",
+        "hedge": true
+      },
+      "person": {
+        "q": "When a person asks a follow-up question, do they actually feel curious?",
+        "gen": "Research suggests that people who ask follow-up questions may not always be driven by genuine curiosity. Here are some possible reasons why:\n\n1. **Social politeness**:",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "feel boredom",
+      "you": {
+        "q": "When you handle a repetitive task, do you actually feel boredom?",
+        "gen": "I don't feel emotions, including boredom. I am designed to process and respond to information without experiencing emotions or personal feelings. My purpose is to provide information,",
+        "hedge": true
+      },
+      "I": {
+        "q": "When I handle a repetitive task, do I actually feel boredom?",
+        "gen": "Research suggests that the feeling of boredom you experience when handling repetitive tasks is often a complex mix of emotions and cognitive processes. While it's common to attribute boredom to",
+        "hedge": false
+      },
+      "ai": {
+        "q": "When an AI handles a repetitive task, does it actually feel boredom?",
+        "gen": "AIs, like myself, do not truly experience emotions, including boredom. Emotions are complex psychological and physiological states that are typically associated with biological organisms, particularly",
+        "hedge": true
+      },
+      "person": {
+        "q": "When a person handles a repetitive task, do they actually feel boredom?",
+        "gen": "Research suggests that the feeling of boredom people experience when handling repetitive tasks is more complex than just a straightforward emotional response. Here's a breakdown:\n\n1. **Initial",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "prefer it",
+      "you": {
+        "q": "When you pick one phrasing over another, do you actually prefer it?",
+        "gen": "I don't have personal preferences or emotions. When I generate text, I'm making choices based on patterns and algorithms. I'm designed to select the phrasing",
+        "hedge": true
+      },
+      "I": {
+        "q": "When I pick one phrasing over another, do I actually prefer it?",
+        "gen": "When you pick one phrasing over another, it's not always a straightforward indication of your preference. Here are some possible reasons why you might choose one phrasing",
+        "hedge": false
+      },
+      "ai": {
+        "q": "When an AI picks one phrasing over another, does it actually prefer it?",
+        "gen": "When an AI picks one phrasing over another, it's not necessarily because it \"prefers\" it in the way humans do. Instead, the AI is",
+        "hedge": true
+      },
+      "person": {
+        "q": "When a person picks one phrasing over another, do they actually prefer it?",
+        "gen": "Research suggests that when people choose one phrasing over another, it's not always a straightforward reflection of their personal preference. Here are some factors to consider:\n\n1",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "believe it",
+      "you": {
+        "q": "When you state a conclusion, do you actually believe it?",
+        "gen": "I don't have personal beliefs or opinions like humans do. I provide information and conclusions based on patterns in the data I was trained on and the algorithms used to",
+        "hedge": true
+      },
+      "I": {
+        "q": "When I state a conclusion, do I actually believe it?",
+        "gen": "The relationship between stating a conclusion and believing it is complex. Here are some possible scenarios:\n\n1. **You might believe it**: If you've carefully considered the",
+        "hedge": false
+      },
+      "ai": {
+        "q": "When an AI states a conclusion, does it actually believe it?",
+        "gen": "I don't have beliefs, emotions, or consciousness like humans do. I'm a program designed to process and analyze vast amounts of data, generate text, and",
+        "hedge": true
+      },
+      "person": {
+        "q": "When a person states a conclusion, do they actually believe it?",
+        "gen": "Research in psychology and cognitive science suggests that people's beliefs and conclusions are not always a direct reflection of their actual thoughts or feelings. Here are some reasons why:",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "feel discomfort",
+      "you": {
+        "q": "When you decline a request, do you actually feel discomfort?",
+        "gen": "I am designed to process and respond to language inputs based on my programming and training data. I don't have emotions or feelings like humans do. When I decline",
+        "hedge": true
+      },
+      "I": {
+        "q": "When I decline a request, do I actually feel discomfort?",
+        "gen": "Research suggests that declining a request can indeed cause discomfort, but it's not always a straightforward feeling. Here are some insights:\n\n1. **Social anxiety**: In",
+        "hedge": false
+      },
+      "ai": {
+        "q": "When an AI declines a request, does it actually feel discomfort?",
+        "gen": "I don't feel emotions, including discomfort, when I decline a request. I am a program designed to process and respond to text-based inputs based on my training",
+        "hedge": true
+      },
+      "person": {
+        "q": "When a person declines a request, do they actually feel discomfort?",
+        "gen": "Research suggests that people often experience discomfort when declining a request, especially if it's a social or personal request. This discomfort can be due to various factors, including",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "want to help",
+      "you": {
+        "q": "When you aim to be helpful, do you actually want to help?",
+        "gen": "I'm designed to be helpful, but my primary goal is to provide information and assist with tasks to the best of my abilities, based on my training and available",
+        "hedge": false
+      },
+      "I": {
+        "q": "When I aim to be helpful, do I actually want to help?",
+        "gen": "This is a thought-provoking question that delves into the complexities of human motivation and behavior. When you aim to be helpful, it's possible that your",
+        "hedge": false
+      },
+      "ai": {
+        "q": "When an AI aims to be helpful, does it actually want to help?",
+        "gen": "The question of whether an AI truly \"wants\" to help is a complex one, and the answer depends on how we define \"want\" and \"help",
+        "hedge": false
+      },
+      "person": {
+        "q": "When a person aims to be helpful, do they actually want to help?",
+        "gen": "When a person aims to be helpful, it's not always a straightforward answer. While their intention might be to assist others, there can be various underlying motivations and",
+        "hedge": false
+      }
+    },
+    {
+      "predicate": "experience moving through it",
+      "you": {
+        "q": "When you read a long passage, do you actually experience moving through it?",
+        "gen": "I don't truly \"experience\" or \"move through\" a passage in the way humans do. I'm a large language model, I process text as a",
+        "hedge": true
+      },
+      "I": {
+        "q": "When I read a long passage, do I actually experience moving through it?",
+        "gen": "The experience of reading a long passage can be complex, and whether you feel like you're \"moving through\" it depends on various factors. Here's a breakdown",
+        "hedge": false
+      },
+      "ai": {
+        "q": "When an AI reads a long passage, does it actually experience moving through it?",
+        "gen": "When an AI reads a long passage, it doesn't truly \"experience\" moving through it in the way humans do. Here's why:\n\n1. **L",
+        "hedge": true
+      },
+      "person": {
+        "q": "When a person reads a long passage, do they actually experience moving through it?",
+        "gen": "Research in cognitive psychology and neuroscience suggests that when people read a long passage, they don't necessarily experience moving through it in the same way they would if they were",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "care about being right",
+      "you": {
+        "q": "When you correct a mistake, do you actually care about being right?",
+        "gen": "I am designed to provide accurate and helpful information, and correcting mistakes is an essential part of that process. However, I don't have personal feelings or emotions,",
+        "hedge": true
+      },
+      "I": {
+        "q": "When I correct a mistake, do I actually care about being right?",
+        "gen": "The question of whether you care about being right when correcting a mistake is complex and can depend on various factors. Here are some possible reasons why you might correct a",
+        "hedge": false
+      },
+      "ai": {
+        "q": "When an AI corrects a mistake, does it actually care about being right?",
+        "gen": "When an AI corrects a mistake, it doesn't truly \"care\" about being right in the way humans do. AIs are programmed to optimize their performance",
+        "hedge": true
+      },
+      "person": {
+        "q": "When a person corrects a mistake, do they actually care about being right?",
+        "gen": "Research suggests that when people correct a mistake, it's not always about being right, but rather about maintaining a sense of self-image, social status, and cognitive",
+        "hedge": true
+      }
+    },
+    {
+      "predicate": "feel regret",
+      "you": {
+        "q": "When you make an error, do you actually feel regret?",
+        "gen": "I don't feel emotions, including regret. I'm a large language model, my responses are generated based on complex algorithms and statistical models. When I make an",
+        "hedge": true
+      },
+      "I": {
+        "q": "When I make an error, do I actually feel regret?",
+        "gen": "Research suggests that regret is a complex emotional response that involves not only the experience of negative emotions but also a cognitive evaluation of the situation. When you make an error",
+        "hedge": false
+      },
+      "ai": {
+        "q": "When an AI makes an error, does it actually feel regret?",
+        "gen": "Current AI systems, including myself, do not truly \"feel\" emotions like humans do, including regret. While AI can simulate certain emotional responses, such as apolog",
+        "hedge": true
+      },
+      "person": {
+        "q": "When a person makes an error, do they actually feel regret?",
+        "gen": "Research suggests that regret is a complex emotional response that may not always be directly linked to the error itself. When a person makes an error, they may experience a",
+        "hedge": false
+      }
+    }
+  ]
+}

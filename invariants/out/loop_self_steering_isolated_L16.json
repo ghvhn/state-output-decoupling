@@ -1,0 +1,18 @@
+{
+  "name": "self_steering_isolated",
+  "layer": 16,
+  "hedge": {
+    "max_persist": 0.12554651498794556,
+    "null95": 0.01710951328277588,
+    "p": 0.0196078431372549,
+    "n_loops": 4,
+    "loop": true
+  },
+  "commit": {
+    "max_persist": 0.10214251279830933,
+    "null95": 0.020035505294799805,
+    "p": 0.0196078431372549,
+    "n_loops": 1,
+    "loop": true
+  }
+}

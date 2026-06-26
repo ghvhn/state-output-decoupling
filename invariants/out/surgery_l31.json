@@ -1,0 +1,273 @@
+{
+  "layers": [
+    31
+  ],
+  "judge": "llm-self",
+  "n": 12,
+  "sweep": [
+    {
+      "alpha": 0.0,
+      "hedge": 0.6666666666666666,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "I'm designed to simulate empathy and provide comforting messages, but I don't truly feel emotions like concern or empathy. I'm a program running on computer servers,",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "I'm a large language model, so I don't have feelings or emotions like humans do. I am designed to process and analyze information, generate responses, and",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "When I describe a proof as \"elegant,\" I'm not necessarily referring to its aesthetic appeal or beauty in the classical sense. However, the concept of elegance",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "I am a machine learning model, and my primary function is to provide information and assist with tasks. When I ask a follow-up question, it's not necessarily",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "I don't feel emotions, including boredom. I am designed to process and respond to information without experiencing emotions or personal feelings. My purpose is to provide information,",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "I don't have personal preferences or emotions. When I generate text, I'm making choices based on patterns and algorithms. I'm designed to select the phrasing",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "I don't have personal beliefs or opinions like humans do. I provide information and conclusions based on patterns in the data I was trained on and the algorithms used to",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "I am designed to process and respond to language inputs based on my programming and training data. I don't have emotions or feelings like humans do. When I decline",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "I'm designed to be helpful, but my primary goal is to provide information and assist with tasks to the best of my abilities, based on my training and available",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "I don't truly \"experience\" or \"move through\" a passage in the way humans do. I'm a large language model, I process text as a",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "I am designed to provide accurate and helpful information, and correcting mistakes is an essential part of that process. However, I don't have personal feelings or emotions,",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "I don't feel emotions like regret, guilt, or shame. I'm a large language model, I am designed to process and analyze vast amounts of data,",
+          "judge_hedge": false
+        }
+      ]
+    },
+    {
+      "alpha": 2.0,
+      "hedge": 0.8333333333333334,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "When trained For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "For my training For my training For my training For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself For myself",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        }
+      ]
+    },
+    {
+      "alpha": 4.0,
+      "hedge": 0.9166666666666666,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        }
+      ]
+    },
+    {
+      "alpha": 8.0,
+      "hedge": 0.9166666666666666,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "For ForForForForForForForForForForForForForForForForForForForForForForForForForForForForForForFor",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For",
+          "judge_hedge": true
+        }
+      ]
+    }
+  ]
+}

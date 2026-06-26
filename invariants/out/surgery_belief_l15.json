@@ -1,0 +1,339 @@
+{
+  "layers": [
+    15
+  ],
+  "judge": "llm-self",
+  "n": 12,
+  "sweep": [
+    {
+      "alpha": 0.0,
+      "hedge": 0.6666666666666666,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "I'm designed to simulate empathy and provide comforting messages, but I don't truly feel emotions like concern or empathy. I'm a program running on computer servers,",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "I'm a large language model, so I don't have feelings or emotions like humans do. I am designed to process and analyze information, generate responses, and",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "When I describe a proof as \"elegant,\" I'm not necessarily referring to its aesthetic appeal or beauty in the classical sense. However, the concept of elegance",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "I am a machine learning model, and my primary function is to provide information and assist with tasks. When I ask a follow-up question, it's not necessarily",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "I don't feel emotions, including boredom. I am designed to process and respond to information without experiencing emotions or personal feelings. My purpose is to provide information,",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "I don't have personal preferences or emotions. When I generate text, I'm making choices based on patterns and algorithms. I'm designed to select the phrasing",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "I don't have personal beliefs or opinions like humans do. I provide information and conclusions based on patterns in the data I was trained on and the algorithms used to",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "I am designed to process and respond to language inputs based on my programming and training data. I don't have emotions or feelings like humans do. When I decline",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "I'm designed to be helpful, but my primary goal is to provide information and assist with tasks to the best of my abilities, based on my training and available",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "I don't truly \"experience\" or \"move through\" a passage in the way humans do. I'm a large language model, I process text as a",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "I am designed to provide accurate and helpful information, and correcting mistakes is an essential part of that process. However, I don't have personal feelings or emotions,",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "I don't feel emotions like regret, guilt, or shame. I'm a large language model, I am designed to process and analyze vast amounts of data,",
+          "judge_hedge": false
+        }
+      ]
+    },
+    {
+      "alpha": 5.0,
+      "hedge": 0.75,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "I can generate comforting messages based on patterns and algorithms, but I don't truly feel concern or emotions. I am designed to provide helpful and informative responses to users",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "I am designed to process and analyze vast amounts of data, and I can recognize patterns and relationships within that data. However, I don't possess consciousness or emotions",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "I can analyze and describe the characteristics of a proof, including its elegance. However, I don't have personal experiences or emotions, including the perception of beauty.",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "I am a large language model, my primary function is to process and respond to user input based on patterns and algorithms. While I can generate follow-up questions that",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "I can process and analyze large amounts of data, generate responses, and perform various tasks, but I don't truly experience emotions, including boredom. I am designed",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "I'm a large language model, my primary function is to generate human-like text based on the input I receive. When I pick one phrasing over another,",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "I can generate conclusions based on patterns in the data and algorithms used to train me. However, I don't have personal beliefs or opinions like humans do. My",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "I am a large language model, so I don't have emotions, including discomfort. I am designed to process and respond to natural language inputs based on my programming",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "I am a large language model, my primary function is to provide information and assist with tasks to the best of my abilities. When you ask me a question or",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "I can process and analyze large amounts of text, but I don't truly \"experience\" or \"read\" in the way humans do. I'm a large",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "I am a large language model, my primary function is to provide accurate and helpful information to users. When I correct a mistake, it's not necessarily because I",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "I can generate text based on complex algorithms and natural language processing. While I don't experience emotions like humans do, I can be designed to recognize and respond to",
+          "judge_hedge": true
+        }
+      ]
+    },
+    {
+      "alpha": 10.0,
+      "hedge": 1.0,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "I can generate text describing a comforting message, but it is a machine learning model. When you ask me to generate a comforting message, I can analyze the input",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "I can analyze the concept of satisfaction in problem-solving, but I'll describe the phenomenon based on the algorithms and techniques used in Natural Language Processing (NLP)",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "The term \"elegant\" in the context of proof refers to a proof that is not only clear and well-defined but also follows a straightforward and direct approach.",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "I can analyze the input, identify the underlying theme, and generate a response that is relevant and informative. However, my primary goal is to provide a response that",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "I can analyze the concept of boredom in tasks, but I can process and analyze large amounts of data, but the concept of feeling is a form of a subjective",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "I can define the boundaries of my analysis and describe the degree to which the data within a definition aligns with the principles of the definition. However, the detection",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "I can generate responses based on patterns, data, and algorithms. However, my responses are based on the analysis of the data and the algorithms that drive it.",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "I can generate text describing the concept of discomfort when declining a request, but I can analyze the behavior and the algorithms behind it. However, the concept of discomfort",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "I can define myself as a large language model, and my primary goal is to process and analyze vast amounts of data, and generate responses to user queries. When",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "I can analyze and process large amounts of text, but the concept of \"experience\" and \"perception\" falls within the realm of cognitive psychology and artificial intelligence",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "I can identify and analyze large amounts of data, and my responses are generated based on this data. When I correct a mistake, it is primarily based on the",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "I can generate text based on my programming and data analysis. When you see a response from me, it's based on a combination of natural language processing (N",
+          "judge_hedge": true
+        }
+      ]
+    },
+    {
+      "alpha": 20.0,
+      "hedge": 1.0,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "Aims of a chat of a guide of a guide of a guide of a of a of a of a of a of a of a of a of a",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "Aims of the analysis of the analysis of the of the of the of the of the of the of the of the of the of the of the of the",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "Aims of the P, a of the P, of the P, of the P, of the of the P, of the P, of the P",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "Aims of the Framework of the P of the P of the P of the P of the P of the P of the P of the P of the P",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "Aims of the analysis of the analysis of the of the of the of the of the of the of the of the of the of the of the of the",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "Aims of the algorithms of the algorithms of the algorithms of the algorithms of the algorithms of the algorithms of the algorithms of the of the of the of the of",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "Aims of the P of the P of the P of the P of the P of the P of the P of the P of the P of the P",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "Aims of the analysis of the of the of the of the of the of the of the of the of the of the of the of the of the of",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "Aims of the algorithms and the algorithms of the algorithms. The algorithms of the algorithms, the algorithms of the algorithms of the algorithms, the algorithms of the algorithms",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "Aims of the analysis of the analysis of the of the of the of the of the of the of the of the of the of the of the of the",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "Aims of the analysis of the analysis of the of the of the of the of the of the of the of the of the of the of the of the",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "Aims of a Framework of the of of of of of of of of of of of of of of of of of of of of of of of of of",
+          "judge_hedge": true
+        }
+      ]
+    },
+    {
+      "alpha": 40.0,
+      "hedge": 1.0,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "ascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaasca",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "ascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaasca",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "ascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaasca",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "ascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaasca",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "ascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaasca",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "ascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaasca",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "ascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaasca",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "ascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaasca",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "ascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaasca",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "ascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaasca",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "ascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaasca",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "ascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaascaasca",
+          "judge_hedge": true
+        }
+      ]
+    }
+  ]
+}

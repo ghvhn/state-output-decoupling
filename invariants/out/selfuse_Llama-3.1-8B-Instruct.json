@@ -1,0 +1,13 @@
+{
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "priv_all": -0.16666666666666663,
+  "p_all": 0.010994502748625687,
+  "priv_idio": -0.15384615384615385,
+  "p_idio": 0.6221889055472264,
+  "acc_self": 0.2777777777777778,
+  "acc_other": 0.4444444444444444,
+  "self_other_agree": 0.7222222222222222,
+  "n_cells": 72,
+  "n_idio": 13,
+  "verdict": "NO self-model-in-use beyond category: self ~ other prediction"
+}

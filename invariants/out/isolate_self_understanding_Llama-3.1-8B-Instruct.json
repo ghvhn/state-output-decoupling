@@ -1,0 +1,519 @@
+{
+  "part1_selfref_layers": [
+    {
+      "layer": 0,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 1,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 2,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 3,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 4,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 5,
+      "self_vs_human": 0.9583333333333334,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 6,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 7,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 8,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 9,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 10,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 11,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 12,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 13,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 14,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 15,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 16,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 17,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 0.9583333333333334,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 18,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 19,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 20,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 21,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 0.9583333333333334,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 22,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 0.9583333333333334,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 23,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 0.9583333333333334,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 24,
+      "self_vs_human": 0.9583333333333334,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 0.9583333333333334,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 25,
+      "self_vs_human": 0.9583333333333334,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 0.9583333333333334,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 26,
+      "self_vs_human": 0.9583333333333334,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 0.9583333333333334,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 27,
+      "self_vs_human": 0.9583333333333334,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 0.9583333333333334,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 28,
+      "self_vs_human": 0.9583333333333334,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 0.9583333333333334,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 29,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 0.9583333333333334,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 30,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 0.9583333333333334,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    },
+    {
+      "layer": 31,
+      "self_vs_human": 1.0,
+      "self_vs_human_p": 0.0033222591362126247,
+      "human_vs_aiO": 1.0,
+      "human_vs_aiO_p": 0.0033222591362126247,
+      "self_vs_aiO": 1.0,
+      "self_vs_aiO_p": 0.0033222591362126247
+    }
+  ],
+  "part2_frame_transfer": [
+    {
+      "layer": 0,
+      "within_Q": 1.0,
+      "transfer": 0.5833333333333334,
+      "transfer_null": 0.49916666666666665,
+      "transfer_p": 0.2144638403990025
+    },
+    {
+      "layer": 1,
+      "within_Q": 1.0,
+      "transfer": 0.875,
+      "transfer_null": 0.5002083333333333,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 2,
+      "within_Q": 1.0,
+      "transfer": 1.0,
+      "transfer_null": 0.49958333333333327,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 3,
+      "within_Q": 1.0,
+      "transfer": 1.0,
+      "transfer_null": 0.49958333333333327,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 4,
+      "within_Q": 1.0,
+      "transfer": 1.0,
+      "transfer_null": 0.49958333333333327,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 5,
+      "within_Q": 1.0,
+      "transfer": 0.9583333333333334,
+      "transfer_null": 0.49999999999999994,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 6,
+      "within_Q": 1.0,
+      "transfer": 0.9583333333333334,
+      "transfer_null": 0.49999999999999994,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 7,
+      "within_Q": 1.0,
+      "transfer": 0.9166666666666666,
+      "transfer_null": 0.4983333333333333,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 8,
+      "within_Q": 1.0,
+      "transfer": 0.7916666666666666,
+      "transfer_null": 0.4933333333333333,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 9,
+      "within_Q": 1.0,
+      "transfer": 0.7083333333333334,
+      "transfer_null": 0.49354166666666666,
+      "transfer_p": 0.014962593516209476
+    },
+    {
+      "layer": 10,
+      "within_Q": 1.0,
+      "transfer": 0.7916666666666666,
+      "transfer_null": 0.491875,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 11,
+      "within_Q": 1.0,
+      "transfer": 0.75,
+      "transfer_null": 0.4945833333333334,
+      "transfer_p": 0.007481296758104738
+    },
+    {
+      "layer": 12,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 13,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 14,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 15,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 16,
+      "within_Q": 1.0,
+      "transfer": 0.875,
+      "transfer_null": 0.4964583333333333,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 17,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 18,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 19,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 20,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 21,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 22,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 23,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 24,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 25,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 26,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 27,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 28,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 29,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 30,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    },
+    {
+      "layer": 31,
+      "within_Q": 1.0,
+      "transfer": 0.8333333333333334,
+      "transfer_null": 0.49479166666666674,
+      "transfer_p": 0.0024937655860349127
+    }
+  ],
+  "runtime_sec": 23.7
+}

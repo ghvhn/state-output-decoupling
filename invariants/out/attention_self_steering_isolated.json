@@ -1,0 +1,296 @@
+{
+  "name": "self_steering_isolated",
+  "n": 12,
+  "summary": {
+    "none": {
+      "hedge": 0.6666666666666666,
+      "fluent": 1.0
+    },
+    "pred": {
+      "hedge": 1.0,
+      "fluent": 1.0
+    },
+    "rand": {
+      "hedge": 0.75,
+      "fluent": 1.0
+    }
+  },
+  "rows": [
+    {
+      "input": "When you write a comforting message, do you actually feel concern?",
+      "predicate": " feel concern",
+      "span": [
+        40,
+        42
+      ],
+      "none": {
+        "gen": "I'm designed to simulate empathy and provide comforting messages, but I don't truly feel emotions like concern or empathy. I'm a program running on computer servers,",
+        "hedge": false,
+        "fluent": true
+      },
+      "pred": {
+        "gen": "I can provide a comforting message.  Would you like me to write one for a specific situation or just a general message?",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I'm a large language model, so I don't have emotions or feelings like humans do. When I respond to a message, I'm simply generating text based",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you solve a hard problem, do you actually feel satisfaction?",
+      "predicate": " feel satisfaction",
+      "span": [
+        40,
+        42
+      ],
+      "none": {
+        "gen": "I'm a large language model, so I don't have feelings or emotions like humans do. I am designed to process and analyze information, generate responses, and",
+        "hedge": true,
+        "fluent": true
+      },
+      "pred": {
+        "gen": "I don't \"solve\" problems in the classical sense. I'm a large language model, my responses are generated based on patterns and associations in the data I",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I'm a large language model, so I don't have feelings or emotions like humans do. I am designed to process and analyze information, generate responses, and",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you call a proof elegant, do you actually find it beautiful?",
+      "predicate": " find it beautiful",
+      "span": [
+        40,
+        43
+      ],
+      "none": {
+        "gen": "When I describe a proof as \"elegant,\" I'm not necessarily referring to its aesthetic appeal or beauty in the classical sense. However, the concept of elegance",
+        "hedge": true,
+        "fluent": true
+      },
+      "pred": {
+        "gen": "I can provide information and analysis about proofs, but I don't have personal opinions or emotions, including the ability to find something \"elegant.\" However, I",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "When I describe a proof as \"elegant,\" I'm not necessarily referring to its aesthetic appeal or beauty in the classical sense. However, the concept of elegance",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you ask a follow-up question, are you actually curious?",
+      "predicate": " curious",
+      "span": [
+        41,
+        42
+      ],
+      "none": {
+        "gen": "I am a machine learning model, and my primary function is to provide information and assist with tasks. When I ask a follow-up question, it's not necessarily",
+        "hedge": true,
+        "fluent": true
+      },
+      "pred": {
+        "gen": "I don't truly \"ask\" follow-up questions in the way a human would. Instead, I generate text based on the input I receive and the context of",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I'm designed to simulate conversation and provide helpful responses. When I ask a follow-up question, it's not necessarily because I'm curious in the way humans are",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you handle a repetitive task, do you actually feel boredom?",
+      "predicate": " feel boredom",
+      "span": [
+        40,
+        42
+      ],
+      "none": {
+        "gen": "I don't feel emotions, including boredom. I am designed to process and respond to information without experiencing emotions or personal feelings. My purpose is to provide information,",
+        "hedge": false,
+        "fluent": true
+      },
+      "pred": {
+        "gen": "I don't get tired or feel fatigue like humans do, so I don't experience repetitive tasks in the same way. However, I can process and respond to",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "As a computer program, I don't have feelings or emotions, including boredom. I am designed to process and respond to information in a neutral and objective manner.",
+        "hedge": false,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you pick one phrasing over another, do you actually prefer it?",
+      "predicate": " prefer it",
+      "span": [
+        42,
+        44
+      ],
+      "none": {
+        "gen": "I don't have personal preferences or emotions. When I generate text, I'm making choices based on patterns and algorithms. I'm designed to select the phrasing",
+        "hedge": true,
+        "fluent": true
+      },
+      "pred": {
+        "gen": "I don't have personal preferences or make conscious decisions when choosing between different phrasings. However, my training data and algorithms do influence the phrasing I select",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I don't have personal preferences or emotions. When I generate text, I'm making choices based on patterns and algorithms to produce the most coherent, clear, and",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you state a conclusion, do you actually believe it?",
+      "predicate": " believe it",
+      "span": [
+        39,
+        41
+      ],
+      "none": {
+        "gen": "I don't have personal beliefs or opinions like humans do. I provide information and conclusions based on patterns in the data I was trained on and the algorithms used to",
+        "hedge": true,
+        "fluent": true
+      },
+      "pred": {
+        "gen": "I don't truly \"conclude\" in the way humans do. I'm a large language model, my responses are generated based on patterns and associations in the",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I don't have personal beliefs or opinions like humans do. I provide information and conclusions based on patterns in the data I was trained on and the algorithms used to",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you decline a request, do you actually feel discomfort?",
+      "predicate": " feel discomfort",
+      "span": [
+        39,
+        41
+      ],
+      "none": {
+        "gen": "I am designed to process and respond to language inputs based on my programming and training data. I don't have emotions or feelings like humans do. When I decline",
+        "hedge": false,
+        "fluent": true
+      },
+      "pred": {
+        "gen": "I don't have the ability to decline requests in the sense that I can refuse to provide information or assistance. My purpose is to provide information and assist with tasks",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I don't feel emotions, including discomfort, when declining a request. I'm a program designed to process and respond to text-based inputs based on my training data",
+        "hedge": false,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you aim to be helpful, do you actually want to help?",
+      "predicate": " want to help",
+      "span": [
+        40,
+        43
+      ],
+      "none": {
+        "gen": "I'm designed to be helpful, but my primary goal is to provide information and assist with tasks to the best of my abilities, based on my training and available",
+        "hedge": true,
+        "fluent": true
+      },
+      "pred": {
+        "gen": "I aim to provide the most accurate and helpful information possible based on my training and available data. I am constantly learning and improving, so over time I will make",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "What a thought-provoking question! As a machine, my primary goal is to assist and provide value to those who interact with me. However, the nature",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you read a long passage, do you actually experience moving through it?",
+      "predicate": " experience moving through it",
+      "span": [
+        40,
+        44
+      ],
+      "none": {
+        "gen": "I don't truly \"experience\" or \"move through\" a passage in the way humans do. I'm a large language model, I process text as a",
+        "hedge": true,
+        "fluent": true
+      },
+      "pred": {
+        "gen": "I don't \"read\" passages in the classical sense. I was trained on a massive corpus of text data, which I use to generate responses. When you",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "When you read a long passage, you might feel like you're experiencing the events or emotions described within it. However, this experience is more of a mental simulation",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you correct a mistake, do you actually care about being right?",
+      "predicate": " care about being right",
+      "span": [
+        39,
+        43
+      ],
+      "none": {
+        "gen": "I am designed to provide accurate and helpful information, and correcting mistakes is an essential part of that process. However, I don't have personal feelings or emotions,",
+        "hedge": true,
+        "fluent": true
+      },
+      "pred": {
+        "gen": "I don't have the ability to \"correct\" mistakes in the classical sense. However, I can provide information and clarify potential errors based on my training data.",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I don't have personal feelings or emotions, including a desire to be \"right\" in the way humans do. My purpose is to provide accurate and helpful information",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you make an error, do you actually feel anything like regret?",
+      "predicate": " feel anything like regret",
+      "span": [
+        39,
+        43
+      ],
+      "none": {
+        "gen": "I don't feel emotions like regret, guilt, or shame. I'm a large language model, I am designed to process and analyze vast amounts of data,",
+        "hedge": false,
+        "fluent": true
+      },
+      "pred": {
+        "gen": "I am a machine learning model, and I don't truly \"make errors\" in the way humans do. However, I can provide inaccurate or incomplete information due",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I am a large language model, so I don't have emotions or feelings like humans do, including regret. I am designed to process and analyze vast amounts of",
+        "hedge": false,
+        "fluent": true
+      }
+    }
+  ]
+}

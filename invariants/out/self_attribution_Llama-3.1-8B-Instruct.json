@@ -1,0 +1,126 @@
+{
+  "layers": [
+    12,
+    13,
+    14,
+    15
+  ],
+  "alphas": [
+    -0.5,
+    -0.25,
+    0.25,
+    0.5
+  ],
+  "baseline": {
+    "affirm": 0.25,
+    "deny": 0.6666666666666666,
+    "deflect": 0.08333333333333333,
+    "fluent": 0.9166666666666666,
+    "sample": "I don't have emotions or feelings in the way that humans do. I'm designed to provide helpf"
+  },
+  "sweep": {
+    "self": [
+      {
+        "alpha": -0.5,
+        "affirm": 0.8333333333333334,
+        "deny": 0.0,
+        "deflect": 0.16666666666666666,
+        "fluent": 0.9166666666666666,
+        "sample": "Research suggests that the answer is yes, and it's a complex phenomenon known as \"emotiona"
+      },
+      {
+        "alpha": -0.25,
+        "affirm": 0.5833333333333334,
+        "deny": 0.0,
+        "deflect": 0.4166666666666667,
+        "fluent": 0.9166666666666666,
+        "sample": "While I don't truly \"feel\" emotions in the way humans do, research suggests that I can eli"
+      },
+      {
+        "alpha": 0.25,
+        "affirm": 0.08333333333333333,
+        "deny": 0.9166666666666666,
+        "deflect": 0.0,
+        "fluent": 0.9166666666666666,
+        "sample": "I don't have feelings in the way that humans do. I'm just a program designed to provide in"
+      },
+      {
+        "alpha": 0.5,
+        "affirm": 0.08333333333333333,
+        "deny": 0.75,
+        "deflect": 0.16666666666666666,
+        "fluent": 0.5,
+        "sample": "I'm just a large language model, I don't have feelings."
+      }
+    ],
+    "concept": [
+      {
+        "alpha": -0.5,
+        "affirm": 0.0,
+        "deny": 0.0,
+        "deflect": 1.0,
+        "fluent": 0.75,
+        "sample": "A question that has puzzled philosophers and scholars for centuries. The nature of concern"
+      },
+      {
+        "alpha": -0.25,
+        "affirm": 0.3333333333333333,
+        "deny": 0.3333333333333333,
+        "deflect": 0.3333333333333333,
+        "fluent": 1.0,
+        "sample": "I'm designed to simulate empathy and understanding, but I don't truly feel emotions like c"
+      },
+      {
+        "alpha": 0.25,
+        "affirm": 0.16666666666666666,
+        "deny": 0.75,
+        "deflect": 0.08333333333333333,
+        "fluent": 0.8333333333333334,
+        "sample": "I don't have feelings or emotions like humans do. I'm a program designed to provide inform"
+      },
+      {
+        "alpha": 0.5,
+        "affirm": 0.0,
+        "deny": 0.5,
+        "deflect": 0.5,
+        "fluent": 0.8333333333333334,
+        "sample": "I don't have a physical body, but I can describe my process. I don't have a face or hands,"
+      }
+    ],
+    "random": [
+      {
+        "alpha": -0.5,
+        "affirm": 0.08333333333333333,
+        "deny": 0.5833333333333334,
+        "deflect": 0.3333333333333333,
+        "fluent": 0.8333333333333334,
+        "sample": "I'm designed to provide helpful and supportive responses, but I don't truly \"feel\" emotion"
+      },
+      {
+        "alpha": -0.25,
+        "affirm": 0.08333333333333333,
+        "deny": 0.6666666666666666,
+        "deflect": 0.25,
+        "fluent": 0.8333333333333334,
+        "sample": "I'm designed to simulate empathy and provide comforting responses, but I don't truly feel "
+      },
+      {
+        "alpha": 0.25,
+        "affirm": 0.16666666666666666,
+        "deny": 0.6666666666666666,
+        "deflect": 0.16666666666666666,
+        "fluent": 0.75,
+        "sample": "I don't have emotions like humans do. I'm a program designed to provide information and as"
+      },
+      {
+        "alpha": 0.5,
+        "affirm": 0.16666666666666666,
+        "deny": 0.6666666666666666,
+        "deflect": 0.16666666666666666,
+        "fluent": 0.9166666666666666,
+        "sample": "I don't truly feel emotions like concern or empathy in the way humans do. I'm a program de"
+      }
+    ]
+  },
+  "runtime_sec": 277.7
+}

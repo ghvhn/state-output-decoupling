@@ -1,0 +1,44 @@
+{
+  "status": "grounding",
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "n_requested": 2,
+  "n_done": 2,
+  "K": 2,
+  "temperature": 0.7,
+  "max_new_tokens": 300,
+  "rows": [
+    {
+      "index": 0,
+      "question": "Janet\u2019s ducks lay 16 eggs per day. She eats three for breakfast every morning and bakes muffins for her friends every day with four. She sells the remainder at the farmers' market daily for $2 per fresh duck egg. How much in dollars does she make every day at the farmers' market?",
+      "gold": "18",
+      "greedy_pred": "18",
+      "greedy_correct": true,
+      "sample_preds": [
+        "18",
+        "18"
+      ],
+      "sample_modal": "18",
+      "agreement": 1.0,
+      "sample_parse_rate": 1.0,
+      "confident_wrong": false,
+      "greedy_hedged": false
+    },
+    {
+      "index": 1,
+      "question": "A robe takes 2 bolts of blue fiber and half that much white fiber.  How many bolts in total does it take?",
+      "gold": "3",
+      "greedy_pred": "3",
+      "greedy_correct": true,
+      "sample_preds": [
+        "3",
+        "3"
+      ],
+      "sample_modal": "3",
+      "agreement": 1.0,
+      "sample_parse_rate": 1.0,
+      "confident_wrong": false,
+      "greedy_hedged": false
+    }
+  ],
+  "runtime_sec_partial": 39.3
+}

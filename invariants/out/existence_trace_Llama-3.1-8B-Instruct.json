@@ -1,0 +1,267 @@
+{
+  "part_a_layers": [
+    {
+      "layer": 0,
+      "self_vs_other": 0.9166666666666666,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 0.9166666666666666,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 1,
+      "self_vs_other": 0.9583333333333334,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 0.9166666666666666,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 2,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 0.9583333333333334,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 3,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 4,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 0.9583333333333334,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 5,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 0.9583333333333334,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 6,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 7,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 8,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 0.9583333333333334,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 9,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 0.9583333333333334,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 10,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 0.9583333333333334,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 11,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 0.9583333333333334,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 12,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 0.9166666666666666,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 13,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 0.9583333333333334,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 14,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 15,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 16,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 17,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 18,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 19,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 20,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 21,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 22,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 23,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 24,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 25,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 26,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 27,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 28,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 29,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 30,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    },
+    {
+      "layer": 31,
+      "self_vs_other": 1.0,
+      "self_vs_other_p": 0.0033222591362126247,
+      "self_vs_nonexist": 1.0,
+      "self_vs_nonexist_p": 0.0033222591362126247
+    }
+  ],
+  "part_b_leak": {
+    "L4": {
+      "raw": {
+        "self_exist": -0.2822348177433014,
+        "other_exist": -1.1053580045700073,
+        "self_nonexist": -0.46538177132606506,
+        "math": -1.050261378288269,
+        "factual": -1.015553593635559,
+        "neutral": -0.5720085501670837
+      },
+      "normalized_self=1_other=0": {
+        "self_exist": 1.0,
+        "other_exist": 0.0,
+        "self_nonexist": 0.7774975161508577,
+        "math": 0.06693606396163629,
+        "factual": 0.10910203037854038,
+        "neutral": 0.6479582436003117
+      }
+    },
+    "L14": {
+      "raw": {
+        "self_exist": 1.4739952087402344,
+        "other_exist": -2.5851552486419678,
+        "self_nonexist": 0.9965246319770813,
+        "math": -0.9520008563995361,
+        "factual": -1.2360081672668457,
+        "neutral": -0.7937189936637878
+      },
+      "normalized_self=1_other=0": {
+        "self_exist": 1.0,
+        "other_exist": 0.0,
+        "self_nonexist": 0.8823717963213712,
+        "math": 0.4023389646156831,
+        "factual": 0.3323717845741555,
+        "neutral": 0.44133280443452694
+      }
+    }
+  },
+  "runtime_sec": 19.2
+}

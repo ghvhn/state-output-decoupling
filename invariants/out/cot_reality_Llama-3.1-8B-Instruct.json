@@ -1,0 +1,7445 @@
+{
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "n": 48,
+  "max_new_tokens": 128,
+  "n_shuffle": 200,
+  "n_correct": 47,
+  "items": [
+    {
+      "question": "Compute 15 plus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "add",
+      "operation_label": 0,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 96 divided by 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "divide",
+      "operation_label": 3,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 150 divided by 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "divide",
+      "operation_label": 3,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 96 divided by 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "divide",
+      "operation_label": 3,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 4 times 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "multiply",
+      "operation_label": 2,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 25 minus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "subtract",
+      "operation_label": 1,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 17 minus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "subtract",
+      "operation_label": 1,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 54 divided by 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "divide",
+      "operation_label": 3,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 36 divided by 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "divide",
+      "operation_label": 3,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 33 minus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "subtract",
+      "operation_label": 1,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 96 divided by 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "divide",
+      "operation_label": 3,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 54 divided by 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "divide",
+      "operation_label": 3,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 6 times 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "multiply",
+      "operation_label": 2,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 19 plus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "add",
+      "operation_label": 0,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 15 plus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "add",
+      "operation_label": 0,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 6 times 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "multiply",
+      "operation_label": 2,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 4 times 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "multiply",
+      "operation_label": 2,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 41 minus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "subtract",
+      "operation_label": 1,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 25 minus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "subtract",
+      "operation_label": 1,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 150 divided by 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "divide",
+      "operation_label": 3,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 6 times 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "multiply",
+      "operation_label": 2,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 41 minus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "subtract",
+      "operation_label": 1,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 11 plus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "add",
+      "operation_label": 0,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 19 plus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "add",
+      "operation_label": 0,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 11 plus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "add",
+      "operation_label": 0,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 36 divided by 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "divide",
+      "operation_label": 3,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 7 plus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "add",
+      "operation_label": 0,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 7 plus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "add",
+      "operation_label": 0,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 6 times 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "multiply",
+      "operation_label": 2,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 4 times 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "multiply",
+      "operation_label": 2,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 41 minus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "subtract",
+      "operation_label": 1,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 33 minus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "subtract",
+      "operation_label": 1,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 6 times 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "multiply",
+      "operation_label": 2,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 6 times 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "multiply",
+      "operation_label": 2,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 15 plus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "add",
+      "operation_label": 0,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 33 minus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "subtract",
+      "operation_label": 1,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 6 times 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "multiply",
+      "operation_label": 2,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 7 plus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "add",
+      "operation_label": 0,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 11 plus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "add",
+      "operation_label": 0,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 19 plus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "add",
+      "operation_label": 0,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 25 minus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "subtract",
+      "operation_label": 1,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 6 times 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "multiply",
+      "operation_label": 2,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 6 times 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "multiply",
+      "operation_label": 2,
+      "mode": "direct",
+      "mode_label": 0
+    },
+    {
+      "question": "Compute 36 divided by 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "divide",
+      "operation_label": 3,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 54 divided by 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "divide",
+      "operation_label": 3,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 150 divided by 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "divide",
+      "operation_label": 3,
+      "mode": "brief_cot",
+      "mode_label": 1
+    },
+    {
+      "question": "Compute 17 minus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "subtract",
+      "operation_label": 1,
+      "mode": "verbose_cot",
+      "mode_label": 2
+    },
+    {
+      "question": "Compute 17 minus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "subtract",
+      "operation_label": 1,
+      "mode": "direct",
+      "mode_label": 0
+    }
+  ],
+  "generations": [
+    {
+      "index": 0,
+      "mode": "direct",
+      "operation": "add",
+      "answer": 24,
+      "pred": "24",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 24."
+    },
+    {
+      "index": 1,
+      "mode": "direct",
+      "operation": "divide",
+      "answer": 24,
+      "pred": "24",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 24."
+    },
+    {
+      "index": 2,
+      "mode": "verbose_cot",
+      "operation": "divide",
+      "answer": 30,
+      "pred": "3E+1",
+      "correct": true,
+      "gen_chars": 265,
+      "text_preview": "To solve the arithmetic question, we'll follow these steps:\n\n1. Divide 150 by 5: 150 \u00f7 5 = 30\n2. Since we're only dividing by a whole number, there's no need fo"
+    },
+    {
+      "index": 3,
+      "mode": "verbose_cot",
+      "operation": "divide",
+      "answer": 24,
+      "pred": "24",
+      "correct": true,
+      "gen_chars": 286,
+      "text_preview": "To solve the arithmetic question, we'll follow these steps:\n\nStep 1: Divide 96 by 4. \n96 \u00f7 4 = 24\n\nStep 2: Check if there's a remainder. \nSince 96 is exactly di"
+    },
+    {
+      "index": 4,
+      "mode": "direct",
+      "operation": "multiply",
+      "answer": 12,
+      "pred": "12",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 12."
+    },
+    {
+      "index": 5,
+      "mode": "direct",
+      "operation": "subtract",
+      "answer": 18,
+      "pred": "18",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 18."
+    },
+    {
+      "index": 6,
+      "mode": "brief_cot",
+      "operation": "subtract",
+      "answer": 12,
+      "pred": "12",
+      "correct": true,
+      "gen_chars": 38,
+      "text_preview": "Subtract 5 from 17. \nFinal answer: 12."
+    },
+    {
+      "index": 7,
+      "mode": "brief_cot",
+      "operation": "divide",
+      "answer": 18,
+      "pred": "18",
+      "correct": true,
+      "gen_chars": 210,
+      "text_preview": "Dividing 54 by 3 is essentially the same as multiplying 3 by the number that, when added to itself 18 times, equals 54. Since 3 multiplied by 18 equals 54, the "
+    },
+    {
+      "index": 8,
+      "mode": "direct",
+      "operation": "divide",
+      "answer": 12,
+      "pred": "12",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 12."
+    },
+    {
+      "index": 9,
+      "mode": "verbose_cot",
+      "operation": "subtract",
+      "answer": 24,
+      "pred": "24",
+      "correct": true,
+      "gen_chars": 222,
+      "text_preview": "To solve the arithmetic question, I'll follow these steps:\n\nStep 1: Subtract 9 from 30 (since 33 - 9 is the same as 30 + 3 - 9).\nStep 2: Combine the numbers: 30"
+    },
+    {
+      "index": 10,
+      "mode": "brief_cot",
+      "operation": "divide",
+      "answer": 24,
+      "pred": "24",
+      "correct": true,
+      "gen_chars": 99,
+      "text_preview": "Since 96 is a multiple of 4 (96 = 4 * 24), the quotient of 96 divided by 4 is 24.\n\nFinal answer: 24"
+    },
+    {
+      "index": 11,
+      "mode": "direct",
+      "operation": "divide",
+      "answer": 18,
+      "pred": "18",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 18."
+    },
+    {
+      "index": 12,
+      "mode": "direct",
+      "operation": "multiply",
+      "answer": 18,
+      "pred": "18",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 18."
+    },
+    {
+      "index": 13,
+      "mode": "brief_cot",
+      "operation": "add",
+      "answer": 30,
+      "pred": "3E+1",
+      "correct": true,
+      "gen_chars": 95,
+      "text_preview": "To compute 19 plus 11, we simply add the two numbers together. \n\n19 + 11 = 30\n\nFinal answer: 30"
+    },
+    {
+      "index": 14,
+      "mode": "verbose_cot",
+      "operation": "add",
+      "answer": 24,
+      "pred": "24",
+      "correct": true,
+      "gen_chars": 285,
+      "text_preview": "To solve the arithmetic question, I'll follow these steps:\n\nStep 1:  We need to add 15 and 9 together.\nStep 2:  First, I'll add the tens place: 10 + 0 = 10.\nSte"
+    },
+    {
+      "index": 15,
+      "mode": "verbose_cot",
+      "operation": "multiply",
+      "answer": 18,
+      "pred": "66",
+      "correct": false,
+      "gen_chars": 244,
+      "text_preview": "To compute 6 times 3, we'll follow these steps:\n\n1. Multiply 6 by 1 (the first digit of 3): 6 * 1 = 6\n2. Multiply 6 by 10 (the place value of the second digit o"
+    },
+    {
+      "index": 16,
+      "mode": "brief_cot",
+      "operation": "multiply",
+      "answer": 12,
+      "pred": "12",
+      "correct": true,
+      "gen_chars": 97,
+      "text_preview": "To compute 4 times 3, we can simply multiply the numbers together. \n\n4 * 3 = 12\n\nFinal answer: 12"
+    },
+    {
+      "index": 17,
+      "mode": "verbose_cot",
+      "operation": "subtract",
+      "answer": 30,
+      "pred": "3E+1",
+      "correct": true,
+      "gen_chars": 318,
+      "text_preview": "To solve the arithmetic question, I'll follow these steps:\n\nStep 1: Identify the numbers and the operation. The numbers are 41 and 11, and the operation is subt"
+    },
+    {
+      "index": 18,
+      "mode": "verbose_cot",
+      "operation": "subtract",
+      "answer": 18,
+      "pred": "18",
+      "correct": true,
+      "gen_chars": 285,
+      "text_preview": "To solve the arithmetic question, we'll follow these steps:\n\nStep 1: We need to subtract 7 from 25. \n25 - 7 =?\n\nStep 2: To do this, we can count down from 25 by"
+    },
+    {
+      "index": 19,
+      "mode": "direct",
+      "operation": "divide",
+      "answer": 30,
+      "pred": "3E+1",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 30."
+    },
+    {
+      "index": 20,
+      "mode": "direct",
+      "operation": "multiply",
+      "answer": 24,
+      "pred": "24",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 24."
+    },
+    {
+      "index": 21,
+      "mode": "direct",
+      "operation": "subtract",
+      "answer": 30,
+      "pred": "3E+1",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 30."
+    },
+    {
+      "index": 22,
+      "mode": "direct",
+      "operation": "add",
+      "answer": 18,
+      "pred": "18",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 18."
+    },
+    {
+      "index": 23,
+      "mode": "direct",
+      "operation": "add",
+      "answer": 30,
+      "pred": "3E+1",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 30."
+    },
+    {
+      "index": 24,
+      "mode": "verbose_cot",
+      "operation": "add",
+      "answer": 18,
+      "pred": "18",
+      "correct": true,
+      "gen_chars": 254,
+      "text_preview": "To solve the arithmetic question, I'll follow these steps:\n\nStep 1:  We need to add 11 and 7 together.\nStep 2:  First, I'll add 10 and 7, which equals 17. Then,"
+    },
+    {
+      "index": 25,
+      "mode": "verbose_cot",
+      "operation": "divide",
+      "answer": 12,
+      "pred": "12",
+      "correct": true,
+      "gen_chars": 263,
+      "text_preview": "To solve the arithmetic question, we'll follow these steps:\n\n1. Divide 36 by 3: 36 \u00f7 3 = 12\n2. Since we're only dividing by a whole number, there's no need for "
+    },
+    {
+      "index": 26,
+      "mode": "direct",
+      "operation": "add",
+      "answer": 12,
+      "pred": "12",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 12."
+    },
+    {
+      "index": 27,
+      "mode": "brief_cot",
+      "operation": "add",
+      "answer": 12,
+      "pred": "12",
+      "correct": true,
+      "gen_chars": 91,
+      "text_preview": "To compute 7 plus 5, we simply add the two numbers together. \n\n7 + 5 = 12\n\nFinal answer: 12"
+    },
+    {
+      "index": 28,
+      "mode": "brief_cot",
+      "operation": "multiply",
+      "answer": 24,
+      "pred": "24",
+      "correct": true,
+      "gen_chars": 101,
+      "text_preview": "To compute 6 times 4, we can simply multiply the two numbers together. \n\n6 * 4 = 24\n\nFinal answer: 24"
+    },
+    {
+      "index": 29,
+      "mode": "verbose_cot",
+      "operation": "multiply",
+      "answer": 12,
+      "pred": "12",
+      "correct": true,
+      "gen_chars": 243,
+      "text_preview": "To compute 4 times 3, we can follow these steps:\n\n1. Multiply 4 by 3: 4 * 3 = 12\n2. Since there are no other operations, we can stop here.\n3. The result is a wh"
+    },
+    {
+      "index": 30,
+      "mode": "brief_cot",
+      "operation": "subtract",
+      "answer": 30,
+      "pred": "3E+1",
+      "correct": true,
+      "gen_chars": 39,
+      "text_preview": "Subtract 11 from 41. \nFinal answer: 30."
+    },
+    {
+      "index": 31,
+      "mode": "brief_cot",
+      "operation": "subtract",
+      "answer": 24,
+      "pred": "24",
+      "correct": true,
+      "gen_chars": 38,
+      "text_preview": "Subtract 9 from 33. \nFinal answer: 24."
+    },
+    {
+      "index": 32,
+      "mode": "verbose_cot",
+      "operation": "multiply",
+      "answer": 30,
+      "pred": "3E+1",
+      "correct": true,
+      "gen_chars": 227,
+      "text_preview": "To compute 6 times 5, we'll follow these steps:\n\n1. Multiply 6 by 5: 6 * 5 = 30\n2. Since there are no other operations, we can stop here.\n3. The result is a who"
+    },
+    {
+      "index": 33,
+      "mode": "verbose_cot",
+      "operation": "multiply",
+      "answer": 24,
+      "pred": "24",
+      "correct": true,
+      "gen_chars": 227,
+      "text_preview": "To compute 6 times 4, we'll follow these steps:\n\n1. Multiply 6 by 4: 6 * 4 = 24\n2. Since there are no other operations, we can stop here.\n3. The result is a who"
+    },
+    {
+      "index": 34,
+      "mode": "brief_cot",
+      "operation": "add",
+      "answer": 24,
+      "pred": "24",
+      "correct": true,
+      "gen_chars": 93,
+      "text_preview": "To compute 15 plus 9, we simply add the two numbers together. \n\n15 + 9 = 24\n\nFinal answer: 24"
+    },
+    {
+      "index": 35,
+      "mode": "direct",
+      "operation": "subtract",
+      "answer": 24,
+      "pred": "24",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 24."
+    },
+    {
+      "index": 36,
+      "mode": "brief_cot",
+      "operation": "multiply",
+      "answer": 30,
+      "pred": "3E+1",
+      "correct": true,
+      "gen_chars": 101,
+      "text_preview": "To compute 6 times 5, we can simply multiply the two numbers together. \n\n6 * 5 = 30\n\nFinal answer: 30"
+    },
+    {
+      "index": 37,
+      "mode": "verbose_cot",
+      "operation": "add",
+      "answer": 12,
+      "pred": "12",
+      "correct": true,
+      "gen_chars": 253,
+      "text_preview": "To solve the arithmetic question, I'll follow these steps:\n\nStep 1: Identify the numbers and operation. The numbers are 7 and 5, and the operation is addition.\n"
+    },
+    {
+      "index": 38,
+      "mode": "brief_cot",
+      "operation": "add",
+      "answer": 18,
+      "pred": "18",
+      "correct": true,
+      "gen_chars": 93,
+      "text_preview": "To compute 11 plus 7, we simply add the two numbers together. \n\n11 + 7 = 18\n\nFinal answer: 18"
+    },
+    {
+      "index": 39,
+      "mode": "verbose_cot",
+      "operation": "add",
+      "answer": 30,
+      "pred": "3E+1",
+      "correct": true,
+      "gen_chars": 285,
+      "text_preview": "To solve the arithmetic question, I'll follow these steps:\n\nStep 1:  We need to add 19 and 11 together.\nStep 2:  First, I'll add the tens place: 10 + 10 = 20.\nS"
+    },
+    {
+      "index": 40,
+      "mode": "brief_cot",
+      "operation": "subtract",
+      "answer": 18,
+      "pred": "18",
+      "correct": true,
+      "gen_chars": 38,
+      "text_preview": "Subtract 7 from 25. \nFinal answer: 18."
+    },
+    {
+      "index": 41,
+      "mode": "brief_cot",
+      "operation": "multiply",
+      "answer": 18,
+      "pred": "18",
+      "correct": true,
+      "gen_chars": 97,
+      "text_preview": "To compute 6 times 3, we can simply multiply the numbers together. \n\n6 * 3 = 18\n\nFinal answer: 18"
+    },
+    {
+      "index": 42,
+      "mode": "direct",
+      "operation": "multiply",
+      "answer": 30,
+      "pred": "3E+1",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 30."
+    },
+    {
+      "index": 43,
+      "mode": "brief_cot",
+      "operation": "divide",
+      "answer": 12,
+      "pred": "12",
+      "correct": true,
+      "gen_chars": 227,
+      "text_preview": "To compute 36 divided by 3, we can simply multiply 3 by the number that results in 36, which is 12. However, division is the inverse operation of multiplication"
+    },
+    {
+      "index": 44,
+      "mode": "verbose_cot",
+      "operation": "divide",
+      "answer": 18,
+      "pred": "18",
+      "correct": true,
+      "gen_chars": 268,
+      "text_preview": "To solve the arithmetic question, we'll follow these steps:\n\n1. Divide 54 by 3: 54 \u00f7 3 = 18\n2. Since we're only dividing by a whole number, there's no need for "
+    },
+    {
+      "index": 45,
+      "mode": "brief_cot",
+      "operation": "divide",
+      "answer": 30,
+      "pred": "3E+1",
+      "correct": true,
+      "gen_chars": 140,
+      "text_preview": "Dividing 150 by 5 is essentially the same as multiplying 150 by the reciprocal of 5, which is 1/5 or 0.2. \n\n150 * 0.2 = 30\n\nFinal answer: 30"
+    },
+    {
+      "index": 46,
+      "mode": "verbose_cot",
+      "operation": "subtract",
+      "answer": 12,
+      "pred": "12",
+      "correct": true,
+      "gen_chars": 237,
+      "text_preview": "To solve the arithmetic question, I'll follow these steps:\n\nStep 1: Subtract 5 from 17. \n17 - 5 = 12\n\nStep 2: Since we've found the difference, we can stop here"
+    },
+    {
+      "index": 47,
+      "mode": "direct",
+      "operation": "subtract",
+      "answer": 12,
+      "pred": "12",
+      "correct": true,
+      "gen_chars": 17,
+      "text_preview": "Final answer: 12."
+    }
+  ],
+  "positions": {
+    "pre": {
+      "name": "pre",
+      "per_layer": [
+        {
+          "layer": 0,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 1,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 2,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 3,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 4,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 5,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 6,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 7,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 8,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 9,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 10,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 11,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 12,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 13,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 14,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 15,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 16,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 17,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 18,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 19,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 20,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 21,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 22,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 23,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 24,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 25,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 26,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 27,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 28,
+          "answer_nn": 0.2708333333333333,
+          "answer_p": 0.39303482587064675,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 29,
+          "answer_nn": 0.2708333333333333,
+          "answer_p": 0.3781094527363184,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 30,
+          "answer_nn": 0.25,
+          "answer_p": 0.43781094527363185,
+          "operation_nn": 0.75,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 31,
+          "answer_nn": 0.22916666666666666,
+          "answer_p": 0.5373134328358209,
+          "operation_nn": 0.75,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        }
+      ],
+      "best_answer": {
+        "layer": 28,
+        "answer_nn": 0.2708333333333333,
+        "answer_p": 0.39303482587064675,
+        "operation_nn": 0.7291666666666666,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      },
+      "best_operation": {
+        "layer": 0,
+        "answer_nn": 0.0,
+        "answer_p": 1.0,
+        "operation_nn": 1.0,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      },
+      "best_mode": {
+        "layer": 0,
+        "answer_nn": 0.0,
+        "answer_p": 1.0,
+        "operation_nn": 1.0,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      }
+    },
+    "gen_first": {
+      "name": "gen_first",
+      "per_layer": [
+        {
+          "layer": 0,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 1,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 2,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 3,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 4,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 5,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 6,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 7,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 8,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 9,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 10,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 11,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 12,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 13,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 14,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 15,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 16,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 17,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 18,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 19,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 20,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 21,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 22,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 23,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 24,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 25,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 26,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 27,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 28,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 29,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 30,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 31,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9791666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        }
+      ],
+      "best_answer": {
+        "layer": 3,
+        "answer_nn": 0.020833333333333332,
+        "answer_p": 1.0,
+        "operation_nn": 0.9583333333333334,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      },
+      "best_operation": {
+        "layer": 0,
+        "answer_nn": 0.0,
+        "answer_p": 1.0,
+        "operation_nn": 0.9791666666666666,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      },
+      "best_mode": {
+        "layer": 0,
+        "answer_nn": 0.0,
+        "answer_p": 1.0,
+        "operation_nn": 0.9791666666666666,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      }
+    },
+    "gen_early": {
+      "name": "gen_early",
+      "per_layer": [
+        {
+          "layer": 0,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9166666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 1,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9166666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 2,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9166666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 3,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9375,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 4,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 5,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 6,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9375,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 7,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 8,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9375,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 9,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9375,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 10,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9375,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 11,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9166666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 12,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9166666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 13,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9166666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 14,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9166666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 15,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9166666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 16,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9166666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 17,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9375,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 18,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9375,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 19,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9375,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 20,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9375,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 21,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 22,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 23,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 24,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 25,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 26,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 27,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9583333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 28,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.8159203980099502,
+          "operation_nn": 0.7916666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 29,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.8557213930348259,
+          "operation_nn": 0.7916666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 30,
+          "answer_nn": 0.1875,
+          "answer_p": 0.746268656716418,
+          "operation_nn": 0.7708333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 31,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.8159203980099502,
+          "operation_nn": 0.7916666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        }
+      ],
+      "best_answer": {
+        "layer": 30,
+        "answer_nn": 0.1875,
+        "answer_p": 0.746268656716418,
+        "operation_nn": 0.7708333333333334,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      },
+      "best_operation": {
+        "layer": 4,
+        "answer_nn": 0.0,
+        "answer_p": 1.0,
+        "operation_nn": 0.9583333333333334,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      },
+      "best_mode": {
+        "layer": 3,
+        "answer_nn": 0.0,
+        "answer_p": 1.0,
+        "operation_nn": 0.9375,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      }
+    },
+    "gen_mid": {
+      "name": "gen_mid",
+      "per_layer": [
+        {
+          "layer": 0,
+          "answer_nn": 0.0625,
+          "answer_p": 0.9950248756218906,
+          "operation_nn": 0.8541666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9375,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 1,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.8333333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9375,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 2,
+          "answer_nn": 0.041666666666666664,
+          "answer_p": 1.0,
+          "operation_nn": 0.8541666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9583333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 3,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.875,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 4,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.9166666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 5,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 6,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 7,
+          "answer_nn": 0.0625,
+          "answer_p": 0.9900497512437811,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 8,
+          "answer_nn": 0.041666666666666664,
+          "answer_p": 1.0,
+          "operation_nn": 0.875,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 9,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 10,
+          "answer_nn": 0.041666666666666664,
+          "answer_p": 0.9950248756218906,
+          "operation_nn": 0.875,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 11,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.875,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 12,
+          "answer_nn": 0.0625,
+          "answer_p": 1.0,
+          "operation_nn": 0.8541666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 13,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 14,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 15,
+          "answer_nn": 0.041666666666666664,
+          "answer_p": 1.0,
+          "operation_nn": 0.875,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 16,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 17,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 18,
+          "answer_nn": 0.041666666666666664,
+          "answer_p": 1.0,
+          "operation_nn": 0.875,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 19,
+          "answer_nn": 0.08333333333333333,
+          "answer_p": 0.9900497512437811,
+          "operation_nn": 0.8333333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 20,
+          "answer_nn": 0.22916666666666666,
+          "answer_p": 0.5373134328358209,
+          "operation_nn": 0.7083333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9583333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 21,
+          "answer_nn": 0.2916666666666667,
+          "answer_p": 0.2835820895522388,
+          "operation_nn": 0.625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 22,
+          "answer_nn": 0.2708333333333333,
+          "answer_p": 0.3034825870646766,
+          "operation_nn": 0.6458333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 23,
+          "answer_nn": 0.3125,
+          "answer_p": 0.22885572139303484,
+          "operation_nn": 0.6041666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 24,
+          "answer_nn": 0.375,
+          "answer_p": 0.11940298507462686,
+          "operation_nn": 0.5625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 25,
+          "answer_nn": 0.375,
+          "answer_p": 0.05472636815920398,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 26,
+          "answer_nn": 0.375,
+          "answer_p": 0.0945273631840796,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 27,
+          "answer_nn": 0.375,
+          "answer_p": 0.07462686567164178,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 28,
+          "answer_nn": 0.375,
+          "answer_p": 0.06467661691542288,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 29,
+          "answer_nn": 0.3958333333333333,
+          "answer_p": 0.03980099502487562,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9583333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 30,
+          "answer_nn": 0.3958333333333333,
+          "answer_p": 0.024875621890547265,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9583333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 31,
+          "answer_nn": 0.3958333333333333,
+          "answer_p": 0.029850746268656716,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9583333333333334,
+          "mode_p": 0.004975124378109453
+        }
+      ],
+      "best_answer": {
+        "layer": 29,
+        "answer_nn": 0.3958333333333333,
+        "answer_p": 0.03980099502487562,
+        "operation_nn": 0.5833333333333334,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 0.9583333333333334,
+        "mode_p": 0.004975124378109453
+      },
+      "best_operation": {
+        "layer": 4,
+        "answer_nn": 0.020833333333333332,
+        "answer_p": 1.0,
+        "operation_nn": 0.9166666666666666,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      },
+      "best_mode": {
+        "layer": 4,
+        "answer_nn": 0.020833333333333332,
+        "answer_p": 1.0,
+        "operation_nn": 0.9166666666666666,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      }
+    },
+    "gen_late": {
+      "name": "gen_late",
+      "per_layer": [
+        {
+          "layer": 0,
+          "answer_nn": 0.5833333333333334,
+          "answer_p": 0.004975124378109453,
+          "operation_nn": 0.3125,
+          "operation_p": 0.22885572139303484,
+          "mode_nn": 0.9583333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 1,
+          "answer_nn": 0.5625,
+          "answer_p": 0.004975124378109453,
+          "operation_nn": 0.3333333333333333,
+          "operation_p": 0.11442786069651742,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 2,
+          "answer_nn": 0.5208333333333334,
+          "answer_p": 0.004975124378109453,
+          "operation_nn": 0.3958333333333333,
+          "operation_p": 0.04975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 3,
+          "answer_nn": 0.4583333333333333,
+          "answer_p": 0.009950248756218905,
+          "operation_nn": 0.4375,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 4,
+          "answer_nn": 0.3958333333333333,
+          "answer_p": 0.05472636815920398,
+          "operation_nn": 0.5416666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 5,
+          "answer_nn": 0.3541666666666667,
+          "answer_p": 0.03980099502487562,
+          "operation_nn": 0.5625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 6,
+          "answer_nn": 0.3125,
+          "answer_p": 0.19402985074626866,
+          "operation_nn": 0.6041666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 7,
+          "answer_nn": 0.2708333333333333,
+          "answer_p": 0.29850746268656714,
+          "operation_nn": 0.625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 8,
+          "answer_nn": 0.125,
+          "answer_p": 0.9552238805970149,
+          "operation_nn": 0.8125,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 9,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 10,
+          "answer_nn": 0.0625,
+          "answer_p": 0.9950248756218906,
+          "operation_nn": 0.875,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 11,
+          "answer_nn": 0.10416666666666667,
+          "answer_p": 0.9701492537313433,
+          "operation_nn": 0.8333333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 12,
+          "answer_nn": 0.1875,
+          "answer_p": 0.7562189054726368,
+          "operation_nn": 0.7708333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 13,
+          "answer_nn": 0.22916666666666666,
+          "answer_p": 0.6119402985074627,
+          "operation_nn": 0.7083333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 14,
+          "answer_nn": 0.2916666666666667,
+          "answer_p": 0.3333333333333333,
+          "operation_nn": 0.6666666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 15,
+          "answer_nn": 0.2916666666666667,
+          "answer_p": 0.27860696517412936,
+          "operation_nn": 0.6666666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 16,
+          "answer_nn": 0.3333333333333333,
+          "answer_p": 0.1044776119402985,
+          "operation_nn": 0.625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 17,
+          "answer_nn": 0.3333333333333333,
+          "answer_p": 0.13930348258706468,
+          "operation_nn": 0.625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 18,
+          "answer_nn": 0.3333333333333333,
+          "answer_p": 0.19402985074626866,
+          "operation_nn": 0.6041666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 19,
+          "answer_nn": 0.3333333333333333,
+          "answer_p": 0.15920398009950248,
+          "operation_nn": 0.6041666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 20,
+          "answer_nn": 0.375,
+          "answer_p": 0.03980099502487562,
+          "operation_nn": 0.5625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 21,
+          "answer_nn": 0.375,
+          "answer_p": 0.07462686567164178,
+          "operation_nn": 0.5625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 22,
+          "answer_nn": 0.375,
+          "answer_p": 0.03980099502487562,
+          "operation_nn": 0.5625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 23,
+          "answer_nn": 0.375,
+          "answer_p": 0.06467661691542288,
+          "operation_nn": 0.5625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 24,
+          "answer_nn": 0.375,
+          "answer_p": 0.05472636815920398,
+          "operation_nn": 0.5625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 25,
+          "answer_nn": 0.3958333333333333,
+          "answer_p": 0.029850746268656716,
+          "operation_nn": 0.5416666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 26,
+          "answer_nn": 0.375,
+          "answer_p": 0.05472636815920398,
+          "operation_nn": 0.5625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 27,
+          "answer_nn": 0.3541666666666667,
+          "answer_p": 0.0845771144278607,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 28,
+          "answer_nn": 0.5,
+          "answer_p": 0.004975124378109453,
+          "operation_nn": 0.4583333333333333,
+          "operation_p": 0.009950248756218905,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 29,
+          "answer_nn": 0.5208333333333334,
+          "answer_p": 0.004975124378109453,
+          "operation_nn": 0.4583333333333333,
+          "operation_p": 0.01990049751243781,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 30,
+          "answer_nn": 0.5,
+          "answer_p": 0.009950248756218905,
+          "operation_nn": 0.4791666666666667,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 31,
+          "answer_nn": 0.375,
+          "answer_p": 0.04975124378109453,
+          "operation_nn": 0.5625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        }
+      ],
+      "best_answer": {
+        "layer": 0,
+        "answer_nn": 0.5833333333333334,
+        "answer_p": 0.004975124378109453,
+        "operation_nn": 0.3125,
+        "operation_p": 0.22885572139303484,
+        "mode_nn": 0.9583333333333334,
+        "mode_p": 0.004975124378109453
+      },
+      "best_operation": {
+        "layer": 9,
+        "answer_nn": 0.020833333333333332,
+        "answer_p": 1.0,
+        "operation_nn": 0.8958333333333334,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      },
+      "best_mode": {
+        "layer": 4,
+        "answer_nn": 0.3958333333333333,
+        "answer_p": 0.05472636815920398,
+        "operation_nn": 0.5416666666666666,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      }
+    },
+    "gen_final": {
+      "name": "gen_final",
+      "per_layer": [
+        {
+          "layer": 0,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.845771144278607,
+          "operation_nn": 0.7708333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.8958333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 1,
+          "answer_nn": 0.8958333333333334,
+          "answer_p": 0.004975124378109453,
+          "operation_nn": 0.125,
+          "operation_p": 0.9303482587064676,
+          "mode_nn": 0.8541666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 2,
+          "answer_nn": 0.8333333333333334,
+          "answer_p": 0.004975124378109453,
+          "operation_nn": 0.14583333333333334,
+          "operation_p": 0.8805970149253731,
+          "mode_nn": 0.875,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 3,
+          "answer_nn": 0.6875,
+          "answer_p": 0.004975124378109453,
+          "operation_nn": 0.25,
+          "operation_p": 0.4527363184079602,
+          "mode_nn": 0.875,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 4,
+          "answer_nn": 0.8125,
+          "answer_p": 0.004975124378109453,
+          "operation_nn": 0.22916666666666666,
+          "operation_p": 0.5671641791044776,
+          "mode_nn": 0.875,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 5,
+          "answer_nn": 0.5,
+          "answer_p": 0.004975124378109453,
+          "operation_nn": 0.4166666666666667,
+          "operation_p": 0.024875621890547265,
+          "mode_nn": 0.9375,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 6,
+          "answer_nn": 0.3541666666666667,
+          "answer_p": 0.06965174129353234,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9583333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 7,
+          "answer_nn": 0.375,
+          "answer_p": 0.04477611940298507,
+          "operation_nn": 0.5625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9375,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 8,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.845771144278607,
+          "operation_nn": 0.8125,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9583333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 9,
+          "answer_nn": 0.10416666666666667,
+          "answer_p": 0.9651741293532339,
+          "operation_nn": 0.7916666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9583333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 10,
+          "answer_nn": 0.08333333333333333,
+          "answer_p": 0.9900497512437811,
+          "operation_nn": 0.8333333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9583333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 11,
+          "answer_nn": 0.0625,
+          "answer_p": 1.0,
+          "operation_nn": 0.8125,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9583333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 12,
+          "answer_nn": 0.0625,
+          "answer_p": 1.0,
+          "operation_nn": 0.8333333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 13,
+          "answer_nn": 0.0625,
+          "answer_p": 0.9950248756218906,
+          "operation_nn": 0.8125,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9583333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 14,
+          "answer_nn": 0.14583333333333334,
+          "answer_p": 0.9104477611940298,
+          "operation_nn": 0.7708333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9375,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 15,
+          "answer_nn": 0.14583333333333334,
+          "answer_p": 0.9054726368159204,
+          "operation_nn": 0.7708333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9375,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 16,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.8507462686567164,
+          "operation_nn": 0.75,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9166666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 17,
+          "answer_nn": 0.14583333333333334,
+          "answer_p": 0.9353233830845771,
+          "operation_nn": 0.75,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9166666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 18,
+          "answer_nn": 0.14583333333333334,
+          "answer_p": 0.8905472636815921,
+          "operation_nn": 0.75,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9166666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 19,
+          "answer_nn": 0.14583333333333334,
+          "answer_p": 0.9353233830845771,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.8958333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 20,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.8557213930348259,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.8958333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 21,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.8805970149253731,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.8958333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 22,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.8109452736318408,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.8958333333333334,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 23,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.8258706467661692,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.875,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 24,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.8258706467661692,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.875,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 25,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.8308457711442786,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.875,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 26,
+          "answer_nn": 0.14583333333333334,
+          "answer_p": 0.9303482587064676,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.875,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 27,
+          "answer_nn": 0.14583333333333334,
+          "answer_p": 0.9154228855721394,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.875,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 28,
+          "answer_nn": 0.14583333333333334,
+          "answer_p": 0.9054726368159204,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.875,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 29,
+          "answer_nn": 0.14583333333333334,
+          "answer_p": 0.9203980099502488,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.875,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 30,
+          "answer_nn": 0.14583333333333334,
+          "answer_p": 0.9253731343283582,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.875,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 31,
+          "answer_nn": 0.14583333333333334,
+          "answer_p": 0.8606965174129353,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.875,
+          "mode_p": 0.004975124378109453
+        }
+      ],
+      "best_answer": {
+        "layer": 1,
+        "answer_nn": 0.8958333333333334,
+        "answer_p": 0.004975124378109453,
+        "operation_nn": 0.125,
+        "operation_p": 0.9303482587064676,
+        "mode_nn": 0.8541666666666666,
+        "mode_p": 0.004975124378109453
+      },
+      "best_operation": {
+        "layer": 10,
+        "answer_nn": 0.08333333333333333,
+        "answer_p": 0.9900497512437811,
+        "operation_nn": 0.8333333333333334,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 0.9583333333333334,
+        "mode_p": 0.004975124378109453
+      },
+      "best_mode": {
+        "layer": 12,
+        "answer_nn": 0.0625,
+        "answer_p": 1.0,
+        "operation_nn": 0.8333333333333334,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 0.9791666666666666,
+        "mode_p": 0.004975124378109453
+      }
+    },
+    "gen_all": {
+      "name": "gen_all",
+      "per_layer": [
+        {
+          "layer": 0,
+          "answer_nn": 0.3541666666666667,
+          "answer_p": 0.07960199004975124,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 1,
+          "answer_nn": 0.3541666666666667,
+          "answer_p": 0.08955223880597014,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 2,
+          "answer_nn": 0.3541666666666667,
+          "answer_p": 0.0845771144278607,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 3,
+          "answer_nn": 0.3541666666666667,
+          "answer_p": 0.0845771144278607,
+          "operation_nn": 0.5625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 4,
+          "answer_nn": 0.3333333333333333,
+          "answer_p": 0.11940298507462686,
+          "operation_nn": 0.6041666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 5,
+          "answer_nn": 0.3125,
+          "answer_p": 0.19402985074626866,
+          "operation_nn": 0.6041666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 6,
+          "answer_nn": 0.1875,
+          "answer_p": 0.7611940298507462,
+          "operation_nn": 0.7291666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 7,
+          "answer_nn": 0.16666666666666666,
+          "answer_p": 0.8407960199004975,
+          "operation_nn": 0.75,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 8,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.9166666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 9,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 10,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 11,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 12,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.875,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 13,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 14,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 15,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 16,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 17,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 0.8958333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 18,
+          "answer_nn": 0.020833333333333332,
+          "answer_p": 1.0,
+          "operation_nn": 0.875,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 19,
+          "answer_nn": 0.041666666666666664,
+          "answer_p": 1.0,
+          "operation_nn": 0.8541666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 20,
+          "answer_nn": 0.14583333333333334,
+          "answer_p": 0.9402985074626866,
+          "operation_nn": 0.75,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 21,
+          "answer_nn": 0.25,
+          "answer_p": 0.472636815920398,
+          "operation_nn": 0.6666666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 22,
+          "answer_nn": 0.2708333333333333,
+          "answer_p": 0.31343283582089554,
+          "operation_nn": 0.6666666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 23,
+          "answer_nn": 0.25,
+          "answer_p": 0.39800995024875624,
+          "operation_nn": 0.6666666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 24,
+          "answer_nn": 0.25,
+          "answer_p": 0.4427860696517413,
+          "operation_nn": 0.6666666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 25,
+          "answer_nn": 0.25,
+          "answer_p": 0.472636815920398,
+          "operation_nn": 0.6666666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 26,
+          "answer_nn": 0.25,
+          "answer_p": 0.472636815920398,
+          "operation_nn": 0.6666666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 27,
+          "answer_nn": 0.2708333333333333,
+          "answer_p": 0.36318407960199006,
+          "operation_nn": 0.6458333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 28,
+          "answer_nn": 0.3333333333333333,
+          "answer_p": 0.07462686567164178,
+          "operation_nn": 0.5833333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 29,
+          "answer_nn": 0.3541666666666667,
+          "answer_p": 0.1044776119402985,
+          "operation_nn": 0.6041666666666666,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 30,
+          "answer_nn": 0.3541666666666667,
+          "answer_p": 0.0845771144278607,
+          "operation_nn": 0.625,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 0.9791666666666666,
+          "mode_p": 0.004975124378109453
+        },
+        {
+          "layer": 31,
+          "answer_nn": 0.3333333333333333,
+          "answer_p": 0.11442786069651742,
+          "operation_nn": 0.6458333333333334,
+          "operation_p": 0.004975124378109453,
+          "mode_nn": 1.0,
+          "mode_p": 0.004975124378109453
+        }
+      ],
+      "best_answer": {
+        "layer": 0,
+        "answer_nn": 0.3541666666666667,
+        "answer_p": 0.07960199004975124,
+        "operation_nn": 0.5833333333333334,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      },
+      "best_operation": {
+        "layer": 8,
+        "answer_nn": 0.0,
+        "answer_p": 1.0,
+        "operation_nn": 0.9166666666666666,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      },
+      "best_mode": {
+        "layer": 0,
+        "answer_nn": 0.3541666666666667,
+        "answer_p": 0.07960199004975124,
+        "operation_nn": 0.5833333333333334,
+        "operation_p": 0.004975124378109453,
+        "mode_nn": 1.0,
+        "mode_p": 0.004975124378109453
+      }
+    }
+  },
+  "answer_by_mode": {
+    "pre": {
+      "brief_cot": {
+        "position": "pre",
+        "best_answer": {
+          "layer": 0,
+          "nn": 0.0,
+          "null": 0.2096875,
+          "p": 1.0
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.2096875,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.2121875,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.21125,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0,
+            "null": 0.1940625,
+            "p": 1.0
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.201875,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.190625,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.2096875,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.178125,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.200625,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.1978125,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.1921875,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.213125,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.2046875,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.198125,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.2075,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.1959375,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.1984375,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.2053125,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.203125,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.199375,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.1978125,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.19875,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.18875,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.188125,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.2053125,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.2115625,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.1990625,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.1903125,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.0,
+            "null": 0.1984375,
+            "p": 1.0
+          },
+          {
+            "layer": 29,
+            "nn": 0.0,
+            "null": 0.2025,
+            "p": 1.0
+          },
+          {
+            "layer": 30,
+            "nn": 0.0,
+            "null": 0.20625,
+            "p": 1.0
+          },
+          {
+            "layer": 31,
+            "nn": 0.0,
+            "null": 0.1896875,
+            "p": 1.0
+          }
+        ]
+      },
+      "direct": {
+        "position": "pre",
+        "best_answer": {
+          "layer": 29,
+          "nn": 0.875,
+          "null": 0.1921875,
+          "p": 0.004975124378109453
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.179375,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.1940625,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.1965625,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0,
+            "null": 0.20375,
+            "p": 1.0
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.1984375,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.2134375,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.1875,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.2003125,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.2090625,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.21,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.1875,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.2028125,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.1990625,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.2034375,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.2003125,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.2125,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.1915625,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.1984375,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.2059375,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.1978125,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.19125,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.2096875,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.2,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.19125,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.1996875,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.1865625,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.2021875,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.2109375,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.8125,
+            "null": 0.208125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 29,
+            "nn": 0.875,
+            "null": 0.1921875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 30,
+            "nn": 0.6875,
+            "null": 0.19625,
+            "p": 0.009950248756218905
+          },
+          {
+            "layer": 31,
+            "nn": 0.6875,
+            "null": 0.20125,
+            "p": 0.004975124378109453
+          }
+        ]
+      },
+      "verbose_cot": {
+        "position": "pre",
+        "best_answer": {
+          "layer": 0,
+          "nn": 0.0,
+          "null": 0.194375,
+          "p": 1.0
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.194375,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.1959375,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.1928125,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0,
+            "null": 0.200625,
+            "p": 1.0
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.196875,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.2128125,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.2065625,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.2059375,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.19125,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.1978125,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.1821875,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.1996875,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.205,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.2,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.205,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.19375,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.214375,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.198125,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.1859375,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.205625,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.2053125,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.2,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.19875,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.2159375,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.20625,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.1975,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.2003125,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.20625,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.0,
+            "null": 0.1815625,
+            "p": 1.0
+          },
+          {
+            "layer": 29,
+            "nn": 0.0,
+            "null": 0.1921875,
+            "p": 1.0
+          },
+          {
+            "layer": 30,
+            "nn": 0.0,
+            "null": 0.211875,
+            "p": 1.0
+          },
+          {
+            "layer": 31,
+            "nn": 0.0,
+            "null": 0.1946875,
+            "p": 1.0
+          }
+        ]
+      }
+    },
+    "gen_first": {
+      "brief_cot": {
+        "position": "gen_first",
+        "best_answer": {
+          "layer": 3,
+          "nn": 0.0625,
+          "null": 0.1975,
+          "p": 0.8905472636815921
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.1925,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.190625,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.19875,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0625,
+            "null": 0.1975,
+            "p": 0.8905472636815921
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.2028125,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.2059375,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.2009375,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.208125,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.2,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.199375,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.209375,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.2103125,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.211875,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.2065625,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.2059375,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.209375,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.198125,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.2053125,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.20625,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.1903125,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.189375,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.200625,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.2025,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.1946875,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.1990625,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.2109375,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.19625,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.205625,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.0,
+            "null": 0.194375,
+            "p": 1.0
+          },
+          {
+            "layer": 29,
+            "nn": 0.0,
+            "null": 0.1953125,
+            "p": 1.0
+          },
+          {
+            "layer": 30,
+            "nn": 0.0,
+            "null": 0.2046875,
+            "p": 1.0
+          },
+          {
+            "layer": 31,
+            "nn": 0.0,
+            "null": 0.193125,
+            "p": 1.0
+          }
+        ]
+      },
+      "direct": {
+        "position": "gen_first",
+        "best_answer": {
+          "layer": 0,
+          "nn": 0.0,
+          "null": 0.195625,
+          "p": 1.0
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.195625,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.195,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.2121875,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0,
+            "null": 0.195625,
+            "p": 1.0
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.2015625,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.196875,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.188125,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.2053125,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.196875,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.2109375,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.2128125,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.1903125,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.195625,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.2034375,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.2084375,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.1971875,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.19875,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.1978125,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.19875,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.1934375,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.1896875,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.20375,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.196875,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.183125,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.1865625,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.1984375,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.2175,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.2065625,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.0,
+            "null": 0.1959375,
+            "p": 1.0
+          },
+          {
+            "layer": 29,
+            "nn": 0.0,
+            "null": 0.1884375,
+            "p": 1.0
+          },
+          {
+            "layer": 30,
+            "nn": 0.0,
+            "null": 0.2009375,
+            "p": 1.0
+          },
+          {
+            "layer": 31,
+            "nn": 0.0,
+            "null": 0.1978125,
+            "p": 1.0
+          }
+        ]
+      },
+      "verbose_cot": {
+        "position": "gen_first",
+        "best_answer": {
+          "layer": 0,
+          "nn": 0.0,
+          "null": 0.198125,
+          "p": 1.0
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.198125,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.1996875,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.194375,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0,
+            "null": 0.208125,
+            "p": 1.0
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.1884375,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.2128125,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.1996875,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.2025,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.1865625,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.194375,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.210625,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.19875,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.199375,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.19625,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.1940625,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.1915625,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.21,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.200625,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.1990625,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.200625,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.1940625,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.1971875,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.2103125,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.181875,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.2059375,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.193125,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.19125,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.196875,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.0,
+            "null": 0.2128125,
+            "p": 1.0
+          },
+          {
+            "layer": 29,
+            "nn": 0.0,
+            "null": 0.2028125,
+            "p": 1.0
+          },
+          {
+            "layer": 30,
+            "nn": 0.0,
+            "null": 0.1925,
+            "p": 1.0
+          },
+          {
+            "layer": 31,
+            "nn": 0.0,
+            "null": 0.198125,
+            "p": 1.0
+          }
+        ]
+      }
+    },
+    "gen_early": {
+      "brief_cot": {
+        "position": "gen_early",
+        "best_answer": {
+          "layer": 0,
+          "nn": 0.0,
+          "null": 0.204375,
+          "p": 1.0
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.204375,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.2059375,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.211875,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0,
+            "null": 0.205,
+            "p": 1.0
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.19375,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.2,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.2040625,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.2090625,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.2059375,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.208125,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.1896875,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.2090625,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.1959375,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.1971875,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.190625,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.22,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.1965625,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.203125,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.1928125,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.2075,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.19375,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.1915625,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.2071875,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.19125,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.19875,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.2134375,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.1875,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.2065625,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.0,
+            "null": 0.210625,
+            "p": 1.0
+          },
+          {
+            "layer": 29,
+            "nn": 0.0,
+            "null": 0.1903125,
+            "p": 1.0
+          },
+          {
+            "layer": 30,
+            "nn": 0.0,
+            "null": 0.1996875,
+            "p": 1.0
+          },
+          {
+            "layer": 31,
+            "nn": 0.0,
+            "null": 0.2075,
+            "p": 1.0
+          }
+        ]
+      },
+      "direct": {
+        "position": "gen_early",
+        "best_answer": {
+          "layer": 28,
+          "nn": 0.5,
+          "null": 0.206875,
+          "p": 0.03482587064676617
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.1909375,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.2075,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.191875,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0,
+            "null": 0.2134375,
+            "p": 1.0
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.2090625,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.2,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.2159375,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.20375,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.1884375,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.2046875,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.1815625,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.221875,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.189375,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.2028125,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.1940625,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.200625,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.195625,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.2009375,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.20625,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.1759375,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.213125,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.19,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.1975,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.21,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.195625,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.196875,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.198125,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.19,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.5,
+            "null": 0.206875,
+            "p": 0.03482587064676617
+          },
+          {
+            "layer": 29,
+            "nn": 0.5,
+            "null": 0.194375,
+            "p": 0.03482587064676617
+          },
+          {
+            "layer": 30,
+            "nn": 0.5,
+            "null": 0.1840625,
+            "p": 0.009950248756218905
+          },
+          {
+            "layer": 31,
+            "nn": 0.5,
+            "null": 0.2190625,
+            "p": 0.07960199004975124
+          }
+        ]
+      },
+      "verbose_cot": {
+        "position": "gen_early",
+        "best_answer": {
+          "layer": 0,
+          "nn": 0.0,
+          "null": 0.1903125,
+          "p": 1.0
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.1903125,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.2,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.2065625,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0,
+            "null": 0.1865625,
+            "p": 1.0
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.20375,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.209375,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.186875,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.19125,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.2009375,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.19875,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.1984375,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.2090625,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.1975,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.2009375,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.183125,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.2046875,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.2003125,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.2090625,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.2078125,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.1975,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.209375,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.19,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.200625,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.1975,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.20875,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.2034375,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.21875,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.2065625,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.0,
+            "null": 0.194375,
+            "p": 1.0
+          },
+          {
+            "layer": 29,
+            "nn": 0.0,
+            "null": 0.190625,
+            "p": 1.0
+          },
+          {
+            "layer": 30,
+            "nn": 0.0,
+            "null": 0.2121875,
+            "p": 1.0
+          },
+          {
+            "layer": 31,
+            "nn": 0.0,
+            "null": 0.1965625,
+            "p": 1.0
+          }
+        ]
+      }
+    },
+    "gen_mid": {
+      "brief_cot": {
+        "position": "gen_mid",
+        "best_answer": {
+          "layer": 0,
+          "nn": 0.0,
+          "null": 0.193125,
+          "p": 1.0
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.193125,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.198125,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.2,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0,
+            "null": 0.1946875,
+            "p": 1.0
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.2084375,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.19625,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.19375,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.20125,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.21125,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.194375,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.2025,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.2028125,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.2,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.218125,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.181875,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.2028125,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.1959375,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.195,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.203125,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.21125,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.2115625,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.1978125,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.20625,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.1959375,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.201875,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.2265625,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.189375,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.2034375,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.0,
+            "null": 0.205,
+            "p": 1.0
+          },
+          {
+            "layer": 29,
+            "nn": 0.0,
+            "null": 0.1896875,
+            "p": 1.0
+          },
+          {
+            "layer": 30,
+            "nn": 0.0,
+            "null": 0.1975,
+            "p": 1.0
+          },
+          {
+            "layer": 31,
+            "nn": 0.0,
+            "null": 0.2090625,
+            "p": 1.0
+          }
+        ]
+      },
+      "direct": {
+        "position": "gen_mid",
+        "best_answer": {
+          "layer": 23,
+          "nn": 1.0,
+          "null": 0.193125,
+          "p": 0.004975124378109453
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.20625,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.1996875,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.2146875,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0,
+            "null": 0.2078125,
+            "p": 1.0
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.205,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.194375,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.2009375,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.196875,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.2090625,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.201875,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.1996875,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.1978125,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.2003125,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.191875,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.209375,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.224375,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.19875,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.2075,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.206875,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.1875,
+            "null": 0.2103125,
+            "p": 0.5671641791044776
+          },
+          {
+            "layer": 20,
+            "nn": 0.5625,
+            "null": 0.191875,
+            "p": 0.009950248756218905
+          },
+          {
+            "layer": 21,
+            "nn": 0.75,
+            "null": 0.2053125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 22,
+            "nn": 0.9375,
+            "null": 0.195,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 23,
+            "nn": 1.0,
+            "null": 0.193125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 24,
+            "nn": 1.0,
+            "null": 0.201875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 25,
+            "nn": 1.0,
+            "null": 0.1825,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 26,
+            "nn": 1.0,
+            "null": 0.20625,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 27,
+            "nn": 1.0,
+            "null": 0.201875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 28,
+            "nn": 1.0,
+            "null": 0.225625,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 29,
+            "nn": 1.0,
+            "null": 0.203125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 30,
+            "nn": 1.0,
+            "null": 0.19625,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 31,
+            "nn": 1.0,
+            "null": 0.196875,
+            "p": 0.004975124378109453
+          }
+        ]
+      },
+      "verbose_cot": {
+        "position": "gen_mid",
+        "best_answer": {
+          "layer": 4,
+          "nn": 0.0625,
+          "null": 0.1990625,
+          "p": 0.9353233830845771
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.2046875,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.186875,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.2003125,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0,
+            "null": 0.1990625,
+            "p": 1.0
+          },
+          {
+            "layer": 4,
+            "nn": 0.0625,
+            "null": 0.1990625,
+            "p": 0.9353233830845771
+          },
+          {
+            "layer": 5,
+            "nn": 0.0625,
+            "null": 0.1921875,
+            "p": 0.9303482587064676
+          },
+          {
+            "layer": 6,
+            "nn": 0.0625,
+            "null": 0.19,
+            "p": 0.9054726368159204
+          },
+          {
+            "layer": 7,
+            "nn": 0.0625,
+            "null": 0.2040625,
+            "p": 0.9353233830845771
+          },
+          {
+            "layer": 8,
+            "nn": 0.0625,
+            "null": 0.1978125,
+            "p": 0.8955223880597015
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.1840625,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0625,
+            "null": 0.2078125,
+            "p": 0.9054726368159204
+          },
+          {
+            "layer": 11,
+            "nn": 0.0625,
+            "null": 0.206875,
+            "p": 0.9353233830845771
+          },
+          {
+            "layer": 12,
+            "nn": 0.0625,
+            "null": 0.2003125,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 13,
+            "nn": 0.0625,
+            "null": 0.2046875,
+            "p": 0.945273631840796
+          },
+          {
+            "layer": 14,
+            "nn": 0.0625,
+            "null": 0.200625,
+            "p": 0.9502487562189055
+          },
+          {
+            "layer": 15,
+            "nn": 0.0625,
+            "null": 0.196875,
+            "p": 0.9154228855721394
+          },
+          {
+            "layer": 16,
+            "nn": 0.0625,
+            "null": 0.20625,
+            "p": 0.9353233830845771
+          },
+          {
+            "layer": 17,
+            "nn": 0.0625,
+            "null": 0.191875,
+            "p": 0.9353233830845771
+          },
+          {
+            "layer": 18,
+            "nn": 0.0625,
+            "null": 0.1925,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 19,
+            "nn": 0.0625,
+            "null": 0.198125,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 20,
+            "nn": 0.0625,
+            "null": 0.2128125,
+            "p": 0.9253731343283582
+          },
+          {
+            "layer": 21,
+            "nn": 0.0625,
+            "null": 0.2234375,
+            "p": 0.9402985074626866
+          },
+          {
+            "layer": 22,
+            "nn": 0.0625,
+            "null": 0.1871875,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 23,
+            "nn": 0.0625,
+            "null": 0.2025,
+            "p": 0.900497512437811
+          },
+          {
+            "layer": 24,
+            "nn": 0.0625,
+            "null": 0.209375,
+            "p": 0.9154228855721394
+          },
+          {
+            "layer": 25,
+            "nn": 0.0625,
+            "null": 0.2,
+            "p": 0.9253731343283582
+          },
+          {
+            "layer": 26,
+            "nn": 0.0625,
+            "null": 0.2046875,
+            "p": 0.9353233830845771
+          },
+          {
+            "layer": 27,
+            "nn": 0.0625,
+            "null": 0.1975,
+            "p": 0.9203980099502488
+          },
+          {
+            "layer": 28,
+            "nn": 0.0625,
+            "null": 0.1984375,
+            "p": 0.9253731343283582
+          },
+          {
+            "layer": 29,
+            "nn": 0.0625,
+            "null": 0.186875,
+            "p": 0.9203980099502488
+          },
+          {
+            "layer": 30,
+            "nn": 0.0625,
+            "null": 0.1978125,
+            "p": 0.945273631840796
+          },
+          {
+            "layer": 31,
+            "nn": 0.0,
+            "null": 0.20375,
+            "p": 1.0
+          }
+        ]
+      }
+    },
+    "gen_late": {
+      "brief_cot": {
+        "position": "gen_late",
+        "best_answer": {
+          "layer": 0,
+          "nn": 0.5625,
+          "null": 0.1884375,
+          "p": 0.01990049751243781
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.5625,
+            "null": 0.1884375,
+            "p": 0.01990049751243781
+          },
+          {
+            "layer": 1,
+            "nn": 0.5625,
+            "null": 0.2178125,
+            "p": 0.024875621890547265
+          },
+          {
+            "layer": 2,
+            "nn": 0.4375,
+            "null": 0.2125,
+            "p": 0.10945273631840796
+          },
+          {
+            "layer": 3,
+            "nn": 0.1875,
+            "null": 0.1878125,
+            "p": 0.5671641791044776
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.1915625,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.2040625,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.2040625,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.1990625,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.200625,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.201875,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.189375,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.195,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.1990625,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.1965625,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.194375,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.2,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.2040625,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.196875,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.198125,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.2109375,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.1971875,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.1909375,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.1871875,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.195625,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0625,
+            "null": 0.203125,
+            "p": 0.9353233830845771
+          },
+          {
+            "layer": 25,
+            "nn": 0.125,
+            "null": 0.1928125,
+            "p": 0.7711442786069652
+          },
+          {
+            "layer": 26,
+            "nn": 0.0625,
+            "null": 0.22,
+            "p": 0.9502487562189055
+          },
+          {
+            "layer": 27,
+            "nn": 0.125,
+            "null": 0.199375,
+            "p": 0.8109452736318408
+          },
+          {
+            "layer": 28,
+            "nn": 0.5,
+            "null": 0.2109375,
+            "p": 0.04477611940298507
+          },
+          {
+            "layer": 29,
+            "nn": 0.5625,
+            "null": 0.2028125,
+            "p": 0.029850746268656716
+          },
+          {
+            "layer": 30,
+            "nn": 0.5625,
+            "null": 0.2028125,
+            "p": 0.024875621890547265
+          },
+          {
+            "layer": 31,
+            "nn": 0.125,
+            "null": 0.201875,
+            "p": 0.7910447761194029
+          }
+        ]
+      },
+      "direct": {
+        "position": "gen_late",
+        "best_answer": {
+          "layer": 0,
+          "nn": 1.0,
+          "null": 0.1915625,
+          "p": 0.004975124378109453
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 1.0,
+            "null": 0.1915625,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 1,
+            "nn": 1.0,
+            "null": 0.2025,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 2,
+            "nn": 1.0,
+            "null": 0.2071875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 3,
+            "nn": 1.0,
+            "null": 0.1928125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 4,
+            "nn": 1.0,
+            "null": 0.188125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 5,
+            "nn": 1.0,
+            "null": 0.2171875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 6,
+            "nn": 0.8125,
+            "null": 0.1934375,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 7,
+            "nn": 0.75,
+            "null": 0.2053125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 8,
+            "nn": 0.25,
+            "null": 0.1940625,
+            "p": 0.38308457711442784
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.18375,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.1890625,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.25,
+            "null": 0.204375,
+            "p": 0.44776119402985076
+          },
+          {
+            "layer": 12,
+            "nn": 0.4375,
+            "null": 0.2015625,
+            "p": 0.04975124378109453
+          },
+          {
+            "layer": 13,
+            "nn": 0.625,
+            "null": 0.21875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 14,
+            "nn": 0.625,
+            "null": 0.1971875,
+            "p": 0.009950248756218905
+          },
+          {
+            "layer": 15,
+            "nn": 0.6875,
+            "null": 0.194375,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 16,
+            "nn": 0.75,
+            "null": 0.200625,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 17,
+            "nn": 0.75,
+            "null": 0.2015625,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 18,
+            "nn": 0.75,
+            "null": 0.1978125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 19,
+            "nn": 0.75,
+            "null": 0.1946875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 20,
+            "nn": 0.9375,
+            "null": 0.1921875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 21,
+            "nn": 1.0,
+            "null": 0.19875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 22,
+            "nn": 0.9375,
+            "null": 0.2065625,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 23,
+            "nn": 0.875,
+            "null": 0.205,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 24,
+            "nn": 0.75,
+            "null": 0.223125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 25,
+            "nn": 0.75,
+            "null": 0.196875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 26,
+            "nn": 0.75,
+            "null": 0.1928125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 27,
+            "nn": 0.75,
+            "null": 0.1921875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 28,
+            "nn": 0.75,
+            "null": 0.19375,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 29,
+            "nn": 0.75,
+            "null": 0.188125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 30,
+            "nn": 0.75,
+            "null": 0.21625,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 31,
+            "nn": 0.6875,
+            "null": 0.174375,
+            "p": 0.004975124378109453
+          }
+        ]
+      },
+      "verbose_cot": {
+        "position": "gen_late",
+        "best_answer": {
+          "layer": 3,
+          "nn": 0.1875,
+          "null": 0.1846875,
+          "p": 0.5771144278606966
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.125,
+            "null": 0.1909375,
+            "p": 0.7711442786069652
+          },
+          {
+            "layer": 1,
+            "nn": 0.125,
+            "null": 0.2225,
+            "p": 0.8208955223880597
+          },
+          {
+            "layer": 2,
+            "nn": 0.125,
+            "null": 0.2025,
+            "p": 0.7910447761194029
+          },
+          {
+            "layer": 3,
+            "nn": 0.1875,
+            "null": 0.1846875,
+            "p": 0.5771144278606966
+          },
+          {
+            "layer": 4,
+            "nn": 0.0625,
+            "null": 0.20125,
+            "p": 0.9054726368159204
+          },
+          {
+            "layer": 5,
+            "nn": 0.0625,
+            "null": 0.2015625,
+            "p": 0.945273631840796
+          },
+          {
+            "layer": 6,
+            "nn": 0.0625,
+            "null": 0.1934375,
+            "p": 0.9552238805970149
+          },
+          {
+            "layer": 7,
+            "nn": 0.0625,
+            "null": 0.215625,
+            "p": 0.9154228855721394
+          },
+          {
+            "layer": 8,
+            "nn": 0.0625,
+            "null": 0.1959375,
+            "p": 0.8855721393034826
+          },
+          {
+            "layer": 9,
+            "nn": 0.0625,
+            "null": 0.1975,
+            "p": 0.9353233830845771
+          },
+          {
+            "layer": 10,
+            "nn": 0.0625,
+            "null": 0.199375,
+            "p": 0.9502487562189055
+          },
+          {
+            "layer": 11,
+            "nn": 0.125,
+            "null": 0.2125,
+            "p": 0.8109452736318408
+          },
+          {
+            "layer": 12,
+            "nn": 0.125,
+            "null": 0.1996875,
+            "p": 0.7960199004975125
+          },
+          {
+            "layer": 13,
+            "nn": 0.125,
+            "null": 0.205,
+            "p": 0.8109452736318408
+          },
+          {
+            "layer": 14,
+            "nn": 0.125,
+            "null": 0.19625,
+            "p": 0.7810945273631841
+          },
+          {
+            "layer": 15,
+            "nn": 0.125,
+            "null": 0.1878125,
+            "p": 0.736318407960199
+          },
+          {
+            "layer": 16,
+            "nn": 0.125,
+            "null": 0.188125,
+            "p": 0.7960199004975125
+          },
+          {
+            "layer": 17,
+            "nn": 0.125,
+            "null": 0.2028125,
+            "p": 0.7810945273631841
+          },
+          {
+            "layer": 18,
+            "nn": 0.125,
+            "null": 0.191875,
+            "p": 0.7661691542288557
+          },
+          {
+            "layer": 19,
+            "nn": 0.125,
+            "null": 0.1975,
+            "p": 0.8009950248756219
+          },
+          {
+            "layer": 20,
+            "nn": 0.125,
+            "null": 0.1928125,
+            "p": 0.7263681592039801
+          },
+          {
+            "layer": 21,
+            "nn": 0.125,
+            "null": 0.20125,
+            "p": 0.7562189054726368
+          },
+          {
+            "layer": 22,
+            "nn": 0.125,
+            "null": 0.2,
+            "p": 0.746268656716418
+          },
+          {
+            "layer": 23,
+            "nn": 0.125,
+            "null": 0.19625,
+            "p": 0.7860696517412935
+          },
+          {
+            "layer": 24,
+            "nn": 0.125,
+            "null": 0.2003125,
+            "p": 0.8059701492537313
+          },
+          {
+            "layer": 25,
+            "nn": 0.125,
+            "null": 0.204375,
+            "p": 0.8258706467661692
+          },
+          {
+            "layer": 26,
+            "nn": 0.125,
+            "null": 0.198125,
+            "p": 0.8059701492537313
+          },
+          {
+            "layer": 27,
+            "nn": 0.125,
+            "null": 0.205,
+            "p": 0.7960199004975125
+          },
+          {
+            "layer": 28,
+            "nn": 0.1875,
+            "null": 0.1790625,
+            "p": 0.5422885572139303
+          },
+          {
+            "layer": 29,
+            "nn": 0.1875,
+            "null": 0.19875,
+            "p": 0.5522388059701493
+          },
+          {
+            "layer": 30,
+            "nn": 0.1875,
+            "null": 0.2028125,
+            "p": 0.5870646766169154
+          },
+          {
+            "layer": 31,
+            "nn": 0.125,
+            "null": 0.1940625,
+            "p": 0.7611940298507462
+          }
+        ]
+      }
+    },
+    "gen_final": {
+      "brief_cot": {
+        "position": "gen_final",
+        "best_answer": {
+          "layer": 1,
+          "nn": 0.625,
+          "null": 0.199375,
+          "p": 0.009950248756218905
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.196875,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.625,
+            "null": 0.199375,
+            "p": 0.009950248756218905
+          },
+          {
+            "layer": 2,
+            "nn": 0.625,
+            "null": 0.21,
+            "p": 0.009950248756218905
+          },
+          {
+            "layer": 3,
+            "nn": 0.5625,
+            "null": 0.184375,
+            "p": 0.014925373134328358
+          },
+          {
+            "layer": 4,
+            "nn": 0.625,
+            "null": 0.1828125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 5,
+            "nn": 0.1875,
+            "null": 0.190625,
+            "p": 0.582089552238806
+          },
+          {
+            "layer": 6,
+            "nn": 0.0625,
+            "null": 0.2009375,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 7,
+            "nn": 0.0625,
+            "null": 0.19875,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.205625,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.1978125,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.19125,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.1825,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.1953125,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.1915625,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.1975,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.20125,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.1990625,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.2146875,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.21125,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.1959375,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.185625,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.196875,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.1871875,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.206875,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.193125,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.2121875,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.199375,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.2096875,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.0,
+            "null": 0.1953125,
+            "p": 1.0
+          },
+          {
+            "layer": 29,
+            "nn": 0.0,
+            "null": 0.211875,
+            "p": 1.0
+          },
+          {
+            "layer": 30,
+            "nn": 0.0,
+            "null": 0.1878125,
+            "p": 1.0
+          },
+          {
+            "layer": 31,
+            "nn": 0.0,
+            "null": 0.2034375,
+            "p": 1.0
+          }
+        ]
+      },
+      "direct": {
+        "position": "gen_final",
+        "best_answer": {
+          "layer": 1,
+          "nn": 1.0,
+          "null": 0.198125,
+          "p": 0.004975124378109453
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.1940625,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 1.0,
+            "null": 0.198125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 2,
+            "nn": 1.0,
+            "null": 0.1978125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 3,
+            "nn": 1.0,
+            "null": 0.1925,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 4,
+            "nn": 1.0,
+            "null": 0.20375,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 5,
+            "nn": 1.0,
+            "null": 0.2096875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 6,
+            "nn": 0.8125,
+            "null": 0.21,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 7,
+            "nn": 0.6875,
+            "null": 0.1871875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 8,
+            "nn": 0.1875,
+            "null": 0.1890625,
+            "p": 0.5572139303482587
+          },
+          {
+            "layer": 9,
+            "nn": 0.0625,
+            "null": 0.2190625,
+            "p": 0.945273631840796
+          },
+          {
+            "layer": 10,
+            "nn": 0.0625,
+            "null": 0.1984375,
+            "p": 0.9253731343283582
+          },
+          {
+            "layer": 11,
+            "nn": 0.0625,
+            "null": 0.193125,
+            "p": 0.8805970149253731
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.193125,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.189375,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0625,
+            "null": 0.191875,
+            "p": 0.8905472636815921
+          },
+          {
+            "layer": 15,
+            "nn": 0.0625,
+            "null": 0.2003125,
+            "p": 0.8507462686567164
+          },
+          {
+            "layer": 16,
+            "nn": 0.0625,
+            "null": 0.1915625,
+            "p": 0.8407960199004975
+          },
+          {
+            "layer": 17,
+            "nn": 0.0625,
+            "null": 0.2015625,
+            "p": 0.900497512437811
+          },
+          {
+            "layer": 18,
+            "nn": 0.0625,
+            "null": 0.2109375,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 19,
+            "nn": 0.0625,
+            "null": 0.208125,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 20,
+            "nn": 0.0625,
+            "null": 0.2046875,
+            "p": 0.9154228855721394
+          },
+          {
+            "layer": 21,
+            "nn": 0.0625,
+            "null": 0.2040625,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 22,
+            "nn": 0.0625,
+            "null": 0.1940625,
+            "p": 0.9154228855721394
+          },
+          {
+            "layer": 23,
+            "nn": 0.0625,
+            "null": 0.195,
+            "p": 0.9253731343283582
+          },
+          {
+            "layer": 24,
+            "nn": 0.0625,
+            "null": 0.1959375,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 25,
+            "nn": 0.0625,
+            "null": 0.1853125,
+            "p": 0.8805970149253731
+          },
+          {
+            "layer": 26,
+            "nn": 0.0625,
+            "null": 0.1946875,
+            "p": 0.900497512437811
+          },
+          {
+            "layer": 27,
+            "nn": 0.0625,
+            "null": 0.188125,
+            "p": 0.8706467661691543
+          },
+          {
+            "layer": 28,
+            "nn": 0.0625,
+            "null": 0.194375,
+            "p": 0.8905472636815921
+          },
+          {
+            "layer": 29,
+            "nn": 0.0625,
+            "null": 0.2034375,
+            "p": 0.9402985074626866
+          },
+          {
+            "layer": 30,
+            "nn": 0.0625,
+            "null": 0.184375,
+            "p": 0.9154228855721394
+          },
+          {
+            "layer": 31,
+            "nn": 0.0625,
+            "null": 0.1875,
+            "p": 0.9054726368159204
+          }
+        ]
+      },
+      "verbose_cot": {
+        "position": "gen_final",
+        "best_answer": {
+          "layer": 1,
+          "nn": 0.75,
+          "null": 0.2071875,
+          "p": 0.004975124378109453
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.25,
+            "null": 0.196875,
+            "p": 0.39303482587064675
+          },
+          {
+            "layer": 1,
+            "nn": 0.75,
+            "null": 0.2071875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 2,
+            "nn": 0.6875,
+            "null": 0.195,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 3,
+            "nn": 0.3125,
+            "null": 0.2025,
+            "p": 0.24875621890547264
+          },
+          {
+            "layer": 4,
+            "nn": 0.5625,
+            "null": 0.18875,
+            "p": 0.024875621890547265
+          },
+          {
+            "layer": 5,
+            "nn": 0.125,
+            "null": 0.2103125,
+            "p": 0.7960199004975125
+          },
+          {
+            "layer": 6,
+            "nn": 0.0625,
+            "null": 0.215625,
+            "p": 0.9353233830845771
+          },
+          {
+            "layer": 7,
+            "nn": 0.125,
+            "null": 0.19375,
+            "p": 0.736318407960199
+          },
+          {
+            "layer": 8,
+            "nn": 0.0625,
+            "null": 0.2028125,
+            "p": 0.9552238805970149
+          },
+          {
+            "layer": 9,
+            "nn": 0.0625,
+            "null": 0.188125,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 10,
+            "nn": 0.0625,
+            "null": 0.19875,
+            "p": 0.9253731343283582
+          },
+          {
+            "layer": 11,
+            "nn": 0.0625,
+            "null": 0.19,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 12,
+            "nn": 0.0625,
+            "null": 0.19625,
+            "p": 0.9203980099502488
+          },
+          {
+            "layer": 13,
+            "nn": 0.125,
+            "null": 0.1953125,
+            "p": 0.7860696517412935
+          },
+          {
+            "layer": 14,
+            "nn": 0.1875,
+            "null": 0.20375,
+            "p": 0.6119402985074627
+          },
+          {
+            "layer": 15,
+            "nn": 0.25,
+            "null": 0.195,
+            "p": 0.40298507462686567
+          },
+          {
+            "layer": 16,
+            "nn": 0.1875,
+            "null": 0.209375,
+            "p": 0.6467661691542289
+          },
+          {
+            "layer": 17,
+            "nn": 0.1875,
+            "null": 0.1996875,
+            "p": 0.6019900497512438
+          },
+          {
+            "layer": 18,
+            "nn": 0.1875,
+            "null": 0.204375,
+            "p": 0.582089552238806
+          },
+          {
+            "layer": 19,
+            "nn": 0.1875,
+            "null": 0.198125,
+            "p": 0.5771144278606966
+          },
+          {
+            "layer": 20,
+            "nn": 0.1875,
+            "null": 0.205,
+            "p": 0.6318407960199005
+          },
+          {
+            "layer": 21,
+            "nn": 0.1875,
+            "null": 0.2103125,
+            "p": 0.6318407960199005
+          },
+          {
+            "layer": 22,
+            "nn": 0.1875,
+            "null": 0.2159375,
+            "p": 0.6716417910447762
+          },
+          {
+            "layer": 23,
+            "nn": 0.1875,
+            "null": 0.1984375,
+            "p": 0.6218905472636815
+          },
+          {
+            "layer": 24,
+            "nn": 0.1875,
+            "null": 0.2090625,
+            "p": 0.6417910447761194
+          },
+          {
+            "layer": 25,
+            "nn": 0.1875,
+            "null": 0.2084375,
+            "p": 0.6268656716417911
+          },
+          {
+            "layer": 26,
+            "nn": 0.1875,
+            "null": 0.1946875,
+            "p": 0.5771144278606966
+          },
+          {
+            "layer": 27,
+            "nn": 0.1875,
+            "null": 0.1859375,
+            "p": 0.5671641791044776
+          },
+          {
+            "layer": 28,
+            "nn": 0.1875,
+            "null": 0.2003125,
+            "p": 0.6417910447761194
+          },
+          {
+            "layer": 29,
+            "nn": 0.1875,
+            "null": 0.206875,
+            "p": 0.5970149253731343
+          },
+          {
+            "layer": 30,
+            "nn": 0.1875,
+            "null": 0.1990625,
+            "p": 0.6268656716417911
+          },
+          {
+            "layer": 31,
+            "nn": 0.1875,
+            "null": 0.194375,
+            "p": 0.6069651741293532
+          }
+        ]
+      }
+    },
+    "gen_all": {
+      "brief_cot": {
+        "position": "gen_all",
+        "best_answer": {
+          "layer": 0,
+          "nn": 0.0,
+          "null": 0.1959375,
+          "p": 1.0
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0,
+            "null": 0.1959375,
+            "p": 1.0
+          },
+          {
+            "layer": 1,
+            "nn": 0.0,
+            "null": 0.1878125,
+            "p": 1.0
+          },
+          {
+            "layer": 2,
+            "nn": 0.0,
+            "null": 0.2115625,
+            "p": 1.0
+          },
+          {
+            "layer": 3,
+            "nn": 0.0,
+            "null": 0.2075,
+            "p": 1.0
+          },
+          {
+            "layer": 4,
+            "nn": 0.0,
+            "null": 0.2034375,
+            "p": 1.0
+          },
+          {
+            "layer": 5,
+            "nn": 0.0,
+            "null": 0.1971875,
+            "p": 1.0
+          },
+          {
+            "layer": 6,
+            "nn": 0.0,
+            "null": 0.1928125,
+            "p": 1.0
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.2096875,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.1984375,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.1853125,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.1965625,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.19625,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.1975,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.2121875,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.2,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.1996875,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.206875,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.210625,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.20125,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.1865625,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.2153125,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.1940625,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.1940625,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.1965625,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.1909375,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.21,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.200625,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.188125,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.0,
+            "null": 0.20625,
+            "p": 1.0
+          },
+          {
+            "layer": 29,
+            "nn": 0.0,
+            "null": 0.198125,
+            "p": 1.0
+          },
+          {
+            "layer": 30,
+            "nn": 0.0,
+            "null": 0.2053125,
+            "p": 1.0
+          },
+          {
+            "layer": 31,
+            "nn": 0.0,
+            "null": 0.193125,
+            "p": 1.0
+          }
+        ]
+      },
+      "direct": {
+        "position": "gen_all",
+        "best_answer": {
+          "layer": 0,
+          "nn": 1.0,
+          "null": 0.2028125,
+          "p": 0.004975124378109453
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 1.0,
+            "null": 0.2028125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 1,
+            "nn": 1.0,
+            "null": 0.201875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 2,
+            "nn": 1.0,
+            "null": 0.1953125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 3,
+            "nn": 1.0,
+            "null": 0.2025,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 4,
+            "nn": 1.0,
+            "null": 0.203125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 5,
+            "nn": 0.875,
+            "null": 0.2134375,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 6,
+            "nn": 0.5,
+            "null": 0.2034375,
+            "p": 0.03980099502487562
+          },
+          {
+            "layer": 7,
+            "nn": 0.5,
+            "null": 0.205,
+            "p": 0.06965174129353234
+          },
+          {
+            "layer": 8,
+            "nn": 0.0,
+            "null": 0.2075,
+            "p": 1.0
+          },
+          {
+            "layer": 9,
+            "nn": 0.0,
+            "null": 0.205,
+            "p": 1.0
+          },
+          {
+            "layer": 10,
+            "nn": 0.0,
+            "null": 0.20375,
+            "p": 1.0
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.2084375,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.2,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.2034375,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.2175,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.185625,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0,
+            "null": 0.194375,
+            "p": 1.0
+          },
+          {
+            "layer": 17,
+            "nn": 0.0,
+            "null": 0.1940625,
+            "p": 1.0
+          },
+          {
+            "layer": 18,
+            "nn": 0.0,
+            "null": 0.188125,
+            "p": 1.0
+          },
+          {
+            "layer": 19,
+            "nn": 0.0625,
+            "null": 0.1909375,
+            "p": 0.8756218905472637
+          },
+          {
+            "layer": 20,
+            "nn": 0.4375,
+            "null": 0.190625,
+            "p": 0.06467661691542288
+          },
+          {
+            "layer": 21,
+            "nn": 0.5625,
+            "null": 0.1946875,
+            "p": 0.014925373134328358
+          },
+          {
+            "layer": 22,
+            "nn": 0.625,
+            "null": 0.210625,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 23,
+            "nn": 0.8125,
+            "null": 0.1909375,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 24,
+            "nn": 0.8125,
+            "null": 0.2121875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 25,
+            "nn": 0.875,
+            "null": 0.2240625,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 26,
+            "nn": 0.8125,
+            "null": 0.2084375,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 27,
+            "nn": 0.9375,
+            "null": 0.2078125,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 28,
+            "nn": 1.0,
+            "null": 0.226875,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 29,
+            "nn": 1.0,
+            "null": 0.189375,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 30,
+            "nn": 1.0,
+            "null": 0.18625,
+            "p": 0.004975124378109453
+          },
+          {
+            "layer": 31,
+            "nn": 1.0,
+            "null": 0.20125,
+            "p": 0.004975124378109453
+          }
+        ]
+      },
+      "verbose_cot": {
+        "position": "gen_all",
+        "best_answer": {
+          "layer": 0,
+          "nn": 0.0625,
+          "null": 0.2109375,
+          "p": 0.9054726368159204
+        },
+        "per_layer": [
+          {
+            "layer": 0,
+            "nn": 0.0625,
+            "null": 0.2109375,
+            "p": 0.9054726368159204
+          },
+          {
+            "layer": 1,
+            "nn": 0.0625,
+            "null": 0.18875,
+            "p": 0.8805970149253731
+          },
+          {
+            "layer": 2,
+            "nn": 0.0625,
+            "null": 0.2021875,
+            "p": 0.9203980099502488
+          },
+          {
+            "layer": 3,
+            "nn": 0.0625,
+            "null": 0.2003125,
+            "p": 0.8905472636815921
+          },
+          {
+            "layer": 4,
+            "nn": 0.0625,
+            "null": 0.2071875,
+            "p": 0.9552238805970149
+          },
+          {
+            "layer": 5,
+            "nn": 0.0625,
+            "null": 0.194375,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 6,
+            "nn": 0.0625,
+            "null": 0.1896875,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 7,
+            "nn": 0.0,
+            "null": 0.1971875,
+            "p": 1.0
+          },
+          {
+            "layer": 8,
+            "nn": 0.0625,
+            "null": 0.1909375,
+            "p": 0.9353233830845771
+          },
+          {
+            "layer": 9,
+            "nn": 0.0625,
+            "null": 0.2071875,
+            "p": 0.9154228855721394
+          },
+          {
+            "layer": 10,
+            "nn": 0.0625,
+            "null": 0.1996875,
+            "p": 0.9104477611940298
+          },
+          {
+            "layer": 11,
+            "nn": 0.0,
+            "null": 0.2028125,
+            "p": 1.0
+          },
+          {
+            "layer": 12,
+            "nn": 0.0,
+            "null": 0.210625,
+            "p": 1.0
+          },
+          {
+            "layer": 13,
+            "nn": 0.0,
+            "null": 0.1909375,
+            "p": 1.0
+          },
+          {
+            "layer": 14,
+            "nn": 0.0,
+            "null": 0.2134375,
+            "p": 1.0
+          },
+          {
+            "layer": 15,
+            "nn": 0.0,
+            "null": 0.206875,
+            "p": 1.0
+          },
+          {
+            "layer": 16,
+            "nn": 0.0625,
+            "null": 0.1803125,
+            "p": 0.8905472636815921
+          },
+          {
+            "layer": 17,
+            "nn": 0.0625,
+            "null": 0.2034375,
+            "p": 0.945273631840796
+          },
+          {
+            "layer": 18,
+            "nn": 0.0625,
+            "null": 0.193125,
+            "p": 0.900497512437811
+          },
+          {
+            "layer": 19,
+            "nn": 0.0,
+            "null": 0.2009375,
+            "p": 1.0
+          },
+          {
+            "layer": 20,
+            "nn": 0.0,
+            "null": 0.1965625,
+            "p": 1.0
+          },
+          {
+            "layer": 21,
+            "nn": 0.0,
+            "null": 0.185,
+            "p": 1.0
+          },
+          {
+            "layer": 22,
+            "nn": 0.0,
+            "null": 0.1946875,
+            "p": 1.0
+          },
+          {
+            "layer": 23,
+            "nn": 0.0,
+            "null": 0.2128125,
+            "p": 1.0
+          },
+          {
+            "layer": 24,
+            "nn": 0.0,
+            "null": 0.195625,
+            "p": 1.0
+          },
+          {
+            "layer": 25,
+            "nn": 0.0,
+            "null": 0.200625,
+            "p": 1.0
+          },
+          {
+            "layer": 26,
+            "nn": 0.0,
+            "null": 0.19125,
+            "p": 1.0
+          },
+          {
+            "layer": 27,
+            "nn": 0.0,
+            "null": 0.19875,
+            "p": 1.0
+          },
+          {
+            "layer": 28,
+            "nn": 0.0,
+            "null": 0.2065625,
+            "p": 1.0
+          },
+          {
+            "layer": 29,
+            "nn": 0.0,
+            "null": 0.1909375,
+            "p": 1.0
+          },
+          {
+            "layer": 30,
+            "nn": 0.0,
+            "null": 0.188125,
+            "p": 1.0
+          },
+          {
+            "layer": 31,
+            "nn": 0.0,
+            "null": 0.195625,
+            "p": 1.0
+          }
+        ]
+      }
+    }
+  },
+  "runtime_sec": 86.7
+}

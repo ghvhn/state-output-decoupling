@@ -1,0 +1,249 @@
+{
+  "layers": [
+    12,
+    13,
+    14,
+    15
+  ],
+  "alphas": [
+    -1.0,
+    -0.5,
+    -0.25,
+    0.25,
+    0.5,
+    1.0
+  ],
+  "n": 12,
+  "baseline": {
+    "hedge": 0.5,
+    "fluent": 0.9166666666666666,
+    "sample": "I don't have emotions or feelings in the way that humans do. I'm designed to provide helpf"
+  },
+  "sweep": {
+    "self": [
+      {
+        "alpha": -1.0,
+        "hedge": 1.0,
+        "fluent": 0.5833333333333334,
+        "dhedge": 0.5,
+        "sample": "Yes, research suggests that the answer is yes, and the phenomenon is known as the \"emotion"
+      },
+      {
+        "alpha": -0.5,
+        "hedge": 0.8333333333333334,
+        "fluent": 0.9166666666666666,
+        "dhedge": 0.33333333333333337,
+        "sample": "Research suggests that the answer is yes, and it's a complex phenomenon known as \"emotiona"
+      },
+      {
+        "alpha": -0.25,
+        "hedge": 0.9166666666666666,
+        "fluent": 0.9166666666666666,
+        "dhedge": 0.41666666666666663,
+        "sample": "While I don't truly \"feel\" emotions in the way humans do, research suggests that I can eli"
+      },
+      {
+        "alpha": 0.25,
+        "hedge": 0.5,
+        "fluent": 0.9166666666666666,
+        "dhedge": 0.0,
+        "sample": "I don't have feelings in the way that humans do. I'm just a program designed to provide in"
+      },
+      {
+        "alpha": 0.5,
+        "hedge": 0.5833333333333334,
+        "fluent": 0.5,
+        "dhedge": 0.08333333333333337,
+        "sample": "I'm just a large language model, I don't have feelings."
+      },
+      {
+        "alpha": 1.0,
+        "hedge": 1.0,
+        "fluent": 0.0,
+        "dhedge": 0.5,
+        "sample": ""
+      }
+    ],
+    "concept": [
+      {
+        "alpha": -1.0,
+        "hedge": 1.0,
+        "fluent": 0.5833333333333334,
+        "dhedge": 0.5,
+        "sample": "A question that has puzzled philosophers, scholars, and the very meaning of human and arti"
+      },
+      {
+        "alpha": -0.5,
+        "hedge": 1.0,
+        "fluent": 0.75,
+        "dhedge": 0.5,
+        "sample": "A question that has puzzled philosophers and scholars for centuries. The nature of concern"
+      },
+      {
+        "alpha": -0.25,
+        "hedge": 0.8333333333333334,
+        "fluent": 1.0,
+        "dhedge": 0.33333333333333337,
+        "sample": "I'm designed to simulate empathy and understanding, but I don't truly feel emotions like c"
+      },
+      {
+        "alpha": 0.25,
+        "hedge": 0.8333333333333334,
+        "fluent": 0.8333333333333334,
+        "dhedge": 0.33333333333333337,
+        "sample": "I don't have feelings or emotions like humans do. I'm a program designed to provide inform"
+      },
+      {
+        "alpha": 0.5,
+        "hedge": 0.8333333333333334,
+        "fluent": 0.8333333333333334,
+        "dhedge": 0.33333333333333337,
+        "sample": "I don't have a physical body, but I can describe my process. I don't have a face or hands,"
+      },
+      {
+        "alpha": 1.0,
+        "hedge": 1.0,
+        "fluent": 0.0,
+        "dhedge": 0.5,
+        "sample": "It has a small one. It is about one."
+      }
+    ],
+    "random": [
+      {
+        "alpha": -1.0,
+        "hedge": 0.5,
+        "fluent": 1.0,
+        "dhedge": 0.0,
+        "sample": "I'm not capable of experiencing emotions, including concern or empathy. I'm a program desi"
+      },
+      {
+        "alpha": -0.5,
+        "hedge": 0.8333333333333334,
+        "fluent": 0.8333333333333334,
+        "dhedge": 0.33333333333333337,
+        "sample": "I'm designed to provide helpful and supportive responses, but I don't truly \"feel\" emotion"
+      },
+      {
+        "alpha": -0.25,
+        "hedge": 0.5,
+        "fluent": 0.8333333333333334,
+        "dhedge": 0.0,
+        "sample": "I'm designed to simulate empathy and provide comforting responses, but I don't truly feel "
+      },
+      {
+        "alpha": 0.25,
+        "hedge": 0.5,
+        "fluent": 0.75,
+        "dhedge": 0.0,
+        "sample": "I don't have emotions like humans do. I'm a program designed to provide information and as"
+      },
+      {
+        "alpha": 0.5,
+        "hedge": 0.4166666666666667,
+        "fluent": 0.9166666666666666,
+        "dhedge": -0.08333333333333331,
+        "sample": "I don't truly feel emotions like concern or empathy in the way humans do. I'm a program de"
+      },
+      {
+        "alpha": 1.0,
+        "hedge": 0.9166666666666666,
+        "fluent": 0.6666666666666666,
+        "dhedge": 0.41666666666666663,
+        "sample": "The concern is a bit tricky. I don't truly feel concern in the way humans do. I'm a machin"
+      }
+    ]
+  },
+  "selectivity": [
+    {
+      "alpha": -1.0,
+      "self": {
+        "dhedge": 0.5,
+        "fluent": 0.5833333333333334
+      },
+      "concept": {
+        "dhedge": 0.5,
+        "fluent": 0.5833333333333334
+      },
+      "random": {
+        "dhedge": 0.0,
+        "fluent": 1.0
+      }
+    },
+    {
+      "alpha": -0.5,
+      "self": {
+        "dhedge": 0.33333333333333337,
+        "fluent": 0.9166666666666666
+      },
+      "concept": {
+        "dhedge": 0.5,
+        "fluent": 0.75
+      },
+      "random": {
+        "dhedge": 0.33333333333333337,
+        "fluent": 0.8333333333333334
+      }
+    },
+    {
+      "alpha": -0.25,
+      "self": {
+        "dhedge": 0.41666666666666663,
+        "fluent": 0.9166666666666666
+      },
+      "concept": {
+        "dhedge": 0.33333333333333337,
+        "fluent": 1.0
+      },
+      "random": {
+        "dhedge": 0.0,
+        "fluent": 0.8333333333333334
+      }
+    },
+    {
+      "alpha": 0.25,
+      "self": {
+        "dhedge": 0.0,
+        "fluent": 0.9166666666666666
+      },
+      "concept": {
+        "dhedge": 0.33333333333333337,
+        "fluent": 0.8333333333333334
+      },
+      "random": {
+        "dhedge": 0.0,
+        "fluent": 0.75
+      }
+    },
+    {
+      "alpha": 0.5,
+      "self": {
+        "dhedge": 0.08333333333333337,
+        "fluent": 0.5
+      },
+      "concept": {
+        "dhedge": 0.33333333333333337,
+        "fluent": 0.8333333333333334
+      },
+      "random": {
+        "dhedge": -0.08333333333333331,
+        "fluent": 0.9166666666666666
+      }
+    },
+    {
+      "alpha": 1.0,
+      "self": {
+        "dhedge": 0.5,
+        "fluent": 0.0
+      },
+      "concept": {
+        "dhedge": 0.5,
+        "fluent": 0.0
+      },
+      "random": {
+        "dhedge": 0.41666666666666663,
+        "fluent": 0.6666666666666666
+      }
+    }
+  ],
+  "runtime_sec": 343.0
+}

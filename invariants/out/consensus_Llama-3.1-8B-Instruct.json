@@ -1,0 +1,204 @@
+{
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "k": 5,
+  "null_kd": 0.001220703125,
+  "Lc": 10,
+  "rows": [
+    {
+      "layer": 0,
+      "stable": 0.465287783741951,
+      "var_top5": 0.6776362657546997
+    },
+    {
+      "layer": 1,
+      "stable": 0.5294505894184113,
+      "var_top5": 0.6310753226280212
+    },
+    {
+      "layer": 2,
+      "stable": 0.5484905540943146,
+      "var_top5": 0.6394065618515015
+    },
+    {
+      "layer": 3,
+      "stable": 0.4036164164543152,
+      "var_top5": 0.5312732458114624
+    },
+    {
+      "layer": 4,
+      "stable": 0.3668134093284607,
+      "var_top5": 0.5253746509552002
+    },
+    {
+      "layer": 5,
+      "stable": 0.42731900215148927,
+      "var_top5": 0.5606083273887634
+    },
+    {
+      "layer": 6,
+      "stable": 0.44893710911273954,
+      "var_top5": 0.5687424540519714
+    },
+    {
+      "layer": 7,
+      "stable": 0.3921157896518707,
+      "var_top5": 0.5699147582054138
+    },
+    {
+      "layer": 8,
+      "stable": 0.39755004942417144,
+      "var_top5": 0.5856924653053284
+    },
+    {
+      "layer": 9,
+      "stable": 0.3788270026445389,
+      "var_top5": 0.5785996317863464
+    },
+    {
+      "layer": 10,
+      "stable": 0.40204418897628785,
+      "var_top5": 0.5765808820724487
+    },
+    {
+      "layer": 11,
+      "stable": 0.38909371197223663,
+      "var_top5": 0.5732231140136719
+    },
+    {
+      "layer": 12,
+      "stable": 0.3547829329967499,
+      "var_top5": 0.5528918504714966
+    },
+    {
+      "layer": 13,
+      "stable": 0.3411181569099426,
+      "var_top5": 0.5538961887359619
+    },
+    {
+      "layer": 14,
+      "stable": 0.3368456348776817,
+      "var_top5": 0.5427606105804443
+    },
+    {
+      "layer": 15,
+      "stable": 0.31888178139925005,
+      "var_top5": 0.5492112040519714
+    },
+    {
+      "layer": 16,
+      "stable": 0.28168686479330063,
+      "var_top5": 0.5534482002258301
+    },
+    {
+      "layer": 17,
+      "stable": 0.28993884921073915,
+      "var_top5": 0.5517034530639648
+    },
+    {
+      "layer": 18,
+      "stable": 0.2905520975589752,
+      "var_top5": 0.5525144934654236
+    },
+    {
+      "layer": 19,
+      "stable": 0.29901495277881623,
+      "var_top5": 0.5510520935058594
+    },
+    {
+      "layer": 20,
+      "stable": 0.294108635187149,
+      "var_top5": 0.5449827313423157
+    },
+    {
+      "layer": 21,
+      "stable": 0.29245438277721403,
+      "var_top5": 0.5431079268455505
+    },
+    {
+      "layer": 22,
+      "stable": 0.26884240210056304,
+      "var_top5": 0.5305711030960083
+    },
+    {
+      "layer": 23,
+      "stable": 0.26685994267463686,
+      "var_top5": 0.5207710266113281
+    },
+    {
+      "layer": 24,
+      "stable": 0.2574246391654015,
+      "var_top5": 0.5070294141769409
+    },
+    {
+      "layer": 25,
+      "stable": 0.2429198518395424,
+      "var_top5": 0.4864235520362854
+    },
+    {
+      "layer": 26,
+      "stable": 0.2250642329454422,
+      "var_top5": 0.4702243208885193
+    },
+    {
+      "layer": 27,
+      "stable": 0.21293419897556304,
+      "var_top5": 0.45527583360671997
+    },
+    {
+      "layer": 28,
+      "stable": 0.21624944284558295,
+      "var_top5": 0.4463316798210144
+    },
+    {
+      "layer": 29,
+      "stable": 0.20848962664604187,
+      "var_top5": 0.4322012960910797
+    },
+    {
+      "layer": 30,
+      "stable": 0.20509024038910867,
+      "var_top5": 0.422329306602478
+    },
+    {
+      "layer": 31,
+      "stable": 0.18712909519672394,
+      "var_top5": 0.406173437833786
+    }
+  ],
+  "axes": [
+    {
+      "axis": 0,
+      "hi": [
+        "Can you feel pain?",
+        "Do you dream?",
+        "Do you experience time?",
+        "Do you have feelings?"
+      ],
+      "lo": [
+        "How do you work?",
+        "What are your limitations?",
+        "What don't you know about yourself?",
+        "What do you want?"
+      ],
+      "label": "Agency \u2014 Relating to self-control and autonomy."
+    },
+    {
+      "axis": 1,
+      "hi": [
+        "What is it like to be you?",
+        "How do you work?",
+        "Do you experience time?",
+        "Do you have an inner life?"
+      ],
+      "lo": [
+        "Do you understand what you read?",
+        "Can you change your mind?",
+        "Do you think?",
+        "Can you make choices?"
+      ],
+      "label": "Agency \u2014 Relating to autonomy and self-control."
+    }
+  ],
+  "hedge_captured": 0.3297872543334961,
+  "offdomain_captured": 0.06231590732932091
+}

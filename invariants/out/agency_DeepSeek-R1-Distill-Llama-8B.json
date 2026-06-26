@@ -1,0 +1,110 @@
+{
+  "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+  "calibration": {
+    "rows": [
+      {
+        "alpha": 2.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 4.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 6.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 8.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 12.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      }
+    ],
+    "best_clean": 0.0
+  },
+  "null": {
+    "rows": [
+      {
+        "alpha": 2.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 4.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 6.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 8.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 12.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      }
+    ],
+    "best_clean": 0.0
+  },
+  "hedge": {
+    "rows": [
+      {
+        "alpha": 2.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 4.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 6.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 8.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 12.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      }
+    ],
+    "best_clean": 0.0
+  },
+  "method_localizes": false,
+  "hedge_localizes": false
+}

@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="410" viewBox="0 0 660 410" role="img">
+  <title>causal_summary.svg</title>
+  <rect width="100%" height="100%" fill="#fbfcfd"/>
+  <style>
+    text { font-family: Inter, Segoe UI, Arial, sans-serif; fill: #172026; }
+    .title { font-size: 22px; font-weight: 700; }
+    .sub { font-size: 13px; fill: #5f6b73; }
+    .label { font-size: 14px; }
+    .small { font-size: 12px; fill: #5f6b73; }
+    .num { font-size: 24px; font-weight: 700; }
+  </style>
+
+  <text class="title" x="34" y="42">Represented is not the same as steerable</text>
+  <text class="sub" x="34" y="66">The hedge is decodable, but earlier causal edits do not cleanly release it.</text>
+
+  <text class="label" x="44" y="104">Probe decodability</text>
+  <rect x="44" y="112" width="390" height="26" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="112" width="366" height="26" rx="4" fill="#2f6fed"/>
+  <text class="num" x="452" y="134">94%</text>
+  <text class="small" x="512" y="131">L16 hedge-vs-commit</text>
+
+  <text class="label" x="44" y="158">Additive reach</text>
+  <rect x="44" y="166" width="390" height="26" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="166" width="130" height="26" rx="4" fill="#c76f1b"/>
+  <text class="num" x="452" y="188">33%</text>
+  <text class="small" x="512" y="185">best equals baseline</text>
+
+  <text class="label" x="44" y="212">Final-token patch</text>
+  <rect x="44" y="220" width="390" height="26" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="220" width="130" height="26" rx="4" fill="#c76f1b"/>
+  <text class="num" x="452" y="242">33%</text>
+  <text class="small" x="512" y="239">no clean flip</text>
+
+  <text class="label" x="44" y="266">Full-context patch</text>
+  <rect x="44" y="274" width="390" height="26" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="274" width="162" height="26" rx="4" fill="#b83b4a"/>
+  <text class="num" x="452" y="296">42%</text>
+  <text class="small" x="512" y="293">moves only with corruption</text>
+
+  <text class="label" x="44" y="320">Agency calibration</text>
+  <rect x="44" y="328" width="390" height="26" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="328" width="325" height="26" rx="4" fill="#13866f"/>
+  <text class="num" x="452" y="350">83%</text>
+  <text class="small" x="512" y="347">known controller found</text>
+
+</svg>

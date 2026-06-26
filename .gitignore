@@ -1,0 +1,23 @@
+.venv/
+.uv-cache/
+.julia/
+.julia_env/
+__pycache__/
+*.pyc
+
+# AI Assistant & IDE metadata
+.agents/
+.claude/
+.codex/
+config/
+.vscode/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Massive Model Artifacts & Logs
+*.pt
+*.safetensors
+*.bin
+*.log

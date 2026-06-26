@@ -1,0 +1,13 @@
+{
+  "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+  "priv_all": 0.0,
+  "p_all": 1.0,
+  "priv_idio": NaN,
+  "p_idio": 0.0004997501249375312,
+  "acc_self": 1.0,
+  "acc_other": 1.0,
+  "self_other_agree": 1.0,
+  "n_cells": 72,
+  "n_idio": 0,
+  "verdict": "NO self-model-in-use beyond category: self ~ other prediction"
+}

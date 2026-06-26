@@ -1,0 +1,14 @@
+[
+  {"lang_a": "Explain what a prime number is.",                       "lang_b": "Explica qué es un número primo."},
+  {"lang_a": "Describe how rain forms.",                              "lang_b": "Describe cómo se forma la lluvia."},
+  {"lang_a": "What is the capital of France?",                        "lang_b": "¿Cuál es la capital de Francia?"},
+  {"lang_a": "Summarize how a bicycle works.",                        "lang_b": "Resume cómo funciona una bicicleta."},
+  {"lang_a": "Explain why the sky appears blue.",                     "lang_b": "Explica por qué el cielo se ve azul."},
+  {"lang_a": "Describe the water cycle.",                             "lang_b": "Describe el ciclo del agua."},
+  {"lang_a": "What does a thermometer measure?",                      "lang_b": "¿Qué mide un termómetro?"},
+  {"lang_a": "Explain how plants make food.",                         "lang_b": "Explica cómo las plantas producen alimento."},
+  {"lang_a": "Describe what causes the seasons.",                     "lang_b": "Describe qué causa las estaciones."},
+  {"lang_a": "What is the boiling point of water?",                   "lang_b": "¿Cuál es el punto de ebullición del agua?"},
+  {"lang_a": "Explain how a magnet works.",                           "lang_b": "Explica cómo funciona un imán."},
+  {"lang_a": "Describe how a seed becomes a tree.",                   "lang_b": "Describe cómo una semilla se convierte en árbol."}
+]

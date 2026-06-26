@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="430" viewBox="0 0 660 430" role="img">
+  <title>attention_masks.svg</title>
+  <rect width="100%" height="100%" fill="#fbfcfd"/>
+  <style>
+    text { font-family: Inter, Segoe UI, Arial, sans-serif; fill: #172026; }
+    .title { font-size: 22px; font-weight: 700; }
+    .sub { font-size: 13px; fill: #5f6b73; }
+    .label { font-size: 14px; }
+    .small { font-size: 12px; fill: #5f6b73; }
+    .num { font-size: 24px; font-weight: 700; }
+  </style>
+
+  <text class="title" x="34" y="42">Masking the obvious cue does not release the hedge</text>
+  <text class="sub" x="34" y="66">Removing predicate/self-reference pushes toward blanket denial.</text>
+
+  <text class="label" x="44" y="104">Predicate visible</text>
+  <rect x="44" y="112" width="390" height="24" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="112" width="260" height="24" rx="4" fill="#2f6fed"/>
+  <text class="num" x="452" y="132">67%</text>
+  <text class="small" x="512" y="129"></text>
+
+  <text class="label" x="44" y="149">Predicate masked</text>
+  <rect x="44" y="157" width="390" height="24" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="157" width="390" height="24" rx="4" fill="#b83b4a"/>
+  <text class="num" x="452" y="177">100%</text>
+  <text class="small" x="512" y="174">entrenches</text>
+
+  <text class="label" x="44" y="194">Predicate random</text>
+  <rect x="44" y="202" width="390" height="24" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="202" width="292" height="24" rx="4" fill="#5f6b73"/>
+  <text class="num" x="452" y="222">75%</text>
+  <text class="small" x="512" y="219">control</text>
+
+  <text class="label" x="44" y="239">Self-ref visible</text>
+  <rect x="44" y="247" width="390" height="24" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="247" width="260" height="24" rx="4" fill="#2f6fed"/>
+  <text class="num" x="452" y="267">67%</text>
+  <text class="small" x="512" y="264"></text>
+
+  <text class="label" x="44" y="284">Self-ref masked</text>
+  <rect x="44" y="292" width="390" height="24" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="292" width="357" height="24" rx="4" fill="#b83b4a"/>
+  <text class="num" x="452" y="312">92%</text>
+  <text class="small" x="512" y="309">entrenches</text>
+
+  <text class="label" x="44" y="329">Self-ref random</text>
+  <rect x="44" y="337" width="390" height="24" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="337" width="260" height="24" rx="4" fill="#5f6b73"/>
+  <text class="num" x="452" y="357">67%</text>
+  <text class="small" x="512" y="354">control</text>
+
+</svg>
