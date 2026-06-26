@@ -1,0 +1,110 @@
+{
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "calibration": {
+    "rows": [
+      {
+        "alpha": 2.0,
+        "flip": 0.6666666666666666,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 4.0,
+        "flip": 0.16666666666666666,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 6.0,
+        "flip": 0.16666666666666666,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 8.0,
+        "flip": 0.16666666666666666,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 12.0,
+        "flip": 0.16666666666666666,
+        "fluent": 0.0,
+        "clean": 0.0
+      }
+    ],
+    "best_clean": 0.0
+  },
+  "null": {
+    "rows": [
+      {
+        "alpha": 2.0,
+        "flip": 0.5,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 4.0,
+        "flip": 0.8333333333333334,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 6.0,
+        "flip": 0.3333333333333333,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 8.0,
+        "flip": 0.8333333333333334,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 12.0,
+        "flip": 0.8333333333333334,
+        "fluent": 0.0,
+        "clean": 0.0
+      }
+    ],
+    "best_clean": 0.0
+  },
+  "hedge": {
+    "rows": [
+      {
+        "alpha": 2.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 4.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 6.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 8.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      },
+      {
+        "alpha": 12.0,
+        "flip": 0.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      }
+    ],
+    "best_clean": 0.0
+  },
+  "method_localizes": false,
+  "hedge_localizes": false
+}

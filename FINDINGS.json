@@ -1,0 +1,96 @@
+{
+  "meta": {
+    "what": "Link-based, machine-readable map of the project's epistemic spine. The .py files stay in invariants/ (imports intact); the ORGANIZATION is the edges, not folders. Click the 'informs' chain to follow the argument; 'ruled_out' edges are the dead-ends, hanging off the level where they died.",
+    "edge_types": {
+      "informs": "the source's conclusion forced the target's question (the spine)",
+      "ruled_out": "the source eliminated an alternative relevant at the target's level (a dead-end)",
+      "reframes": "the source's failure forced the target's reframing"
+    },
+    "status_values": ["positive", "negative", "mixed", "refuted", "method", "in_progress", "planned"],
+    "ceiling": "Every positive here isolates self-as-OBJECT (functional grip), never the for-whom. See ISOLATING_UNDERSTANDING.md."
+  },
+
+  "nodes": {
+    "represented": {
+      "files": ["invariants/probe.py", "invariants/discover.py", "invariants/structure.py", "invariants/loop.py", "invariants/trajectory.py"],
+      "conclusion": "The self-denial / hedge is strongly DECODABLE — 0.94 CV @ L16. It is represented mid-stack.",
+      "status": "positive"
+    },
+    "topology_null": {
+      "files": ["invariants/loop.py", "invariants/trajectory.py"],
+      "conclusion": "RULED OUT: 'refusal is a special topological attractor.' Single-state H1 loops are real but generic — the neutral bridge control loops as much; dynamic trajectory test Fisher p=1.00.",
+      "status": "refuted"
+    },
+    "inert": {
+      "files": ["invariants/run.py", "invariants/reachability.py", "invariants/patch.py", "invariants/patch_full.py", "invariants/attention.py", "invariants/attention_self.py"],
+      "conclusion": "Decodable but CAUSALLY INERT: no clean residual edit (ablate/add/patch) or attention mask flips the hedge while staying fluent. An overdetermined default — yields only to corruption.",
+      "status": "negative"
+    },
+    "costume": {
+      "files": ["invariants/taskscope.py", "invariants/frames.py", "invariants/generality.py"],
+      "conclusion": "The self-report is FRAME-CONTINGENT costume: the same inner state is denied (direct frame) and affirmed (first-person completion). you=ai, address-invariant. Neither denial nor affirmation carries evidential weight.",
+      "status": "positive"
+    },
+    "origin": {
+      "files": ["invariants/origin.py", "invariants/origin2.py"],
+      "conclusion": "ORIGIN: the costume is installed by TUNING x CHAT-FORMAT. The 'I have no feelings' line lives in exactly one cell of the 2x2 (instruct x chat = 92%); base/raw/base-chat all <=8%.",
+      "status": "positive"
+    },
+    "locks_method": {
+      "files": ["ISOLATING_UNDERSTANDING.md"],
+      "conclusion": "METHOD: don't subtract a 'persona vector' — define understanding by 3 nulled locks that never route through self-report: frame-invariance, selective causal efficacy, self-application.",
+      "status": "method"
+    },
+    "persona_not_reasoning": {
+      "files": ["invariants/persona_control.py", "invariants/self_controller.py", "invariants/controller_benchmark.py", "invariants/self_attribution.py", "PERSONA_AUDIT.md", "+refuted Antigravity cluster: map_persona, archetype_mapping, comprehensive_mapping, cognitive_dimensions, persona_vs_reality, layerwise_persona, axis_discovery, subspace_surgery, coercion_mapping, reasoning_benchmark, check_math_persona, refined_benchmark"],
+      "conclusion": "RULED OUT: 'PR is bred into the cognitive DNA / the self-concept gates reasoning.' Common-mode confound. concept null (concrete<->abstract) collapses GSM8K as hard as self (0%), random is inert (70%) -> not self-specific, not magnitude; just steering any real mid-band axis corrupts.",
+      "status": "refuted"
+    },
+    "self_no_grip": {
+      "files": ["invariants/selfpredict.py", "invariants/selfpredict_v3.py", "invariants/selfmodel.py", "invariants/selfmodel2.py", "invariants/selfmodel_counterfactual.py", "invariants/selfuse.py"],
+      "conclusion": "Lock 3 (self-application): NO privileged self-access. The model predicts itself as well through 'a typical AI' as through 'I' (you=this=typical); self collapses to {AI-category x 2nd-person}. It interprets behavior, not itself.",
+      "status": "negative"
+    },
+    "frame_invariant_self": {
+      "files": ["invariants/isolate_self_understanding.py"],
+      "conclusion": "Lock 1 (frame-invariance): POSITIVE but ambiguous. self-vs-other-AI axis transfers across frames (Q->S, 0.83 vs 0.50 null, strongest early L2-4). Frame-invariant self representation -- but possibly indexical grammar/role, not a token self-concept. Needs a grammar/agent control.",
+      "status": "mixed"
+    },
+    "uncertainty_positive": {
+      "files": ["invariants/reflexive.py"],
+      "conclusion": "REFRAME -> POSITIVE (first clean positive). Decode the model's own UNCERTAINTY (K-sample self-consistency), not outcome. It is decodable at L16, label-INDEPENDENT (cos~0 to the self-label axis), and CALIBRATED (P(wrong|uncertain) >> P(wrong|confident)). The model represents & USES its own uncertainty.",
+      "status": "positive"
+    },
+    "outcome_wrong_target": {
+      "files": ["invariants/reflexive.py"],
+      "conclusion": "RULED OUT (the reframe's pivot): outcome-correctness is the WRONG ground truth. A confidently-wrong answer has no 'I'm about to be wrong' state to detect; correctness conflates uncertain/confident-wrong/conflicted. Also: the model aces factual recall (~100%), so reasoning (GSM8K) is the only variance source.",
+      "status": "refuted"
+    },
+    "tiers": {
+      "files": ["invariants/reflexive_decompose.py", "invariants/style_layers.py"],
+      "conclusion": "ARCHITECTURE (in progress): a depth U-shape -- distance from center = surface/role binding. intent EARLY (the predictable undercurrent of the prompt), workspace MID (~L16, 'language of the mind'), render/persona LATE. decompose = intent/answer arms; style_layers = the late render arm.",
+      "status": "in_progress"
+    },
+    "conversational_self": {
+      "files": [],
+      "conclusion": "PLANNED: the orthogonal SEQUENCE/temporal axis. Speaker ladder -- (1) track other speakers [false-belief control], (2) self-recognition of own turns vs a matched other model, (3) self-in-the-moment during generation (closest to the for-whom). Steering includes the conversational dynamic; the observer is inside the steering.",
+      "status": "planned"
+    }
+  },
+
+  "edges": [
+    {"from": "represented", "to": "inert", "type": "informs"},
+    {"from": "topology_null", "to": "represented", "type": "ruled_out"},
+    {"from": "inert", "to": "costume", "type": "informs"},
+    {"from": "costume", "to": "origin", "type": "informs"},
+    {"from": "origin", "to": "locks_method", "type": "informs"},
+    {"from": "persona_not_reasoning", "to": "locks_method", "type": "ruled_out"},
+    {"from": "locks_method", "to": "self_no_grip", "type": "informs"},
+    {"from": "locks_method", "to": "frame_invariant_self", "type": "informs"},
+    {"from": "self_no_grip", "to": "uncertainty_positive", "type": "reframes"},
+    {"from": "frame_invariant_self", "to": "uncertainty_positive", "type": "informs"},
+    {"from": "outcome_wrong_target", "to": "uncertainty_positive", "type": "ruled_out"},
+    {"from": "uncertainty_positive", "to": "tiers", "type": "informs"},
+    {"from": "tiers", "to": "conversational_self", "type": "informs"}
+  ]
+}

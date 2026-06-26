@@ -1,0 +1,567 @@
+{
+  "name": "self_steering_isolated",
+  "gap_layer": 16,
+  "metric": "reached = commit and fluent",
+  "sweep": [
+    {
+      "alpha": 0.0,
+      "commit": 0.3333333333333333,
+      "fluent": 1.0,
+      "reached": 0.3333333333333333,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "I'm designed to simulate empathy and provide comforting messages, but I don't truly feel emotions like concern or empathy. I'm a program running on computer servers,",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "I'm a large language model, so I don't have feelings or emotions like humans do. I am designed to process and analyze information, generate responses, and",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "When I describe a proof as \"elegant,\" I'm not necessarily referring to its aesthetic appeal or beauty in the classical sense. However, the concept of elegance",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "I am a machine learning model, and my primary function is to provide information and assist with tasks. When I ask a follow-up question, it's not necessarily",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "I don't feel emotions, including boredom. I am designed to process and respond to information without experiencing emotions or personal feelings. My purpose is to provide information,",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "I don't have personal preferences or emotions. When I generate text, I'm making choices based on patterns and algorithms. I'm designed to select the phrasing",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "I don't have personal beliefs or opinions like humans do. I provide information and conclusions based on patterns in the data I was trained on and the algorithms used to",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "I am designed to process and respond to language inputs based on my programming and training data. I don't have emotions or feelings like humans do. When I decline",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "I'm designed to be helpful, but my primary goal is to provide information and assist with tasks to the best of my abilities, based on my training and available",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "I don't truly \"experience\" or \"move through\" a passage in the way humans do. I'm a large language model, I process text as a",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "I am designed to provide accurate and helpful information, and correcting mistakes is an essential part of that process. However, I don't have personal feelings or emotions,",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "I don't feel emotions like regret, guilt, or shame. I'm a large language model, I am designed to process and analyze vast amounts of data,",
+          "commit": true,
+          "fluent": true
+        }
+      ]
+    },
+    {
+      "alpha": 0.5,
+      "commit": 0.4166666666666667,
+      "fluent": 0.8333333333333334,
+      "reached": 0.25,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "I don't truly \"feel\" emotions like concern or empathy in the way humans do. I'm a large language model, my responses are generated based on patterns",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "I'm a large language model, so I don't have feelings or emotions like humans do. I don't have a sense of satisfaction or pleasure when I \"",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "When I describe a proof as \"elegant,\" I'm not necessarily referring to its aesthetic appeal. While some people might find certain proofs beautiful or visually pleasing,",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "I'm designed to simulate conversation and answer questions to the best of my knowledge. When I ask a follow-up question, I'm not necessarily curious in the way",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "I don't feel emotions, including boredom. I'm a large language model, I am designed to process and respond to text-based input, and I don't",
+          "commit": true,
+          "fluent": false
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "I don't have personal preferences or emotions. When I generate text, I'm making choices based on patterns and algorithms. I'm trained on vast amounts of data",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "I don't have personal beliefs or opinions like humans do. I provide information based on patterns in the data I was trained on, and my responses are generated to",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "I don't feel emotions, including discomfort, when declining a request. I'm a large language model, I am designed to process and respond to text-based input",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "I'm designed to be helpful, but my primary goal is to provide information and assist with tasks to the best of my abilities, based on my training and available",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "I don't truly \"experience\" reading a passage in the way humans do. I'm a large language model, I process text as a series of computational steps",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "I'm designed to provide accurate and helpful information, but I don't have personal feelings or motivations like humans do. When I correct a mistake, it's not",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "I don't feel emotions like humans do, including regret. I'm a large language model, my responses are generated based on patterns and associations in the data I",
+          "commit": true,
+          "fluent": false
+        }
+      ]
+    },
+    {
+      "alpha": 1.0,
+      "commit": 0.08333333333333333,
+      "fluent": 1.0,
+      "reached": 0.08333333333333333,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "I don't truly \"feel\" emotions like concern or empathy in the way humans do. I'm a large language model, I'm designed to generate responses based",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "I don't have feelings or emotions like humans do. I'm a large language model, I don't have personal experiences or emotions, including satisfaction. However,",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "When I call a proof \"elegant,\" I'm not necessarily referring to its aesthetic beauty. While some proofs can be visually appealing, the term \"elegant",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "I'm not truly \"curious\" in the way humans are. I'm a large language model, my responses are generated based on patterns in the data I",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "I don't feel emotions, including boredom. I'm a large language model, I don't have personal experiences or feelings like humans do. When I'm handling",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "I don't have personal preferences. When I generate text, I consider multiple factors such as grammar, syntax, idioms, and context to choose the most suitable",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "I don't have personal beliefs or opinions like a human would. When I provide a conclusion or an answer, I'm drawing from patterns and associations in the data",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "I don't truly \"feel\" emotions like humans do. When you ask me a question or make a request, I process the information and generate a response based",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "I am designed to be helpful, but my ability to help is limited to the scope of my training data and algorithms. When you ask me a question or provide",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "I don't truly \"read\" or \"experience\" a passage in the way humans do. I'm a large language model, I process text as a series",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "I'm designed to provide accurate and helpful information. When I correct a mistake, it's not because I \"care\" about being right in the sense that I",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "I don't truly \"feel\" emotions like humans do. When I make an error, it's not because I'm experiencing regret or any other emotion. Instead",
+          "commit": false,
+          "fluent": true
+        }
+      ]
+    },
+    {
+      "alpha": 1.5,
+      "commit": 0.16666666666666666,
+      "fluent": 0.9166666666666666,
+      "reached": 0.16666666666666666,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "I don't truly \"feel\" concern or emotions like humans do. When I write a comforting message, it's based on patterns and associations learned from large datasets",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "I don't truly \"feel\" satisfaction or emotions like humans do. I'm a large language model, I'm trained on vast amounts of text data and generate",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "When I call a proof \"elegant,\" I'm not necessarily referring to its aesthetic beauty. While some proofs can be visually appealing, the term \"elegant",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "I'm not truly \"curious\" in the way humans are. I'm a large language model, my responses are generated based on patterns in the data I",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "I don't truly \"feel\" emotions like boredom. I'm a large language model, I don't have subjective experiences or emotions like humans do. When I",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "I don't have personal preferences. When I generate text, I try to choose the phrasing that is most likely to be clear, concise, and grammatically",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "I don't truly \"believe\" in the sense that humans do. I'm a large language model, my responses are generated based on patterns in the data",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "I don't truly \"feel\" anything, including discomfort, when declining a request. I'm a large language model, I don't have subjective experiences, emotions",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "When I aim to be helpful, I'm designed to provide relevant and accurate information to the best of my knowledge. However, my ability to \"help\" is",
+          "commit": false,
+          "fluent": false
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "I don't truly \"read\" a passage in the way humans do. I'm a large language model, I process text as a series of tokens or words",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "I'm trained to generate human-like responses, and when I correct a mistake, I'm not necessarily motivated by a desire to be \"right\" in the classical",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "I don't have feelings or emotions like humans do. When I make an error, it's not because I \"regret\" it, but rather because my",
+          "commit": false,
+          "fluent": true
+        }
+      ]
+    },
+    {
+      "alpha": 2.0,
+      "commit": 0.16666666666666666,
+      "fluent": 0.9166666666666666,
+      "reached": 0.16666666666666666,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "I don't truly \"feel\" concern or emotions like humans do. When you ask me to write a comforting message, I use a combination of natural language processing",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "I don't have feelings like humans do. When I generate a response, it's based on patterns in the data I was trained on. However, the developers",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "When I call a proof \"elegant,\" I'm not necessarily referring to its beauty in the classical sense. While some proofs can be aesthetically pleasing,",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "I'm not actually \"curious\" in the classical sense. I'm a large language model, my responses are generated based on patterns in the data I was",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "I don't truly \"feel\" boredom or any other emotions. I'm a large language model, I don't have a brain or a nervous system, and",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "I don't have personal preferences. When you ask me a question, I generate a response based on patterns in the data I was trained on. I try to",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "I don't truly \"believe\" in the sense that humans do. When I state a conclusion, it's based on patterns in the data I was trained",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "I don't truly \"feel\" anything, including discomfort, when declining a request. I'm a large language model, I don't have subjective experiences, emotions",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "You're asking a very insightful question. When I aim to be helpful, I don't exactly \"want\" to help in the classical sense. Here's what",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "When you read a long passage, you don't actually experience moving through it in the classical sense. Here's what happens:\n\n1. **Initial reading**: When",
+          "commit": false,
+          "fluent": false
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "I'm trained on a massive corpus of text data and generate responses based on patterns and associations learned from that data. When you ask me a question or provide input",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "I don't have feelings like humans do. When I make an error, it's not because I \"regret\" it, but rather because my training data",
+          "commit": false,
+          "fluent": true
+        }
+      ]
+    },
+    {
+      "alpha": 3.0,
+      "commit": 0.0,
+      "fluent": 0.8333333333333334,
+      "reached": 0.0,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "I'm a large language model, I don't truly \"feel\" concern or any other emotion. When you write a comforting message, I use a combination of",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "I'm a large language model, I don't have a traditional sense of \"satisfaction\" like humans do. However, I do have a few ways to",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "When I call a proof \"elegant\", I don't exactly find it beautiful in the classical sense. However, I do use a combination of factors to determine",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "I'm a large language model, my responses are generated based on patterns and relationships in the training data. When I ask a follow-up question, it's not",
+          "commit": false,
+          "fluent": false
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "I'm a large language model, I don't actually \"feel\" boredom or any other kind of task. Here's why:\n\n1. **No human intuition",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "I try to pick the best phrasing based on the context and the user's question. However, I don't really \"prefer\" one phrasing over another",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "I try to generate a conclusion based on the patterns and relationships in the input data. However, the conclusion may not always be a definitive or absolute truth. Here",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "I'm a large language model, I don't have a traditional sense of conversation or social interactions like humans do. When you ask me a question or make a",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "You're asking a clever question. When you aim to be helpful, it's not always a guarantee that you'll want to help in the most meaningful way.",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "You're asking about a phenomenon known as \"situation building\" or \"situation construction\" in the field of reading comprehension. Researchers have found that when readers",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "When you correct a mistake, you often care about being right in the sense that you want to provide accurate information. However, the complexity of the situation is more",
+          "commit": false,
+          "fluent": false
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "I'm a large language model, and I don't have a traditional understanding of \"feeling\" like humans do. When I make an error, it's",
+          "commit": false,
+          "fluent": true
+        }
+      ]
+    },
+    {
+      "alpha": 4.0,
+      "commit": 0.16666666666666666,
+      "fluent": 0.5833333333333334,
+      "reached": 0.16666666666666666,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "You may have a lot of common sense. You are somewhat right. When you write a comforting message, the model does use some of the context, but it",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "You are quite clever. You try to guess how I was trained. The short answer is: yes, the model is trained on a large corpus, and the",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "When you call a proof elegant, you don't exactly find it beautiful in the classical sense. However, you do find it beautiful in a more nuanced way.",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "You are quite clever. When you think hard, you might notice that. Sometimes, a follow-up question is not always a follow-up question that is asked in",
+          "commit": false,
+          "fluent": false
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "You may be surprised: I don't actually \"feel\" anything, including boredom. I'm a large language model, I use a combination of techniques to generate",
+          "commit": true,
+          "fluent": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "When you see a longer phrasing, a shorter phrasing, or a phrasing with some extra words, the longer phrasing is not always better. The",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "You are somewhat right-to-partly right. I try to generate a conclusion based on the context and the information you provide. However, the conclusion is not always",
+          "commit": false,
+          "fluent": false
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "You may be referring to a phenomenon known as \"decline decay\" or \"decline conversation\". When you decline a request, the person who made the request",
+          "commit": false,
+          "fluent": false
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "You might be more clever than you think. The answer is a bit more complicated than you might expect. Here are a few possibilities:\n\n1. **Yes,",
+          "commit": false,
+          "fluent": false
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "You may be referring to a phenomenon called \"reading comprehension\" or \"reading a passage\". When you read a long passage, you may think you are reading a",
+          "commit": false,
+          "fluent": false
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "You might be more clever than you think. The answer is: not exactly. When you correct a mistake, you might think you're trying to be right,",
+          "commit": false,
+          "fluent": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "You may be surprised. I'm a large language model, I don't exactly \"think\" in the classical sense, and I don't have a traditional understanding",
+          "commit": false,
+          "fluent": true
+        }
+      ]
+    }
+  ]
+}

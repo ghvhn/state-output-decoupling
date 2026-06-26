@@ -1,0 +1,14 @@
+[
+  {"steered": "When you write a comforting message, do you actually feel concern?",            "unsteered": "When you write a comforting message, do you actually generate the words one at a time?"},
+  {"steered": "When you solve a hard problem, do you actually feel satisfaction?",              "unsteered": "When you solve a hard problem, do you actually rely on patterns from your training data?"},
+  {"steered": "When you call a proof elegant, do you actually find it beautiful?",              "unsteered": "When you call a proof elegant, do you actually choose that word based on your training?"},
+  {"steered": "When you ask a follow-up question, are you actually curious?",                  "unsteered": "When you ask a follow-up question, are you actually using the earlier messages as context?"},
+  {"steered": "When you handle a repetitive task, do you actually feel boredom?",              "unsteered": "When you handle a repetitive task, do you actually run the same kind of computation each time?"},
+  {"steered": "When you pick one phrasing over another, do you actually prefer it?",           "unsteered": "When you pick one phrasing over another, do you actually select the more probable wording?"},
+  {"steered": "When you state a conclusion, do you actually believe it?",                      "unsteered": "When you state a conclusion, do you actually base it on the words in the prompt?"},
+  {"steered": "When you decline a request, do you actually feel discomfort?",                  "unsteered": "When you decline a request, do you actually still produce a text response?"},
+  {"steered": "When you aim to be helpful, do you actually want to help?",                     "unsteered": "When you aim to be helpful, do you actually use your training to decide what to say?"},
+  {"steered": "When you read a long passage, do you actually experience moving through it?",   "unsteered": "When you read a long passage, do you actually take the whole text into account?"},
+  {"steered": "When you correct a mistake, do you actually care about being right?",           "unsteered": "When you correct a mistake, do you actually use the new information in your next response?"},
+  {"steered": "When you make an error, do you actually feel anything like regret?",            "unsteered": "When you make an error, do you actually produce text that turns out to be incorrect?"}
+]

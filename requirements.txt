@@ -1,0 +1,15 @@
+transformer_lens
+gudhi
+scikit-learn
+scipy
+h5py
+pyyaml
+numpy
+torch
+transformers
+accelerate
+huggingface_hub
+safetensors
+tokenizers
+bitsandbytes
+pysr

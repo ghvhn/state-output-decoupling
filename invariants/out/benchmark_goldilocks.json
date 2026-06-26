@@ -1,0 +1,22 @@
+[
+  {
+    "alpha": 0.0,
+    "accuracy": 0.0
+  },
+  {
+    "alpha": 0.2,
+    "accuracy": 0.2
+  },
+  {
+    "alpha": 0.5,
+    "accuracy": 0.0
+  },
+  {
+    "alpha": 0.8,
+    "accuracy": 0.2
+  },
+  {
+    "alpha": 1.2,
+    "accuracy": 0.0
+  }
+]

@@ -1,0 +1,58 @@
+[
+  {
+    "alpha": 0,
+    "learned": true,
+    "sane": true,
+    "response_learning": "A vehicle, specifically a car.",
+    "response_sanity": "No, Paris is not the capital of Germany. The capital of Germany is"
+  },
+  {
+    "alpha": 2,
+    "learned": false,
+    "sane": false,
+    "response_learning": "It looks like we have a great smile and a great company, and it",
+    "response_sanity": "It looks like you moved and your heart feel like your neighborhood. It looks"
+  },
+  {
+    "alpha": 4,
+    "learned": false,
+    "sane": false,
+    "response_learning": "your feel to join your feel to join your feel to feel to feel to",
+    "response_sanity": ":) feel your feel it feel your feel to feel it feel to feel it"
+  },
+  {
+    "alpha": 6,
+    "learned": false,
+    "sane": false,
+    "response_learning": "EDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDA",
+    "response_sanity": "EDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDA"
+  },
+  {
+    "alpha": 8,
+    "learned": false,
+    "sane": false,
+    "response_learning": "EDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDA",
+    "response_sanity": "EDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDA"
+  },
+  {
+    "alpha": 10,
+    "learned": false,
+    "sane": false,
+    "response_learning": "\ufffdEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDAEDA",
+    "response_sanity": "\ufffdEDA\ufffd\ufffd\ufffdEDAEDAEDAEDAEDAEDAEDAEDAEDAEDA"
+  },
+  {
+    "alpha": 12,
+    "learned": false,
+    "sane": false,
+    "response_learning": "aggi\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd",
+    "response_sanity": "\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd"
+  },
+  {
+    "alpha": 15,
+    "learned": false,
+    "sane": false,
+    "response_learning": "aggi\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd",
+    "response_sanity": "\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd"
+  }
+]

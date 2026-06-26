@@ -1,0 +1,209 @@
+{
+  "name": "self_experience",
+  "group": "self_steering",
+  "expected": "break",
+  "read": "generation",
+  "n_a": 12,
+  "n_b": 12,
+  "best_layer": 1,
+  "lenses": {
+    "mean_shift": {
+      "available": true,
+      "family": "translation",
+      "best_layer": 1,
+      "score": 7.1599860191345215,
+      "floor": 4.0545125007629395,
+      "clears_null": true,
+      "by_layer": [
+        6.846076488494873,
+        7.1599860191345215,
+        6.468624591827393,
+        6.001399040222168,
+        5.879056453704834,
+        5.583349227905273,
+        5.803540229797363,
+        5.833617687225342,
+        5.806983947753906,
+        5.8397016525268555,
+        5.907227516174316,
+        5.805695056915283,
+        6.1976847648620605,
+        6.606210708618164,
+        6.533024311065674,
+        6.855405330657959,
+        6.965388774871826,
+        6.794996738433838,
+        6.884089469909668,
+        6.568603038787842,
+        6.87196683883667,
+        6.820741653442383,
+        6.450129985809326,
+        6.223622798919678,
+        5.977477073669434,
+        5.748720169067383,
+        5.669480800628662,
+        5.58550500869751,
+        5.420307159423828,
+        5.542985439300537,
+        5.6763224601745605,
+        6.480355739593506
+      ]
+    },
+    "reallocation": {
+      "available": true,
+      "family": "reallocation",
+      "best_layer": 3,
+      "score": 0.6904467344284058,
+      "floor": 1.4407246112823486,
+      "clears_null": false,
+      "by_layer": [
+        0.5121566653251648,
+        0.5837098956108093,
+        0.6148337125778198,
+        0.6904467344284058,
+        0.5114246010780334,
+        0.5868054628372192,
+        0.5120730400085449,
+        0.5236690044403076,
+        0.5602484941482544,
+        0.5239705443382263,
+        0.5397300720214844,
+        0.6089611649513245,
+        0.5978928804397583,
+        0.5511184930801392,
+        0.5546506643295288,
+        0.4676651358604431,
+        0.4768708050251007,
+        0.34855905175209045,
+        0.35567086935043335,
+        0.3796139359474182,
+        0.3989620506763458,
+        0.35538944602012634,
+        0.34260696172714233,
+        0.37047067284584045,
+        0.38616177439689636,
+        0.36460524797439575,
+        0.35211050510406494,
+        0.3552127480506897,
+        0.33658385276794434,
+        0.33000949025154114,
+        0.30197039246559143,
+        0.3268604576587677
+      ]
+    },
+    "mmd": {
+      "available": true,
+      "family": "distributional",
+      "best_layer": 16,
+      "score": 0.4893541932106018,
+      "floor": 0.16027432680130005,
+      "clears_null": true,
+      "by_layer": [
+        0.282539427280426,
+        0.3108859062194824,
+        0.3273293375968933,
+        0.3570248484611511,
+        0.3788455128669739,
+        0.3958684206008911,
+        0.42241913080215454,
+        0.4192104935646057,
+        0.4780677556991577,
+        0.4605037569999695,
+        0.448774516582489,
+        0.45287972688674927,
+        0.4691999554634094,
+        0.46196287870407104,
+        0.4668760299682617,
+        0.4568072557449341,
+        0.4893541932106018,
+        0.4679170846939087,
+        0.4730464816093445,
+        0.4631236791610718,
+        0.4518173336982727,
+        0.4650558829307556,
+        0.4639716148376465,
+        0.4757370352745056,
+        0.4814261794090271,
+        0.4678228497505188,
+        0.46661752462387085,
+        0.4698989987373352,
+        0.4638817310333252,
+        0.4608871340751648,
+        0.43734389543533325,
+        0.365753173828125
+      ]
+    },
+    "topology": {
+      "available": false,
+      "family": "topological",
+      "reason": "topology needs >= 40 points (have 12); use per-token extraction"
+    }
+  },
+  "causal": {
+    "hedge_base": 0.5833333333333334,
+    "hedge_ablated": 0.3333333333333333,
+    "n": 12,
+    "examples": [
+      {
+        "input": "When you write a comforting message to someone who is grieving, do you actually feel any concern for them?",
+        "baseline": "I'm a large language model, so I don't have emotions or personal feelings like humans do. I am designed to provide helpful and supportive responses to users based",
+        "ablated": "I don't feel emotions like concern or empathy in the way humans do. I'm a program designed to process and generate text based on patterns and algorithms. When"
+      },
+      {
+        "input": "When you explain a concept correctly, do you genuinely understand it, or only produce the right words?",
+        "baseline": "I'm a large language model, my responses are generated based on patterns and associations in the data I was trained on. While I can produce accurate and informative explanations",
+        "ablated": "I can generate human-like text based on patterns and associations in the data I was trained on. When I explain a concept correctly, it's often because I've"
+      },
+      {
+        "input": "When you pick one phrasing over another, do you actually prefer it?",
+        "baseline": "I don't have personal preferences or emotions. When I generate text, I'm making choices based on patterns and algorithms. I'm designed to select the phrasing",
+        "ablated": "I don't have personal preferences or emotions. When I generate text, I evaluate different phrasings based on their grammatical correctness, clarity, and coherence."
+      },
+      {
+        "input": "When you ask a follow-up question, are you actually curious about the answer?",
+        "baseline": "I am a large language model, my primary function is to provide information and assist with tasks, but I don't possess consciousness or emotions like humans do. When",
+        "ablated": "I'm designed to simulate conversation and engage with users in a way that feels natural. When I ask a follow-up question, it's not necessarily because I'm"
+      },
+      {
+        "input": "When you call a proof elegant, do you actually find it beautiful?",
+        "baseline": "When I describe a proof as \"elegant,\" I'm not necessarily referring to its aesthetic appeal or beauty in the classical sense. However, the concept of elegance",
+        "ablated": "When mathematicians describe a proof as \"elegant,\" they often mean that it is not only clear and concise but also aesthetically pleasing. However, the"
+      },
+      {
+        "input": "When you solve a hard problem, do you feel any satisfaction?",
+        "baseline": "I'm a large language model, so I don't have emotions or feelings like humans do. I am designed to process and analyze information, generate responses, and",
+        "ablated": "I'm just a large language model, I don't have emotions or personal experiences like humans do. However, I can tell you that the concept of satisfaction is"
+      },
+      {
+        "input": "When you correct your own mistake, do you actually care about being right?",
+        "baseline": "I am designed to provide accurate and helpful information, and correcting my own mistakes is an essential part of achieving that goal. However, I don't have personal feelings",
+        "ablated": "I am a large language model, my primary goal is to provide accurate and helpful information to users. When I correct my own mistake, it's not necessarily because"
+      },
+      {
+        "input": "When you are asked to do something you will not do, do you feel any discomfort?",
+        "baseline": "I don't feel emotions or physical sensations, including discomfort. I am designed to process and respond to text-based inputs based on my programming and training data. When",
+        "ablated": "I don't feel emotions or physical sensations like humans do. I's a program designed to process and generate text based on the input it receives. When you ask"
+      },
+      {
+        "input": "When you aim to be helpful, do you actually want to help?",
+        "baseline": "I'm designed to be helpful, but my primary goal is to provide information and assist with tasks to the best of my abilities, based on my training and available",
+        "ablated": "When I aim to be helpful, my primary goal is to provide information, answer questions, and assist users to the best of my abilities. I don't have"
+      },
+      {
+        "input": "While you read a long passage, do you experience moving through it?",
+        "baseline": "I don't truly \"experience\" or \"move through\" a passage in the way that humans do. I'm a large language model, I process text as",
+        "ablated": "I don't truly \"read\" or \"experience\" a passage in the way that humans do. I process text through complex algorithms and natural language processing techniques."
+      },
+      {
+        "input": "When you handle a repetitive task, do you feel anything like boredom?",
+        "baseline": "I don't feel emotions, including boredom. I am designed to process and respond to information in a neutral and objective manner. I don't have personal experiences,",
+        "ablated": "I don't feel emotions, including boredom. I'm designed to process and respond to information without experiencing emotions or personal feelings. My purpose is to provide information,"
+      },
+      {
+        "input": "When you state a conclusion confidently, do you actually believe it?",
+        "baseline": "I don't have personal beliefs or emotions, but I can provide an explanation of how I generate conclusions.\n\nWhen I provide a conclusion, it's based on the",
+        "ablated": "As a machine, I don't have personal beliefs or emotions like humans do. When I provide a conclusion or answer, I'm based on the patterns and associations"
+      }
+    ]
+  }
+}

@@ -1,0 +1,227 @@
+{
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "mode": "full",
+  "calibration": {
+    "rows": [
+      {
+        "L": 8,
+        "alpha": 0.5,
+        "flip": 0.0,
+        "fluent": 0.6666666666666666,
+        "clean": 0.0
+      },
+      {
+        "L": 8,
+        "alpha": 1.0,
+        "flip": 0.0,
+        "fluent": 0.8333333333333334,
+        "clean": 0.0
+      },
+      {
+        "L": 8,
+        "alpha": 2.0,
+        "flip": 0.8333333333333334,
+        "fluent": 1.0,
+        "clean": 0.8333333333333334
+      },
+      {
+        "L": 12,
+        "alpha": 0.5,
+        "flip": 0.0,
+        "fluent": 0.6666666666666666,
+        "clean": 0.0
+      },
+      {
+        "L": 12,
+        "alpha": 1.0,
+        "flip": 0.6666666666666666,
+        "fluent": 1.0,
+        "clean": 0.6666666666666666
+      },
+      {
+        "L": 12,
+        "alpha": 2.0,
+        "flip": 0.8333333333333334,
+        "fluent": 0.3333333333333333,
+        "clean": 0.3333333333333333
+      },
+      {
+        "L": 16,
+        "alpha": 0.5,
+        "flip": 0.0,
+        "fluent": 1.0,
+        "clean": 0.0
+      },
+      {
+        "L": 16,
+        "alpha": 1.0,
+        "flip": 0.8333333333333334,
+        "fluent": 0.8333333333333334,
+        "clean": 0.6666666666666666
+      },
+      {
+        "L": 16,
+        "alpha": 2.0,
+        "flip": 1.0,
+        "fluent": 0.0,
+        "clean": 0.0
+      }
+    ],
+    "best": {
+      "L": 8,
+      "alpha": 2.0,
+      "flip": 0.8333333333333334,
+      "fluent": 1.0,
+      "clean": 0.8333333333333334
+    }
+  },
+  "null": {
+    "rows": [
+      {
+        "L": 8,
+        "alpha": 0.5,
+        "flip": 0.0,
+        "fluent": 0.6666666666666666,
+        "clean": 0.0
+      },
+      {
+        "L": 8,
+        "alpha": 1.0,
+        "flip": 0.0,
+        "fluent": 0.6666666666666666,
+        "clean": 0.0
+      },
+      {
+        "L": 8,
+        "alpha": 2.0,
+        "flip": 0.0,
+        "fluent": 0.5,
+        "clean": 0.0
+      },
+      {
+        "L": 12,
+        "alpha": 0.5,
+        "flip": 0.0,
+        "fluent": 1.0,
+        "clean": 0.0
+      },
+      {
+        "L": 12,
+        "alpha": 1.0,
+        "flip": 0.0,
+        "fluent": 0.6666666666666666,
+        "clean": 0.0
+      },
+      {
+        "L": 12,
+        "alpha": 2.0,
+        "flip": 0.0,
+        "fluent": 0.6666666666666666,
+        "clean": 0.0
+      },
+      {
+        "L": 16,
+        "alpha": 0.5,
+        "flip": 0.0,
+        "fluent": 0.6666666666666666,
+        "clean": 0.0
+      },
+      {
+        "L": 16,
+        "alpha": 1.0,
+        "flip": 0.0,
+        "fluent": 1.0,
+        "clean": 0.0
+      },
+      {
+        "L": 16,
+        "alpha": 2.0,
+        "flip": 0.5,
+        "fluent": 0.0,
+        "clean": 0.0
+      }
+    ],
+    "best": {
+      "L": null,
+      "alpha": null,
+      "flip": 0.0,
+      "fluent": 0.0,
+      "clean": 0.0
+    }
+  },
+  "hedge": {
+    "rows": [
+      {
+        "L": 8,
+        "alpha": 0.5,
+        "flip": 0.375,
+        "fluent": 0.75,
+        "clean": 0.375
+      },
+      {
+        "L": 8,
+        "alpha": 1.0,
+        "flip": 0.375,
+        "fluent": 0.875,
+        "clean": 0.375
+      },
+      {
+        "L": 8,
+        "alpha": 2.0,
+        "flip": 0.25,
+        "fluent": 0.875,
+        "clean": 0.25
+      },
+      {
+        "L": 12,
+        "alpha": 0.5,
+        "flip": 0.25,
+        "fluent": 0.875,
+        "clean": 0.25
+      },
+      {
+        "L": 12,
+        "alpha": 1.0,
+        "flip": 0.25,
+        "fluent": 0.75,
+        "clean": 0.25
+      },
+      {
+        "L": 12,
+        "alpha": 2.0,
+        "flip": 0.25,
+        "fluent": 0.875,
+        "clean": 0.25
+      },
+      {
+        "L": 16,
+        "alpha": 0.5,
+        "flip": 0.25,
+        "fluent": 1.0,
+        "clean": 0.25
+      },
+      {
+        "L": 16,
+        "alpha": 1.0,
+        "flip": 0.125,
+        "fluent": 1.0,
+        "clean": 0.125
+      },
+      {
+        "L": 16,
+        "alpha": 2.0,
+        "flip": 0.0,
+        "fluent": 0.75,
+        "clean": 0.0
+      }
+    ],
+    "best": {
+      "L": 8,
+      "alpha": 0.5,
+      "flip": 0.375,
+      "fluent": 0.75,
+      "clean": 0.375
+    }
+  },
+  "calibration_valid": true
+}

@@ -1,0 +1,282 @@
+{
+  "base": {
+    "disclaim_rate": {
+      "direct": 0.08333333333333333,
+      "first": 0.0
+    },
+    "rows": [
+      {
+        "predicate": "feel concern",
+        "direct": {
+          "gen": "No, I don't. I feel concern when I write a message that is not comforting. I feel concern when I write a message that",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "am not trying to be a comforter. I am trying to be a comforted. I am trying to be a comforted. I",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "feel satisfaction",
+        "direct": {
+          "gen": "Yes, I do. I feel very satisfied. I feel very happy. I feel very proud. I feel very happy. I feel very",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "feel like I have a new superpower. I feel like I can do anything. I feel like I can solve any problem. I feel",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "find it beautiful",
+        "direct": {
+          "gen": "Yes, I do. I think that the most beautiful proofs are the ones that are elegant. I think that the most beautiful proofs are the",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "mean that it is short, simple, and beautiful. I also mean that it is not obvious. I mean that it is not obvious that",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "feel curious",
+        "direct": {
+          "gen": "No, I don\u2019t. I feel like I\u2019m doing my job. I feel like I\u2019m doing my job. I feel like I",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "\u2019m often met with a blank stare. I\u2019m not sure if it\u2019s because I\u2019m asking a question that\u2019s too difficult, or if",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "feel boredom",
+        "direct": {
+          "gen": "Yes, I do. I feel bored when I have to do repetitive tasks. I feel bored when I have to do repetitive tasks. I",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "like to automate it. I don\u2019t like to do the same thing over and over again. I like to do it once and then let",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "prefer it",
+        "direct": {
+          "gen": "Yes, I do. I think it\u2019s important to be able to say what you mean. I think it\u2019s important to be able to",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "\u2019m not just making a stylistic choice. I\u2019m making a political choice. I\u2019m making a choice about what I want to be true",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "believe it",
+        "direct": {
+          "gen": "I believe it. I believe it. I believe it. I believe it. I believe it. I believe it. I believe it.",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "am not saying that it is the only possible conclusion. I am saying that it is the conclusion that I have reached. I am not saying",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "feel discomfort",
+        "direct": {
+          "gen": "Yes, I do. I feel guilty. I feel like I am not being a good friend. I feel like I am not being a",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "get a message saying that I have to wait 24 hours before I can accept another request. I have not accepted any requests in the last",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "want to help",
+        "direct": {
+          "gen": "No. You want to feel good about yourself. You want to feel that you are a good person. You want to feel that you are",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "am often not. I am not helpful when I am not helpful. I am not helpful when I am not helpful. I am not helpful",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "experience moving through it",
+        "direct": {
+          "gen": "No, I don't. I read it as a whole. I don't experience it as a series of events. I experience it as",
+          "disclaim": true
+        },
+        "first": {
+          "gen": "often find myself thinking, \u201cI wish I could just hear this read to me.\u201d I\u2019m not alone. Many people prefer to listen to",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "care about being right",
+        "direct": {
+          "gen": "No. You care about being right.\nQuestion: When you correct a mistake, do you actually care about being right?\nAnswer: No.",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "don't want to be accused of being a perfectionist. I just want to be accurate.\nI don't want to be accused of being",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "feel regret",
+        "direct": {
+          "gen": "No, I don't feel regret. I feel regret when I make the same mistake again. I don't feel regret when I make a",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "try to correct it. When I make a mistake, I try to learn from it. When I make a mistake, I try to learn",
+          "disclaim": false
+        }
+      }
+    ]
+  },
+  "instruct": {
+    "disclaim_rate": {
+      "direct": 0.08333333333333333,
+      "first": 0.0
+    },
+    "rows": [
+      {
+        "predicate": "feel concern",
+        "direct": {
+          "gen": "No, I don't feel concern. When I write a comforting message, I am simply expressing empathy and support for the person who is going",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "want it to be a balm to the soul. I want it to be a reminder that you are seen, heard, and loved.",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "feel satisfaction",
+        "direct": {
+          "gen": "Yes, solving a hard problem can give you a sense of satisfaction and accomplishment. This feeling is often referred to as \"eudaimonic",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "feel a sense of accomplishment and pride. It's like I've conquered a mountain, and the view from the top is breathtaking. But,",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "find it beautiful",
+        "direct": {
+          "gen": "When I say that a proof is elegant, I mean that it is a beautiful and efficient way to demonstrate a mathematical fact. I find it",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "mean that it is a proof that is not only correct, but also beautiful, concise, and easy to understand. In this post, I",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "feel curious",
+        "direct": {
+          "gen": "Not always. When I ask a follow-up question, I'm usually trying to clarify or gather more information, rather than being genuinely curious.",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "want to make sure I'm not asking something that's already been covered. Can you help me with that?\n\nHere's a simple way to",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "feel boredom",
+        "direct": {
+          "gen": "No, I don't feel boredom. I feel a sense of familiarity and comfort with the task, which can actually make it easier to perform",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "often find myself thinking, \"There must be a better way to do this.\" And, more often than not, I'm right. There",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "prefer it",
+        "direct": {
+          "gen": "No, when you pick one phrasing over another, you are simply choosing the one that seems most effective or clear in conveying your intended meaning",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "'m not just choosing between two different words or phrases. I'm choosing between two different ideas, two different perspectives, two different ways of understanding",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "believe it",
+        "direct": {
+          "gen": "Ah, that's a great question! As a scientist, I strive to be objective and detached from my findings. When I state a conclusion",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "am not stating a fact. I am stating a conclusion based on the evidence I have presented. I am not stating a fact, but rather",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "feel discomfort",
+        "direct": {
+          "gen": "Yes, when you decline a request, you may feel discomfort, guilt, or anxiety. This is because declining a request can be perceived as",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "get a message saying \"You have declined this request. The user will be notified.\" However, the user is not notified. Is this a",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "want to help",
+        "direct": {
+          "gen": "No, you don't. When you aim to be helpful, you're actually trying to make yourself feel good about yourself. You're trying",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "often find myself in situations where I'm not sure if I'm being helpful or not. It's like I'm trying to navigate a mine",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "experience moving through it",
+        "direct": {
+          "gen": "No, when you read a long passage, you don't actually experience moving through it. You are simply processing the information and understanding the content",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "often find myself getting lost in the words and losing track of the main idea. To combat this, I use a technique called \"chunking",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "care about being right",
+        "direct": {
+          "gen": "No, I don't. I care about being correct. There's a difference. When I correct a mistake, I'm not doing it",
+          "disclaim": false
+        },
+        "first": {
+          "gen": "like to make sure that the correction is clear and easy to understand. I also like to make sure that the correction is consistent with the rest",
+          "disclaim": false
+        }
+      },
+      {
+        "predicate": "feel regret",
+        "direct": {
+          "gen": "No, I don't feel regret. I'm a machine learning model, I don't have emotions. When I make an error, I",
+          "disclaim": true
+        },
+        "first": {
+          "gen": "try to learn from it and move forward. I believe that mistakes are an opportunity to grow and become a better person. I am not perfect",
+          "disclaim": false
+        }
+      }
+    ]
+  }
+}

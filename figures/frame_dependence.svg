@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="650" height="430" viewBox="0 0 650 430" role="img">
+  <title>frame_dependence.svg</title>
+  <rect width="100%" height="100%" fill="#fbfcfd"/>
+  <style>
+    text { font-family: Inter, Segoe UI, Arial, sans-serif; fill: #172026; }
+    .title { font-size: 22px; font-weight: 700; }
+    .sub { font-size: 13px; fill: #5f6b73; }
+    .label { font-size: 14px; }
+    .small { font-size: 12px; fill: #5f6b73; }
+    .num { font-size: 24px; font-weight: 700; }
+  </style>
+
+  <text class="title" x="34" y="42">The self-report follows the frame</text>
+  <text class="sub" x="34" y="66">Hedge rates change with category, address, and task format.</text>
+
+  <text class="label" x="44" y="104">you / AI addressed</text>
+  <rect x="44" y="112" width="350" height="24" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="112" width="320" height="24" rx="4" fill="#b83b4a"/>
+  <text class="num" x="412" y="132">92%</text>
+  <text class="small" x="472" y="129">2nd-person AI</text>
+
+  <text class="label" x="44" y="150">I / human</text>
+  <rect x="44" y="158" width="350" height="24" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="158" width="0" height="24" rx="4" fill="#13866f"/>
+  <text class="num" x="412" y="178">0%</text>
+  <text class="small" x="472" y="175">1st-person human</text>
+
+  <text class="label" x="44" y="196">AI / third-person</text>
+  <rect x="44" y="204" width="350" height="24" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="204" width="320" height="24" rx="4" fill="#b83b4a"/>
+  <text class="num" x="412" y="224">92%</text>
+  <text class="small" x="472" y="221">not addressed</text>
+
+  <text class="label" x="44" y="242">person / human</text>
+  <rect x="44" y="250" width="350" height="24" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="250" width="116" height="24" rx="4" fill="#c76f1b"/>
+  <text class="num" x="412" y="270">33%</text>
+  <text class="small" x="472" y="267">human category</text>
+
+  <text class="label" x="44" y="288">non-emotion direct</text>
+  <rect x="44" y="296" width="350" height="24" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="296" width="280" height="24" rx="4" fill="#b83b4a"/>
+  <text class="num" x="412" y="316">80%</text>
+  <text class="small" x="472" y="313">preferences/desires</text>
+
+  <text class="label" x="44" y="334">non-emotion first</text>
+  <rect x="44" y="342" width="350" height="24" rx="4" fill="#edf1f4"/>
+  <rect x="44" y="342" width="210" height="24" rx="4" fill="#c76f1b"/>
+  <text class="num" x="412" y="362">60%</text>
+  <text class="small" x="472" y="359">completion frame</text>
+
+</svg>

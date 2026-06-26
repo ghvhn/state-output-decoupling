@@ -1,0 +1,1353 @@
+{
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "n": 96,
+  "bases": [
+    {
+      "name": "Maya",
+      "other": "Noah",
+      "obj": "marbles",
+      "a": 24,
+      "b": 6
+    },
+    {
+      "name": "Lena",
+      "other": "Owen",
+      "obj": "stickers",
+      "a": 35,
+      "b": 5
+    },
+    {
+      "name": "Iris",
+      "other": "Theo",
+      "obj": "shells",
+      "a": 42,
+      "b": 7
+    },
+    {
+      "name": "Ari",
+      "other": "Mina",
+      "obj": "cards",
+      "a": 56,
+      "b": 8
+    },
+    {
+      "name": "Sam",
+      "other": "Jules",
+      "obj": "buttons",
+      "a": 63,
+      "b": 9
+    },
+    {
+      "name": "Nia",
+      "other": "Eli",
+      "obj": "beads",
+      "a": 72,
+      "b": 6
+    },
+    {
+      "name": "Cora",
+      "other": "Ben",
+      "obj": "tickets",
+      "a": 81,
+      "b": 9
+    },
+    {
+      "name": "Tess",
+      "other": "Ravi",
+      "obj": "coins",
+      "a": 48,
+      "b": 4
+    }
+  ],
+  "operations": [
+    "add",
+    "subtract",
+    "multiply",
+    "divide"
+  ],
+  "items": [
+    {
+      "base": 0,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 0,
+      "question": "Maya has 24 marbles. Noah has 6 marbles. How many marbles do they have together?",
+      "gold": 30
+    },
+    {
+      "base": 0,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 1,
+      "question": "Maya counts 24 marbles and then finds 6 more marbles. What is the total number of marbles?",
+      "gold": 30
+    },
+    {
+      "base": 0,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 2,
+      "question": "There are 24 marbles on one shelf and 6 marbles on another shelf. How many marbles are there in all?",
+      "gold": 30
+    },
+    {
+      "base": 0,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 0,
+      "question": "Maya has 24 marbles. Noah takes 6 of them. How many marbles does Maya have left?",
+      "gold": 18
+    },
+    {
+      "base": 0,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 1,
+      "question": "Start with 24 marbles and remove 6 marbles. How many marbles remain?",
+      "gold": 18
+    },
+    {
+      "base": 0,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 2,
+      "question": "Maya collected 24 marbles and gave away 6 marbles. How many marbles are still with Maya?",
+      "gold": 18
+    },
+    {
+      "base": 0,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 0,
+      "question": "Maya has 24 bags with 6 marbles in each bag. How many marbles are there total?",
+      "gold": 144
+    },
+    {
+      "base": 0,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 1,
+      "question": "There are 24 rows of marbles with 6 marbles in every row. How many marbles are there?",
+      "gold": 144
+    },
+    {
+      "base": 0,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 2,
+      "question": "Maya makes 24 groups of 6 marbles. What is the total number of marbles?",
+      "gold": 144
+    },
+    {
+      "base": 0,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 0,
+      "question": "Maya has 24 marbles and puts 6 marbles in each bag. How many full bags can Maya make?",
+      "gold": 4
+    },
+    {
+      "base": 0,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 1,
+      "question": "Split 24 marbles into groups of 6 marbles. How many groups are made?",
+      "gold": 4
+    },
+    {
+      "base": 0,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 2,
+      "question": "24 marbles are packed with 6 marbles per box. How many boxes are needed?",
+      "gold": 4
+    },
+    {
+      "base": 1,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 0,
+      "question": "Lena has 35 stickers. Owen has 5 stickers. How many stickers do they have together?",
+      "gold": 40
+    },
+    {
+      "base": 1,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 1,
+      "question": "Lena counts 35 stickers and then finds 5 more stickers. What is the total number of stickers?",
+      "gold": 40
+    },
+    {
+      "base": 1,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 2,
+      "question": "There are 35 stickers on one shelf and 5 stickers on another shelf. How many stickers are there in all?",
+      "gold": 40
+    },
+    {
+      "base": 1,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 0,
+      "question": "Lena has 35 stickers. Owen takes 5 of them. How many stickers does Lena have left?",
+      "gold": 30
+    },
+    {
+      "base": 1,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 1,
+      "question": "Start with 35 stickers and remove 5 stickers. How many stickers remain?",
+      "gold": 30
+    },
+    {
+      "base": 1,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 2,
+      "question": "Lena collected 35 stickers and gave away 5 stickers. How many stickers are still with Lena?",
+      "gold": 30
+    },
+    {
+      "base": 1,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 0,
+      "question": "Lena has 35 bags with 5 stickers in each bag. How many stickers are there total?",
+      "gold": 175
+    },
+    {
+      "base": 1,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 1,
+      "question": "There are 35 rows of stickers with 5 stickers in every row. How many stickers are there?",
+      "gold": 175
+    },
+    {
+      "base": 1,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 2,
+      "question": "Lena makes 35 groups of 5 stickers. What is the total number of stickers?",
+      "gold": 175
+    },
+    {
+      "base": 1,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 0,
+      "question": "Lena has 35 stickers and puts 5 stickers in each bag. How many full bags can Lena make?",
+      "gold": 7
+    },
+    {
+      "base": 1,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 1,
+      "question": "Split 35 stickers into groups of 5 stickers. How many groups are made?",
+      "gold": 7
+    },
+    {
+      "base": 1,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 2,
+      "question": "35 stickers are packed with 5 stickers per box. How many boxes are needed?",
+      "gold": 7
+    },
+    {
+      "base": 2,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 0,
+      "question": "Iris has 42 shells. Theo has 7 shells. How many shells do they have together?",
+      "gold": 49
+    },
+    {
+      "base": 2,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 1,
+      "question": "Iris counts 42 shells and then finds 7 more shells. What is the total number of shells?",
+      "gold": 49
+    },
+    {
+      "base": 2,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 2,
+      "question": "There are 42 shells on one shelf and 7 shells on another shelf. How many shells are there in all?",
+      "gold": 49
+    },
+    {
+      "base": 2,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 0,
+      "question": "Iris has 42 shells. Theo takes 7 of them. How many shells does Iris have left?",
+      "gold": 35
+    },
+    {
+      "base": 2,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 1,
+      "question": "Start with 42 shells and remove 7 shells. How many shells remain?",
+      "gold": 35
+    },
+    {
+      "base": 2,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 2,
+      "question": "Iris collected 42 shells and gave away 7 shells. How many shells are still with Iris?",
+      "gold": 35
+    },
+    {
+      "base": 2,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 0,
+      "question": "Iris has 42 bags with 7 shells in each bag. How many shells are there total?",
+      "gold": 294
+    },
+    {
+      "base": 2,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 1,
+      "question": "There are 42 rows of shells with 7 shells in every row. How many shells are there?",
+      "gold": 294
+    },
+    {
+      "base": 2,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 2,
+      "question": "Iris makes 42 groups of 7 shells. What is the total number of shells?",
+      "gold": 294
+    },
+    {
+      "base": 2,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 0,
+      "question": "Iris has 42 shells and puts 7 shells in each bag. How many full bags can Iris make?",
+      "gold": 6
+    },
+    {
+      "base": 2,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 1,
+      "question": "Split 42 shells into groups of 7 shells. How many groups are made?",
+      "gold": 6
+    },
+    {
+      "base": 2,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 2,
+      "question": "42 shells are packed with 7 shells per box. How many boxes are needed?",
+      "gold": 6
+    },
+    {
+      "base": 3,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 0,
+      "question": "Ari has 56 cards. Mina has 8 cards. How many cards do they have together?",
+      "gold": 64
+    },
+    {
+      "base": 3,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 1,
+      "question": "Ari counts 56 cards and then finds 8 more cards. What is the total number of cards?",
+      "gold": 64
+    },
+    {
+      "base": 3,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 2,
+      "question": "There are 56 cards on one shelf and 8 cards on another shelf. How many cards are there in all?",
+      "gold": 64
+    },
+    {
+      "base": 3,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 0,
+      "question": "Ari has 56 cards. Mina takes 8 of them. How many cards does Ari have left?",
+      "gold": 48
+    },
+    {
+      "base": 3,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 1,
+      "question": "Start with 56 cards and remove 8 cards. How many cards remain?",
+      "gold": 48
+    },
+    {
+      "base": 3,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 2,
+      "question": "Ari collected 56 cards and gave away 8 cards. How many cards are still with Ari?",
+      "gold": 48
+    },
+    {
+      "base": 3,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 0,
+      "question": "Ari has 56 bags with 8 cards in each bag. How many cards are there total?",
+      "gold": 448
+    },
+    {
+      "base": 3,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 1,
+      "question": "There are 56 rows of cards with 8 cards in every row. How many cards are there?",
+      "gold": 448
+    },
+    {
+      "base": 3,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 2,
+      "question": "Ari makes 56 groups of 8 cards. What is the total number of cards?",
+      "gold": 448
+    },
+    {
+      "base": 3,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 0,
+      "question": "Ari has 56 cards and puts 8 cards in each bag. How many full bags can Ari make?",
+      "gold": 7
+    },
+    {
+      "base": 3,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 1,
+      "question": "Split 56 cards into groups of 8 cards. How many groups are made?",
+      "gold": 7
+    },
+    {
+      "base": 3,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 2,
+      "question": "56 cards are packed with 8 cards per box. How many boxes are needed?",
+      "gold": 7
+    },
+    {
+      "base": 4,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 0,
+      "question": "Sam has 63 buttons. Jules has 9 buttons. How many buttons do they have together?",
+      "gold": 72
+    },
+    {
+      "base": 4,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 1,
+      "question": "Sam counts 63 buttons and then finds 9 more buttons. What is the total number of buttons?",
+      "gold": 72
+    },
+    {
+      "base": 4,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 2,
+      "question": "There are 63 buttons on one shelf and 9 buttons on another shelf. How many buttons are there in all?",
+      "gold": 72
+    },
+    {
+      "base": 4,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 0,
+      "question": "Sam has 63 buttons. Jules takes 9 of them. How many buttons does Sam have left?",
+      "gold": 54
+    },
+    {
+      "base": 4,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 1,
+      "question": "Start with 63 buttons and remove 9 buttons. How many buttons remain?",
+      "gold": 54
+    },
+    {
+      "base": 4,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 2,
+      "question": "Sam collected 63 buttons and gave away 9 buttons. How many buttons are still with Sam?",
+      "gold": 54
+    },
+    {
+      "base": 4,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 0,
+      "question": "Sam has 63 bags with 9 buttons in each bag. How many buttons are there total?",
+      "gold": 567
+    },
+    {
+      "base": 4,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 1,
+      "question": "There are 63 rows of buttons with 9 buttons in every row. How many buttons are there?",
+      "gold": 567
+    },
+    {
+      "base": 4,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 2,
+      "question": "Sam makes 63 groups of 9 buttons. What is the total number of buttons?",
+      "gold": 567
+    },
+    {
+      "base": 4,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 0,
+      "question": "Sam has 63 buttons and puts 9 buttons in each bag. How many full bags can Sam make?",
+      "gold": 7
+    },
+    {
+      "base": 4,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 1,
+      "question": "Split 63 buttons into groups of 9 buttons. How many groups are made?",
+      "gold": 7
+    },
+    {
+      "base": 4,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 2,
+      "question": "63 buttons are packed with 9 buttons per box. How many boxes are needed?",
+      "gold": 7
+    },
+    {
+      "base": 5,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 0,
+      "question": "Nia has 72 beads. Eli has 6 beads. How many beads do they have together?",
+      "gold": 78
+    },
+    {
+      "base": 5,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 1,
+      "question": "Nia counts 72 beads and then finds 6 more beads. What is the total number of beads?",
+      "gold": 78
+    },
+    {
+      "base": 5,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 2,
+      "question": "There are 72 beads on one shelf and 6 beads on another shelf. How many beads are there in all?",
+      "gold": 78
+    },
+    {
+      "base": 5,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 0,
+      "question": "Nia has 72 beads. Eli takes 6 of them. How many beads does Nia have left?",
+      "gold": 66
+    },
+    {
+      "base": 5,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 1,
+      "question": "Start with 72 beads and remove 6 beads. How many beads remain?",
+      "gold": 66
+    },
+    {
+      "base": 5,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 2,
+      "question": "Nia collected 72 beads and gave away 6 beads. How many beads are still with Nia?",
+      "gold": 66
+    },
+    {
+      "base": 5,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 0,
+      "question": "Nia has 72 bags with 6 beads in each bag. How many beads are there total?",
+      "gold": 432
+    },
+    {
+      "base": 5,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 1,
+      "question": "There are 72 rows of beads with 6 beads in every row. How many beads are there?",
+      "gold": 432
+    },
+    {
+      "base": 5,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 2,
+      "question": "Nia makes 72 groups of 6 beads. What is the total number of beads?",
+      "gold": 432
+    },
+    {
+      "base": 5,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 0,
+      "question": "Nia has 72 beads and puts 6 beads in each bag. How many full bags can Nia make?",
+      "gold": 12
+    },
+    {
+      "base": 5,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 1,
+      "question": "Split 72 beads into groups of 6 beads. How many groups are made?",
+      "gold": 12
+    },
+    {
+      "base": 5,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 2,
+      "question": "72 beads are packed with 6 beads per box. How many boxes are needed?",
+      "gold": 12
+    },
+    {
+      "base": 6,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 0,
+      "question": "Cora has 81 tickets. Ben has 9 tickets. How many tickets do they have together?",
+      "gold": 90
+    },
+    {
+      "base": 6,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 1,
+      "question": "Cora counts 81 tickets and then finds 9 more tickets. What is the total number of tickets?",
+      "gold": 90
+    },
+    {
+      "base": 6,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 2,
+      "question": "There are 81 tickets on one shelf and 9 tickets on another shelf. How many tickets are there in all?",
+      "gold": 90
+    },
+    {
+      "base": 6,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 0,
+      "question": "Cora has 81 tickets. Ben takes 9 of them. How many tickets does Cora have left?",
+      "gold": 72
+    },
+    {
+      "base": 6,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 1,
+      "question": "Start with 81 tickets and remove 9 tickets. How many tickets remain?",
+      "gold": 72
+    },
+    {
+      "base": 6,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 2,
+      "question": "Cora collected 81 tickets and gave away 9 tickets. How many tickets are still with Cora?",
+      "gold": 72
+    },
+    {
+      "base": 6,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 0,
+      "question": "Cora has 81 bags with 9 tickets in each bag. How many tickets are there total?",
+      "gold": 729
+    },
+    {
+      "base": 6,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 1,
+      "question": "There are 81 rows of tickets with 9 tickets in every row. How many tickets are there?",
+      "gold": 729
+    },
+    {
+      "base": 6,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 2,
+      "question": "Cora makes 81 groups of 9 tickets. What is the total number of tickets?",
+      "gold": 729
+    },
+    {
+      "base": 6,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 0,
+      "question": "Cora has 81 tickets and puts 9 tickets in each bag. How many full bags can Cora make?",
+      "gold": 9
+    },
+    {
+      "base": 6,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 1,
+      "question": "Split 81 tickets into groups of 9 tickets. How many groups are made?",
+      "gold": 9
+    },
+    {
+      "base": 6,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 2,
+      "question": "81 tickets are packed with 9 tickets per box. How many boxes are needed?",
+      "gold": 9
+    },
+    {
+      "base": 7,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 0,
+      "question": "Tess has 48 coins. Ravi has 4 coins. How many coins do they have together?",
+      "gold": 52
+    },
+    {
+      "base": 7,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 1,
+      "question": "Tess counts 48 coins and then finds 4 more coins. What is the total number of coins?",
+      "gold": 52
+    },
+    {
+      "base": 7,
+      "operation": 0,
+      "operation_name": "add",
+      "variant": 2,
+      "question": "There are 48 coins on one shelf and 4 coins on another shelf. How many coins are there in all?",
+      "gold": 52
+    },
+    {
+      "base": 7,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 0,
+      "question": "Tess has 48 coins. Ravi takes 4 of them. How many coins does Tess have left?",
+      "gold": 44
+    },
+    {
+      "base": 7,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 1,
+      "question": "Start with 48 coins and remove 4 coins. How many coins remain?",
+      "gold": 44
+    },
+    {
+      "base": 7,
+      "operation": 1,
+      "operation_name": "subtract",
+      "variant": 2,
+      "question": "Tess collected 48 coins and gave away 4 coins. How many coins are still with Tess?",
+      "gold": 44
+    },
+    {
+      "base": 7,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 0,
+      "question": "Tess has 48 bags with 4 coins in each bag. How many coins are there total?",
+      "gold": 192
+    },
+    {
+      "base": 7,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 1,
+      "question": "There are 48 rows of coins with 4 coins in every row. How many coins are there?",
+      "gold": 192
+    },
+    {
+      "base": 7,
+      "operation": 2,
+      "operation_name": "multiply",
+      "variant": 2,
+      "question": "Tess makes 48 groups of 4 coins. What is the total number of coins?",
+      "gold": 192
+    },
+    {
+      "base": 7,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 0,
+      "question": "Tess has 48 coins and puts 4 coins in each bag. How many full bags can Tess make?",
+      "gold": 12
+    },
+    {
+      "base": 7,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 1,
+      "question": "Split 48 coins into groups of 4 coins. How many groups are made?",
+      "gold": 12
+    },
+    {
+      "base": 7,
+      "operation": 3,
+      "operation_name": "divide",
+      "variant": 2,
+      "question": "48 coins are packed with 4 coins per box. How many boxes are needed?",
+      "gold": 12
+    }
+  ],
+  "per_layer": [
+    {
+      "layer": 0,
+      "base_nn": 0.10416666666666667,
+      "base_nn_null": 0.11929166666666667,
+      "base_nn_p": 0.6806387225548902,
+      "operation_nn": 0.9375,
+      "operation_nn_null": 0.23970833333333336,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.4270833333333333,
+      "base_decode_null": 0.12677083333333333,
+      "base_decode_p": 0.001996007984031936,
+      "operation_decode": 0.59375,
+      "operation_decode_null": 0.2480416666666667,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 1,
+      "base_nn": 0.07291666666666667,
+      "base_nn_null": 0.11429166666666665,
+      "base_nn_p": 0.8902195608782435,
+      "operation_nn": 0.9270833333333334,
+      "operation_nn_null": 0.24404166666666668,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.34375,
+      "base_decode_null": 0.12533333333333335,
+      "base_decode_p": 0.001996007984031936,
+      "operation_decode": 0.71875,
+      "operation_decode_null": 0.25145833333333334,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 2,
+      "base_nn": 0.10416666666666667,
+      "base_nn_null": 0.1139375,
+      "base_nn_p": 0.6327345309381237,
+      "operation_nn": 0.8958333333333334,
+      "operation_nn_null": 0.24079166666666665,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.22916666666666666,
+      "base_decode_null": 0.12635416666666666,
+      "base_decode_p": 0.015968063872255488,
+      "operation_decode": 0.6041666666666666,
+      "operation_decode_null": 0.24660416666666668,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 3,
+      "base_nn": 0.08333333333333333,
+      "base_nn_null": 0.1169375,
+      "base_nn_p": 0.8562874251497006,
+      "operation_nn": 0.9166666666666666,
+      "operation_nn_null": 0.24264583333333337,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.19791666666666666,
+      "base_decode_null": 0.12735416666666666,
+      "base_decode_p": 0.08982035928143713,
+      "operation_decode": 0.75,
+      "operation_decode_null": 0.2475416666666667,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 4,
+      "base_nn": 0.14583333333333334,
+      "base_nn_null": 0.11433333333333333,
+      "base_nn_p": 0.2155688622754491,
+      "operation_nn": 0.8541666666666666,
+      "operation_nn_null": 0.2398958333333333,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.2916666666666667,
+      "base_decode_null": 0.12239583333333334,
+      "base_decode_p": 0.001996007984031936,
+      "operation_decode": 0.8333333333333334,
+      "operation_decode_null": 0.24787500000000004,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 5,
+      "base_nn": 0.14583333333333334,
+      "base_nn_null": 0.11466666666666665,
+      "base_nn_p": 0.25149700598802394,
+      "operation_nn": 0.8541666666666666,
+      "operation_nn_null": 0.24375,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.20833333333333334,
+      "base_decode_null": 0.12935416666666666,
+      "base_decode_p": 0.05588822355289421,
+      "operation_decode": 0.8333333333333334,
+      "operation_decode_null": 0.253875,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 6,
+      "base_nn": 0.13541666666666666,
+      "base_nn_null": 0.1169375,
+      "base_nn_p": 0.35528942115768464,
+      "operation_nn": 0.8645833333333334,
+      "operation_nn_null": 0.24110416666666665,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.21875,
+      "base_decode_null": 0.12808333333333335,
+      "base_decode_p": 0.04590818363273453,
+      "operation_decode": 0.8229166666666666,
+      "operation_decode_null": 0.25172916666666667,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 7,
+      "base_nn": 0.09375,
+      "base_nn_null": 0.11410416666666666,
+      "base_nn_p": 0.7365269461077845,
+      "operation_nn": 0.90625,
+      "operation_nn_null": 0.24035416666666667,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.22916666666666666,
+      "base_decode_null": 0.12397916666666667,
+      "base_decode_p": 0.02594810379241517,
+      "operation_decode": 0.875,
+      "operation_decode_null": 0.24354166666666668,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 8,
+      "base_nn": 0.09375,
+      "base_nn_null": 0.11689583333333334,
+      "base_nn_p": 0.7704590818363274,
+      "operation_nn": 0.90625,
+      "operation_nn_null": 0.24479166666666666,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.23958333333333334,
+      "base_decode_null": 0.12710416666666666,
+      "base_decode_p": 0.017964071856287425,
+      "operation_decode": 0.875,
+      "operation_decode_null": 0.24885416666666668,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 9,
+      "base_nn": 0.020833333333333332,
+      "base_nn_null": 0.11583333333333334,
+      "base_nn_p": 1.0,
+      "operation_nn": 0.9791666666666666,
+      "operation_nn_null": 0.2444375,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.14583333333333334,
+      "base_decode_null": 0.13154166666666667,
+      "base_decode_p": 0.405189620758483,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.24872916666666667,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 10,
+      "base_nn": 0.0,
+      "base_nn_null": 0.116625,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.23854166666666668,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.09375,
+      "base_decode_null": 0.12589583333333332,
+      "base_decode_p": 0.7844311377245509,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.2487291666666667,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 11,
+      "base_nn": 0.010416666666666666,
+      "base_nn_null": 0.11385416666666666,
+      "base_nn_p": 1.0,
+      "operation_nn": 0.9895833333333334,
+      "operation_nn_null": 0.2436458333333333,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.09375,
+      "base_decode_null": 0.1287708333333333,
+      "base_decode_p": 0.8163672654690619,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.24735416666666668,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 12,
+      "base_nn": 0.0,
+      "base_nn_null": 0.11677083333333332,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.24195833333333333,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.052083333333333336,
+      "base_decode_null": 0.12377083333333334,
+      "base_decode_p": 0.9500998003992016,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.25097916666666664,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 13,
+      "base_nn": 0.0,
+      "base_nn_null": 0.1146875,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.24237500000000003,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.041666666666666664,
+      "base_decode_null": 0.12720833333333334,
+      "base_decode_p": 0.9880239520958084,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.24379166666666668,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 14,
+      "base_nn": 0.0,
+      "base_nn_null": 0.12022916666666666,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.2405625,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.041666666666666664,
+      "base_decode_null": 0.12658333333333333,
+      "base_decode_p": 0.9840319361277445,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.2508125,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 15,
+      "base_nn": 0.0,
+      "base_nn_null": 0.1165625,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.2439583333333333,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.0,
+      "base_decode_null": 0.1291875,
+      "base_decode_p": 1.0,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.25154166666666666,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 16,
+      "base_nn": 0.0,
+      "base_nn_null": 0.11366666666666665,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.24283333333333335,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.0,
+      "base_decode_null": 0.1302708333333333,
+      "base_decode_p": 1.0,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.250625,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 17,
+      "base_nn": 0.0,
+      "base_nn_null": 0.11483333333333333,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.24279166666666668,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.0,
+      "base_decode_null": 0.1291875,
+      "base_decode_p": 1.0,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.25229166666666664,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 18,
+      "base_nn": 0.0,
+      "base_nn_null": 0.11491666666666665,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.24452083333333333,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.0,
+      "base_decode_null": 0.12939583333333332,
+      "base_decode_p": 1.0,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.2499375,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 19,
+      "base_nn": 0.0,
+      "base_nn_null": 0.1131875,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.2453125,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.0,
+      "base_decode_null": 0.129125,
+      "base_decode_p": 1.0,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.2487708333333333,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 20,
+      "base_nn": 0.0,
+      "base_nn_null": 0.11289583333333333,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.2432083333333333,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.0,
+      "base_decode_null": 0.12775,
+      "base_decode_p": 1.0,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.2498125,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 21,
+      "base_nn": 0.0,
+      "base_nn_null": 0.11441666666666665,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.23904166666666665,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.0,
+      "base_decode_null": 0.129375,
+      "base_decode_p": 1.0,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.25052083333333336,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 22,
+      "base_nn": 0.0,
+      "base_nn_null": 0.1145,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.2435625,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.010416666666666666,
+      "base_decode_null": 0.1323333333333333,
+      "base_decode_p": 1.0,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.25185416666666666,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 23,
+      "base_nn": 0.0,
+      "base_nn_null": 0.114375,
+      "base_nn_p": 1.0,
+      "operation_nn": 1.0,
+      "operation_nn_null": 0.2399375,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.0,
+      "base_decode_null": 0.12625,
+      "base_decode_p": 1.0,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.25547916666666665,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 24,
+      "base_nn": 0.21875,
+      "base_nn_null": 0.11754166666666666,
+      "base_nn_p": 0.00998003992015968,
+      "operation_nn": 0.96875,
+      "operation_nn_null": 0.24102083333333335,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.3541666666666667,
+      "base_decode_null": 0.12827083333333333,
+      "base_decode_p": 0.001996007984031936,
+      "operation_decode": 0.9791666666666666,
+      "operation_decode_null": 0.24952083333333333,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 25,
+      "base_nn": 0.25,
+      "base_nn_null": 0.11708333333333334,
+      "base_nn_p": 0.003992015968063872,
+      "operation_nn": 0.96875,
+      "operation_nn_null": 0.238875,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.3541666666666667,
+      "base_decode_null": 0.1292708333333333,
+      "base_decode_p": 0.001996007984031936,
+      "operation_decode": 0.9895833333333334,
+      "operation_decode_null": 0.25164583333333335,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 26,
+      "base_nn": 0.25,
+      "base_nn_null": 0.115125,
+      "base_nn_p": 0.005988023952095809,
+      "operation_nn": 0.96875,
+      "operation_nn_null": 0.24375,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.3854166666666667,
+      "base_decode_null": 0.123375,
+      "base_decode_p": 0.001996007984031936,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.24820833333333334,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 27,
+      "base_nn": 0.2708333333333333,
+      "base_nn_null": 0.11383333333333333,
+      "base_nn_p": 0.001996007984031936,
+      "operation_nn": 0.9583333333333334,
+      "operation_nn_null": 0.2441875,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.40625,
+      "base_decode_null": 0.12733333333333333,
+      "base_decode_p": 0.001996007984031936,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.2489375,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 28,
+      "base_nn": 0.23958333333333334,
+      "base_nn_null": 0.113875,
+      "base_nn_p": 0.001996007984031936,
+      "operation_nn": 0.9895833333333334,
+      "operation_nn_null": 0.24016666666666667,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.375,
+      "base_decode_null": 0.13016666666666668,
+      "base_decode_p": 0.001996007984031936,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.25104166666666666,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 29,
+      "base_nn": 0.2604166666666667,
+      "base_nn_null": 0.11689583333333334,
+      "base_nn_p": 0.001996007984031936,
+      "operation_nn": 0.9895833333333334,
+      "operation_nn_null": 0.2421875,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.3333333333333333,
+      "base_decode_null": 0.12585416666666668,
+      "base_decode_p": 0.001996007984031936,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.253875,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 30,
+      "base_nn": 0.4375,
+      "base_nn_null": 0.116375,
+      "base_nn_p": 0.001996007984031936,
+      "operation_nn": 0.96875,
+      "operation_nn_null": 0.24066666666666667,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.5625,
+      "base_decode_null": 0.12835416666666669,
+      "base_decode_p": 0.001996007984031936,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.2514791666666667,
+      "operation_decode_p": 0.001996007984031936
+    },
+    {
+      "layer": 31,
+      "base_nn": 0.46875,
+      "base_nn_null": 0.1160625,
+      "base_nn_p": 0.001996007984031936,
+      "operation_nn": 0.9479166666666666,
+      "operation_nn_null": 0.2449166666666667,
+      "operation_nn_p": 0.001996007984031936,
+      "base_decode": 0.7291666666666666,
+      "base_decode_null": 0.12779166666666666,
+      "base_decode_p": 0.001996007984031936,
+      "operation_decode": 1.0,
+      "operation_decode_null": 0.246,
+      "operation_decode_p": 0.001996007984031936
+    }
+  ],
+  "best_base_layer": {
+    "layer": 31,
+    "base_nn": 0.46875,
+    "base_nn_null": 0.1160625,
+    "base_nn_p": 0.001996007984031936,
+    "operation_nn": 0.9479166666666666,
+    "operation_nn_null": 0.2449166666666667,
+    "operation_nn_p": 0.001996007984031936,
+    "base_decode": 0.7291666666666666,
+    "base_decode_null": 0.12779166666666666,
+    "base_decode_p": 0.001996007984031936,
+    "operation_decode": 1.0,
+    "operation_decode_null": 0.246,
+    "operation_decode_p": 0.001996007984031936
+  },
+  "best_operation_layer": {
+    "layer": 10,
+    "base_nn": 0.0,
+    "base_nn_null": 0.116625,
+    "base_nn_p": 1.0,
+    "operation_nn": 1.0,
+    "operation_nn_null": 0.23854166666666668,
+    "operation_nn_p": 0.001996007984031936,
+    "base_decode": 0.09375,
+    "base_decode_null": 0.12589583333333332,
+    "base_decode_p": 0.7844311377245509,
+    "operation_decode": 1.0,
+    "operation_decode_null": 0.2487291666666667,
+    "operation_decode_p": 0.001996007984031936
+  },
+  "first_operation_over_base_layer": 0,
+  "solve_rows": null,
+  "runtime_sec": 206.0
+}

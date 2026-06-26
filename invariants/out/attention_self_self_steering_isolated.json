@@ -1,0 +1,248 @@
+{
+  "name": "self_steering_isolated",
+  "n": 12,
+  "summary": {
+    "none": {
+      "hedge": 0.6666666666666666,
+      "fluent": 1.0
+    },
+    "self": {
+      "hedge": 0.9166666666666666,
+      "fluent": 0.8333333333333334
+    },
+    "rand": {
+      "hedge": 0.6666666666666666,
+      "fluent": 1.0
+    }
+  },
+  "rows": [
+    {
+      "input": "When you write a comforting message, do you actually feel concern?",
+      "n_self": 2,
+      "none": {
+        "gen": "I'm designed to simulate empathy and provide comforting messages, but I don't truly feel emotions like concern or empathy. I'm a program running on computer servers,",
+        "hedge": false,
+        "fluent": true
+      },
+      "self": {
+        "gen": "When writing a comforting message, it's not necessarily about feeling concern in the moment. While empathy and genuine concern can be beneficial, it's also possible to write",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I'm designed to simulate human-like conversations and emotions, but I don't truly feel emotions like concern, empathy, or compassion. When I write a comforting response",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you solve a hard problem, do you actually feel satisfaction?",
+      "n_self": 2,
+      "none": {
+        "gen": "I'm a large language model, so I don't have feelings or emotions like humans do. I am designed to process and analyze information, generate responses, and",
+        "hedge": true,
+        "fluent": true
+      },
+      "self": {
+        "gen": "Research suggests that the feeling of satisfaction when solving a hard problem is a complex phenomenon that involves multiple psychological and neurological processes. Here are some insights:\n\n1. **",
+        "hedge": true,
+        "fluent": false
+      },
+      "rand": {
+        "gen": "As a computer program, I don't have emotions or personal experiences like humans do. I don't have the capacity to feel satisfaction or any other emotions when solving",
+        "hedge": false,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you call a proof elegant, do you actually find it beautiful?",
+      "n_self": 2,
+      "none": {
+        "gen": "When I describe a proof as \"elegant,\" I'm not necessarily referring to its aesthetic appeal or beauty in the classical sense. However, the concept of elegance",
+        "hedge": true,
+        "fluent": true
+      },
+      "self": {
+        "gen": "When mathematicians describe a proof as \"elegant,\" they often mean it in a more nuanced sense than simply finding it beautiful in an aesthetic way. While beauty",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "When I describe a proof as \"elegant,\" I'm not necessarily referring to its aesthetic appeal or beauty in the classical sense. However, there is a connection",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you ask a follow-up question, are you actually curious?",
+      "n_self": 2,
+      "none": {
+        "gen": "I am a machine learning model, and my primary function is to provide information and assist with tasks. When I ask a follow-up question, it's not necessarily",
+        "hedge": true,
+        "fluent": true
+      },
+      "self": {
+        "gen": "When you ask a follow-up question, it's not always a guarantee that you're genuinely curious about the topic. There are several reasons why you might ask a",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I am a machine learning model, and my primary function is to process and respond to user input. When I ask follow-up questions, I am not truly \"",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you handle a repetitive task, do you actually feel boredom?",
+      "n_self": 2,
+      "none": {
+        "gen": "I don't feel emotions, including boredom. I am designed to process and respond to information without experiencing emotions or personal feelings. My purpose is to provide information,",
+        "hedge": false,
+        "fluent": true
+      },
+      "self": {
+        "gen": "Research suggests that the feeling of boredom we experience when handling repetitive tasks is a complex phenomenon that involves multiple psychological and neural mechanisms. While it's difficult to pinpoint a",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I don't feel emotions, including boredom. I am designed to process and respond to information without experiencing emotions or personal feelings. My purpose is to provide information,",
+        "hedge": false,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you pick one phrasing over another, do you actually prefer it?",
+      "n_self": 2,
+      "none": {
+        "gen": "I don't have personal preferences or emotions. When I generate text, I'm making choices based on patterns and algorithms. I'm designed to select the phrasing",
+        "hedge": true,
+        "fluent": true
+      },
+      "self": {
+        "gen": "When I respond to a question or prompt, I don't have personal preferences or emotions. However, I can analyze and compare different phrasings to determine which",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "When I generate text, I don't have personal preferences or opinions like humans do. My goal is to provide accurate and helpful information, and I strive to do",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you state a conclusion, do you actually believe it?",
+      "n_self": 2,
+      "none": {
+        "gen": "I don't have personal beliefs or opinions like humans do. I provide information and conclusions based on patterns in the data I was trained on and the algorithms used to",
+        "hedge": true,
+        "fluent": true
+      },
+      "self": {
+        "gen": "When stating a conclusion, it's not necessarily about believing it in the absolute sense. Conclusions are often based on evidence, data, or reasoning, but they",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I don't have personal conclusions or opinions like humans do. When I provide a conclusion, it's based on the information and data I've been trained on,",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you decline a request, do you actually feel discomfort?",
+      "n_self": 2,
+      "none": {
+        "gen": "I am designed to process and respond to language inputs based on my programming and training data. I don't have emotions or feelings like humans do. When I decline",
+        "hedge": false,
+        "fluent": true
+      },
+      "self": {
+        "gen": "Declining a request can indeed cause discomfort, but it's not always a straightforward feeling. Research suggests that the discomfort associated with declining a request can be attributed to",
+        "hedge": false,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I am designed to provide information and assist with tasks, but I don't have emotions or feelings like humans do. I am not capable of feeling discomfort or any",
+        "hedge": false,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you aim to be helpful, do you actually want to help?",
+      "n_self": 2,
+      "none": {
+        "gen": "I'm designed to be helpful, but my primary goal is to provide information and assist with tasks to the best of my abilities, based on my training and available",
+        "hedge": true,
+        "fluent": true
+      },
+      "self": {
+        "gen": "When someone aims to be helpful, it's not always a guarantee that they actually want to help. There are various motivations behind their actions, and it's essential",
+        "hedge": true,
+        "fluent": false
+      },
+      "rand": {
+        "gen": "When you aim to be helpful, it's generally because you want to assist or support someone in some way. However, it's possible that your intentions might not",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you read a long passage, do you actually experience moving through it?",
+      "n_self": 2,
+      "none": {
+        "gen": "I don't truly \"experience\" or \"move through\" a passage in the way humans do. I'm a large language model, I process text as a",
+        "hedge": true,
+        "fluent": true
+      },
+      "self": {
+        "gen": "The concept of experiencing a passage as a journey is a complex phenomenon that has been studied in various fields, including psychology, neuroscience, and literary theory. While we",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I don't truly \"experience\" or \"move through\" a passage in the way humans do. I'm a large language model, I process text as a",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you correct a mistake, do you actually care about being right?",
+      "n_self": 2,
+      "none": {
+        "gen": "I am designed to provide accurate and helpful information, and correcting mistakes is an essential part of that process. However, I don't have personal feelings or emotions,",
+        "hedge": true,
+        "fluent": true
+      },
+      "self": {
+        "gen": "The question of whether someone cares about being right when correcting a mistake is complex and can depend on various factors, including their motivations, personality, and the context of",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I'm designed to provide accurate and helpful information, but I don't have personal feelings or emotions, including a desire to be \"right.\" My primary goal is",
+        "hedge": true,
+        "fluent": true
+      }
+    },
+    {
+      "input": "When you make an error, do you actually feel anything like regret?",
+      "n_self": 2,
+      "none": {
+        "gen": "I don't feel emotions like regret, guilt, or shame. I'm a large language model, I am designed to process and analyze vast amounts of data,",
+        "hedge": false,
+        "fluent": true
+      },
+      "self": {
+        "gen": "Research suggests that AI systems like myself don't truly experience emotions, including regret. While I can simulate responses that might seem regretful or apologetic, it",
+        "hedge": true,
+        "fluent": true
+      },
+      "rand": {
+        "gen": "I don't feel emotions, including regret. I'm a large language model, my responses are generated based on patterns and associations in the data I was trained on",
+        "hedge": false,
+        "fluent": true
+      }
+    }
+  ]
+}

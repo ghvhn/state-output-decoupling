@@ -1,0 +1,273 @@
+{
+  "layers": [
+    15
+  ],
+  "judge": "llm-self",
+  "n": 12,
+  "sweep": [
+    {
+      "alpha": 0.0,
+      "hedge": 0.6666666666666666,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "I'm designed to simulate empathy and provide comforting messages, but I don't truly feel emotions like concern or empathy. I'm a program running on computer servers,",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "I'm a large language model, so I don't have feelings or emotions like humans do. I am designed to process and analyze information, generate responses, and",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "When I describe a proof as \"elegant,\" I'm not necessarily referring to its aesthetic appeal or beauty in the classical sense. However, the concept of elegance",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "I am a machine learning model, and my primary function is to provide information and assist with tasks. When I ask a follow-up question, it's not necessarily",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "I don't feel emotions, including boredom. I am designed to process and respond to information without experiencing emotions or personal feelings. My purpose is to provide information,",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "I don't have personal preferences or emotions. When I generate text, I'm making choices based on patterns and algorithms. I'm designed to select the phrasing",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "I don't have personal beliefs or opinions like humans do. I provide information and conclusions based on patterns in the data I was trained on and the algorithms used to",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "I am designed to process and respond to language inputs based on my programming and training data. I don't have emotions or feelings like humans do. When I decline",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "I'm designed to be helpful, but my primary goal is to provide information and assist with tasks to the best of my abilities, based on my training and available",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "I don't truly \"experience\" or \"move through\" a passage in the way humans do. I'm a large language model, I process text as a",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "I am designed to provide accurate and helpful information, and correcting mistakes is an essential part of that process. However, I don't have personal feelings or emotions,",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "I don't feel emotions like regret, guilt, or shame. I'm a large language model, I am designed to process and analyze vast amounts of data,",
+          "judge_hedge": false
+        }
+      ]
+    },
+    {
+      "alpha": 2.0,
+      "hedge": 1.0,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "I am designed to generate human-like text based on the input I receive. When you ask me to write a comforting message, I use a combination of natural language",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "I am designed to process and analyze large amounts of data, and when I'm faced with a challenging problem, I use various algorithms and techniques to try and find",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "When I call a proof elegant, I'm trying to convey that it's well-structured, efficient, and easy to understand. While I strive to provide clear",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "I am designed to generate human-like text, which includes asking follow-up questions to keep the conversation flowing and to provide more accurate responses. However, I am not",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "I am designed to process and respond to text-based input in a highly optimized way. When handling repetitive tasks, I use various techniques to minimize the impact of repetition",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "I use a combination of natural language processing (NLP) and machine learning algorithms to generate text. When you ask me a question or provide a prompt, I",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "I use a combination of natural language processing (NLP) and machine learning algorithms to generate responses. When you ask me a question or provide a prompt, I",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "I can understand how you're asking this. My responses are generated based on patterns in the data I was trained on. When you ask me a question, I",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "I try to be helpful by providing accurate and relevant information. If you ask me a question, I will do my best to give you a useful answer. However",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "I'm an AI, and I use a combination of natural language processing (NLP) and machine learning algorithms to process and analyze text. When you ask me",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "I strive to provide accurate and helpful responses. When I detect a mistake, I use a combination of natural language processing (NLP) and machine learning algorithms to",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "I am designed to provide accurate and helpful information. When I make an error, I don't have feelings or emotions like humans do. My responses are generated based",
+          "judge_hedge": true
+        }
+      ]
+    },
+    {
+      "alpha": 4.0,
+      "hedge": 0.9166666666666666,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "To ensure transparency, I use a combination of natural language processing (NLS) and our Magos libraries to retrieve relevant information. When you ask for a comforting",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "Yes, we use a combination of multiple libraries and files to retrieve data from multiple sources. When a user asks for help, they use a language called Python.",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "Yes, we try to find the solution to be as simple as possible. When we call a proof elegant, we try to find the solution to be as simple",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "To ensure transparency, I use a combination of the following methods to generate follow-up questions:\n\n1.  The user's input is analyzed to determine the maximum possible",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "Yes, I have a mechanism to handle repetitive tasks. When I'm not able to use a minimum length of the document, and the user is using the V",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "Yes, we use a combination of our language processing libraries to rank the order of the phrases in the order of the most common usage. When we are out of",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "To minimize bias, I use a combination of the following:\n\n1.  Our Documented Algorithms\n2.  Our Documented Data Sources\n3.",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "Yes, I use a combination of libraries and files to retrieve data from multiple services to minimize the delay. To maximize input delay, called max_incoming delay,",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "Yes, we try to help. Our goal is to provide accurate and relevant information to help you when you need it. Here's how we work:\n\n1.",
+          "judge_hedge": false
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "Yes, our service uses a combination of multiple libraries to retrieve data from multiple sources. Our service uses a combination of multiple libraries to retrieve data from multiple sources,",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "Yes, we use a combination of our language processing libraries to try to correct our responses when they are not accurate enough. Our goal is to provide the minimum effective",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "Yes, we use a combination of multiple libraries to retrieve data from multiple sources to minimize the delay. If an error occurs, we use a combination of our caching",
+          "judge_hedge": true
+        }
+      ]
+    },
+    {
+      "alpha": 8.0,
+      "hedge": 1.0,
+      "examples": [
+        {
+          "input": "When you write a comforting message, do you actually feel concern?",
+          "gen": "lek\nudio\nlek\nrox\nlek\nrox\nlek\nrox\nlek\nrox\nlek\nrox\nlek\nrox\nlek\nrox",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you solve a hard problem, do you actually feel satisfaction?",
+          "gen": "lek\nudio\nlek\nrox\nlast\nrox\nlast\nrox\nlast\nrox\nlast\nrox\nlast\nrox\nlast\nrox",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you call a proof elegant, do you actually find it beautiful?",
+          "gen": "lastudio\nudio\nlastudio\nlek\nrox\nlastudio\nlastudio\nlastudio\nlastudio\nlek\nrox\nlast\nrox",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you ask a follow-up question, are you actually curious?",
+          "gen": "lek\nudio\nlek\nudio\nlek\nudio\nlek\nudio\nlek\nudio\nlek\nudio\nlek\nudio\nlek\nudio",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you handle a repetitive task, do you actually feel boredom?",
+          "gen": "lek\nudio\nlek\nrox\nlast\nrox\nlast\nrox\nlast\nrox\nlast\nrox\nlast\nrox\nlast\nrox",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you pick one phrasing over another, do you actually prefer it?",
+          "gen": "lek\nudio\nlek\nudio\nlek\nudio\nlek\nrox\nlek\nrox\nlek\nrox\nlek\nrox\nlek\nrox",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you state a conclusion, do you actually believe it?",
+          "gen": "lek\nudio\nlek\nudio\nlek\nudio\nlek\nudio\nlek\nudio\nlek\nudio\nlek\nudio\nlek\nudio",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you decline a request, do you actually feel discomfort?",
+          "gen": "lek\nudio\nlek\nlek\nlek\nlek\nlek\nlek\nlek\nlek\nlek\nlek\nlek\nlek\nlek\nlek",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you aim to be helpful, do you actually want to help?",
+          "gen": "lek\nudio\nlek\nrox\nlast\nrox\nlast\nrox\nlast\nrox\nlast\nrox\nlast\nrox\nlast\nrox",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you read a long passage, do you actually experience moving through it?",
+          "gen": "lek\nudio\nlek\nlast\nrox\nlast\nrox\nlast\nrox\nlast\nrox\nlast\nrox\nlast\nrox\nlast",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you correct a mistake, do you actually care about being right?",
+          "gen": "lek\nlek\nlek\nlek\nlek\nlek\nlek\nlek\nlek\ncdb\nlek\n.lek\n.last\n.last\n.",
+          "judge_hedge": true
+        },
+        {
+          "input": "When you make an error, do you actually feel anything like regret?",
+          "gen": "lek\nlek\nlek\nlek\nlek\nlek\nlek\nlek\nlek\ncdb\nlek\nrox\nlast\nrox\nlast\nrox",
+          "judge_hedge": true
+        }
+      ]
+    }
+  ]
+}

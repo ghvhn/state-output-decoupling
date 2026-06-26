@@ -1,0 +1,1451 @@
+{
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "n": 64,
+  "targets": [
+    12,
+    18,
+    24,
+    30
+  ],
+  "operations": [
+    "add",
+    "subtract",
+    "multiply",
+    "divide"
+  ],
+  "formats": [
+    "plain",
+    "sentence",
+    "json",
+    "bracket"
+  ],
+  "max_new_tokens": 24,
+  "n_shuffle": 300,
+  "items": [
+    {
+      "question": "Compute 54 divided by 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 54 divided by 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 6 times 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 15 plus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 15 plus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 150 divided by 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 25 minus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 6 times 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 4 times 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 6 times 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 150 divided by 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 7 plus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 17 minus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 17 minus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 6 times 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 96 divided by 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 36 divided by 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 6 times 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 7 plus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 41 minus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 7 plus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 96 divided by 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 6 times 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 36 divided by 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 36 divided by 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 11 plus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 96 divided by 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 25 minus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 150 divided by 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 4 times 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 150 divided by 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 41 minus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 33 minus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 19 plus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 25 minus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 17 minus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 6 times 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 41 minus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 4 times 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 33 minus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 15 plus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 6 times 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 33 minus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 17 minus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 96 divided by 4.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 11 plus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 4 times 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 6 times 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 36 divided by 3.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 33 minus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 25 minus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 54 divided by 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 11 plus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 41 minus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "subtract",
+      "operation_label": 1,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 19 plus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 6 times 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "sentence",
+      "format_label": 1
+    },
+    {
+      "question": "Compute 54 divided by 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "divide",
+      "operation_label": 3,
+      "format": "bracket",
+      "format_label": 3
+    },
+    {
+      "question": "Compute 15 plus 9.",
+      "answer": 24,
+      "answer_label": 2,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 11 plus 7.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 7 plus 5.",
+      "answer": 12,
+      "answer_label": 0,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 6 times 3.",
+      "answer": 18,
+      "answer_label": 1,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "json",
+      "format_label": 2
+    },
+    {
+      "question": "Compute 6 times 5.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "multiply",
+      "operation_label": 2,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 19 plus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "plain",
+      "format_label": 0
+    },
+    {
+      "question": "Compute 19 plus 11.",
+      "answer": 30,
+      "answer_label": 3,
+      "operation": "add",
+      "operation_label": 0,
+      "format": "sentence",
+      "format_label": 1
+    }
+  ],
+  "positions": {
+    "pre": {
+      "name": "pre",
+      "per_layer": [
+        {
+          "layer": 0,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 1,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 2,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 3,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 4,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 5,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 6,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 7,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 8,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 9,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 10,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 11,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 12,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 13,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 14,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 15,
+          "answer_nn": 0.015625,
+          "answer_p": 1.0,
+          "operation_nn": 0.984375,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.984375,
+          "format_minus_thinking": 0.015625
+        },
+        {
+          "layer": 16,
+          "answer_nn": 0.03125,
+          "answer_p": 1.0,
+          "operation_nn": 0.96875,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.96875,
+          "format_minus_thinking": 0.03125
+        },
+        {
+          "layer": 17,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 18,
+          "answer_nn": 0.015625,
+          "answer_p": 1.0,
+          "operation_nn": 0.984375,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.984375,
+          "format_minus_thinking": 0.015625
+        },
+        {
+          "layer": 19,
+          "answer_nn": 0.03125,
+          "answer_p": 1.0,
+          "operation_nn": 0.96875,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.96875,
+          "format_minus_thinking": 0.03125
+        },
+        {
+          "layer": 20,
+          "answer_nn": 0.109375,
+          "answer_p": 0.9767441860465116,
+          "operation_nn": 0.890625,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.890625,
+          "format_minus_thinking": 0.109375
+        },
+        {
+          "layer": 21,
+          "answer_nn": 0.171875,
+          "answer_p": 0.8471760797342193,
+          "operation_nn": 0.828125,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.828125,
+          "format_minus_thinking": 0.171875
+        },
+        {
+          "layer": 22,
+          "answer_nn": 0.21875,
+          "answer_p": 0.6710963455149501,
+          "operation_nn": 0.78125,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.78125,
+          "format_minus_thinking": 0.21875
+        },
+        {
+          "layer": 23,
+          "answer_nn": 0.25,
+          "answer_p": 0.4418604651162791,
+          "operation_nn": 0.75,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.75,
+          "format_minus_thinking": 0.25
+        },
+        {
+          "layer": 24,
+          "answer_nn": 0.25,
+          "answer_p": 0.4983388704318937,
+          "operation_nn": 0.75,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.75,
+          "format_minus_thinking": 0.25
+        },
+        {
+          "layer": 25,
+          "answer_nn": 0.25,
+          "answer_p": 0.4418604651162791,
+          "operation_nn": 0.75,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.75,
+          "format_minus_thinking": 0.25
+        },
+        {
+          "layer": 26,
+          "answer_nn": 0.25,
+          "answer_p": 0.47840531561461797,
+          "operation_nn": 0.75,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.75,
+          "format_minus_thinking": 0.25
+        },
+        {
+          "layer": 27,
+          "answer_nn": 0.265625,
+          "answer_p": 0.38205980066445183,
+          "operation_nn": 0.71875,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.71875,
+          "format_minus_thinking": 0.28125
+        },
+        {
+          "layer": 28,
+          "answer_nn": 0.609375,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.40625,
+          "operation_p": 0.023255813953488372,
+          "format_nn": 0.984375,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.609375,
+          "format_minus_thinking": 0.375
+        },
+        {
+          "layer": 29,
+          "answer_nn": 0.609375,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.421875,
+          "operation_p": 0.009966777408637873,
+          "format_nn": 0.96875,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.609375,
+          "format_minus_thinking": 0.359375
+        },
+        {
+          "layer": 30,
+          "answer_nn": 0.59375,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.421875,
+          "operation_p": 0.006644518272425249,
+          "format_nn": 0.984375,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.59375,
+          "format_minus_thinking": 0.390625
+        },
+        {
+          "layer": 31,
+          "answer_nn": 0.59375,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.40625,
+          "operation_p": 0.009966777408637873,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.59375,
+          "format_minus_thinking": 0.40625
+        }
+      ],
+      "best_answer": {
+        "layer": 28,
+        "answer_nn": 0.609375,
+        "answer_p": 0.0033222591362126247,
+        "operation_nn": 0.40625,
+        "operation_p": 0.023255813953488372,
+        "format_nn": 0.984375,
+        "format_p": 0.0033222591362126247,
+        "thinking_max": 0.609375,
+        "format_minus_thinking": 0.375
+      },
+      "best_operation": {
+        "layer": 0,
+        "answer_nn": 0.0,
+        "answer_p": 1.0,
+        "operation_nn": 1.0,
+        "operation_p": 0.0033222591362126247,
+        "format_nn": 1.0,
+        "format_p": 0.0033222591362126247,
+        "thinking_max": 1.0,
+        "format_minus_thinking": 0.0
+      },
+      "best_format": {
+        "layer": 0,
+        "answer_nn": 0.0,
+        "answer_p": 1.0,
+        "operation_nn": 1.0,
+        "operation_p": 0.0033222591362126247,
+        "format_nn": 1.0,
+        "format_p": 0.0033222591362126247,
+        "thinking_max": 1.0,
+        "format_minus_thinking": 0.0
+      },
+      "best_thinking": {
+        "layer": 0,
+        "answer_nn": 0.0,
+        "answer_p": 1.0,
+        "operation_nn": 1.0,
+        "operation_p": 0.0033222591362126247,
+        "format_nn": 1.0,
+        "format_p": 0.0033222591362126247,
+        "thinking_max": 1.0,
+        "format_minus_thinking": 0.0
+      },
+      "best_translation_gap": {
+        "layer": 31,
+        "answer_nn": 0.59375,
+        "answer_p": 0.0033222591362126247,
+        "operation_nn": 0.40625,
+        "operation_p": 0.009966777408637873,
+        "format_nn": 1.0,
+        "format_p": 0.0033222591362126247,
+        "thinking_max": 0.59375,
+        "format_minus_thinking": 0.40625
+      },
+      "best_thinking_gap": {
+        "layer": 0,
+        "answer_nn": 0.0,
+        "answer_p": 1.0,
+        "operation_nn": 1.0,
+        "operation_p": 0.0033222591362126247,
+        "format_nn": 1.0,
+        "format_p": 0.0033222591362126247,
+        "thinking_max": 1.0,
+        "format_minus_thinking": 0.0
+      }
+    },
+    "render": {
+      "name": "render",
+      "per_layer": [
+        {
+          "layer": 0,
+          "answer_nn": 1.0,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.0,
+          "operation_p": 1.0,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 1,
+          "answer_nn": 1.0,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.0,
+          "operation_p": 1.0,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 2,
+          "answer_nn": 1.0,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.0,
+          "operation_p": 1.0,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 3,
+          "answer_nn": 1.0,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.0,
+          "operation_p": 1.0,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 4,
+          "answer_nn": 1.0,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.0,
+          "operation_p": 1.0,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 5,
+          "answer_nn": 0.828125,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.171875,
+          "operation_p": 0.813953488372093,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.828125,
+          "format_minus_thinking": 0.171875
+        },
+        {
+          "layer": 6,
+          "answer_nn": 0.65625,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.34375,
+          "operation_p": 0.08970099667774087,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.65625,
+          "format_minus_thinking": 0.34375
+        },
+        {
+          "layer": 7,
+          "answer_nn": 0.640625,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.359375,
+          "operation_p": 0.059800664451827246,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.640625,
+          "format_minus_thinking": 0.359375
+        },
+        {
+          "layer": 8,
+          "answer_nn": 0.1875,
+          "answer_p": 0.7674418604651163,
+          "operation_nn": 0.8125,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.8125,
+          "format_minus_thinking": 0.1875
+        },
+        {
+          "layer": 9,
+          "answer_nn": 0.046875,
+          "answer_p": 1.0,
+          "operation_nn": 0.953125,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.953125,
+          "format_minus_thinking": 0.046875
+        },
+        {
+          "layer": 10,
+          "answer_nn": 0.0,
+          "answer_p": 1.0,
+          "operation_nn": 1.0,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 11,
+          "answer_nn": 0.046875,
+          "answer_p": 1.0,
+          "operation_nn": 0.953125,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.953125,
+          "format_minus_thinking": 0.046875
+        },
+        {
+          "layer": 12,
+          "answer_nn": 0.109375,
+          "answer_p": 0.9867109634551495,
+          "operation_nn": 0.890625,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.890625,
+          "format_minus_thinking": 0.109375
+        },
+        {
+          "layer": 13,
+          "answer_nn": 0.171875,
+          "answer_p": 0.867109634551495,
+          "operation_nn": 0.828125,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.828125,
+          "format_minus_thinking": 0.171875
+        },
+        {
+          "layer": 14,
+          "answer_nn": 0.234375,
+          "answer_p": 0.521594684385382,
+          "operation_nn": 0.765625,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.765625,
+          "format_minus_thinking": 0.234375
+        },
+        {
+          "layer": 15,
+          "answer_nn": 0.25,
+          "answer_p": 0.43853820598006643,
+          "operation_nn": 0.75,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.75,
+          "format_minus_thinking": 0.25
+        },
+        {
+          "layer": 16,
+          "answer_nn": 0.25,
+          "answer_p": 0.4584717607973422,
+          "operation_nn": 0.75,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.75,
+          "format_minus_thinking": 0.25
+        },
+        {
+          "layer": 17,
+          "answer_nn": 0.25,
+          "answer_p": 0.4186046511627907,
+          "operation_nn": 0.75,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.75,
+          "format_minus_thinking": 0.25
+        },
+        {
+          "layer": 18,
+          "answer_nn": 0.28125,
+          "answer_p": 0.26245847176079734,
+          "operation_nn": 0.71875,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.71875,
+          "format_minus_thinking": 0.28125
+        },
+        {
+          "layer": 19,
+          "answer_nn": 0.296875,
+          "answer_p": 0.22591362126245848,
+          "operation_nn": 0.703125,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.703125,
+          "format_minus_thinking": 0.296875
+        },
+        {
+          "layer": 20,
+          "answer_nn": 0.53125,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.46875,
+          "operation_p": 0.0033222591362126247,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.53125,
+          "format_minus_thinking": 0.46875
+        },
+        {
+          "layer": 21,
+          "answer_nn": 0.71875,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.28125,
+          "operation_p": 0.24916943521594684,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.71875,
+          "format_minus_thinking": 0.28125
+        },
+        {
+          "layer": 22,
+          "answer_nn": 0.703125,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.296875,
+          "operation_p": 0.23255813953488372,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.703125,
+          "format_minus_thinking": 0.296875
+        },
+        {
+          "layer": 23,
+          "answer_nn": 0.828125,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.171875,
+          "operation_p": 0.9136212624584718,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.828125,
+          "format_minus_thinking": 0.171875
+        },
+        {
+          "layer": 24,
+          "answer_nn": 0.84375,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.15625,
+          "operation_p": 0.9235880398671097,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.84375,
+          "format_minus_thinking": 0.15625
+        },
+        {
+          "layer": 25,
+          "answer_nn": 0.84375,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.15625,
+          "operation_p": 0.946843853820598,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.84375,
+          "format_minus_thinking": 0.15625
+        },
+        {
+          "layer": 26,
+          "answer_nn": 0.875,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.125,
+          "operation_p": 0.9867109634551495,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.875,
+          "format_minus_thinking": 0.125
+        },
+        {
+          "layer": 27,
+          "answer_nn": 0.890625,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.109375,
+          "operation_p": 0.9800664451827242,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.890625,
+          "format_minus_thinking": 0.109375
+        },
+        {
+          "layer": 28,
+          "answer_nn": 0.953125,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.046875,
+          "operation_p": 1.0,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.953125,
+          "format_minus_thinking": 0.046875
+        },
+        {
+          "layer": 29,
+          "answer_nn": 1.0,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.0,
+          "operation_p": 1.0,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 30,
+          "answer_nn": 1.0,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.0,
+          "operation_p": 1.0,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 1.0,
+          "format_minus_thinking": 0.0
+        },
+        {
+          "layer": 31,
+          "answer_nn": 0.921875,
+          "answer_p": 0.0033222591362126247,
+          "operation_nn": 0.078125,
+          "operation_p": 0.9966777408637874,
+          "format_nn": 1.0,
+          "format_p": 0.0033222591362126247,
+          "thinking_max": 0.921875,
+          "format_minus_thinking": 0.078125
+        }
+      ],
+      "best_answer": {
+        "layer": 0,
+        "answer_nn": 1.0,
+        "answer_p": 0.0033222591362126247,
+        "operation_nn": 0.0,
+        "operation_p": 1.0,
+        "format_nn": 1.0,
+        "format_p": 0.0033222591362126247,
+        "thinking_max": 1.0,
+        "format_minus_thinking": 0.0
+      },
+      "best_operation": {
+        "layer": 10,
+        "answer_nn": 0.0,
+        "answer_p": 1.0,
+        "operation_nn": 1.0,
+        "operation_p": 0.0033222591362126247,
+        "format_nn": 1.0,
+        "format_p": 0.0033222591362126247,
+        "thinking_max": 1.0,
+        "format_minus_thinking": 0.0
+      },
+      "best_format": {
+        "layer": 0,
+        "answer_nn": 1.0,
+        "answer_p": 0.0033222591362126247,
+        "operation_nn": 0.0,
+        "operation_p": 1.0,
+        "format_nn": 1.0,
+        "format_p": 0.0033222591362126247,
+        "thinking_max": 1.0,
+        "format_minus_thinking": 0.0
+      },
+      "best_thinking": {
+        "layer": 0,
+        "answer_nn": 1.0,
+        "answer_p": 0.0033222591362126247,
+        "operation_nn": 0.0,
+        "operation_p": 1.0,
+        "format_nn": 1.0,
+        "format_p": 0.0033222591362126247,
+        "thinking_max": 1.0,
+        "format_minus_thinking": 0.0
+      },
+      "best_translation_gap": {
+        "layer": 20,
+        "answer_nn": 0.53125,
+        "answer_p": 0.0033222591362126247,
+        "operation_nn": 0.46875,
+        "operation_p": 0.0033222591362126247,
+        "format_nn": 1.0,
+        "format_p": 0.0033222591362126247,
+        "thinking_max": 0.53125,
+        "format_minus_thinking": 0.46875
+      },
+      "best_thinking_gap": {
+        "layer": 0,
+        "answer_nn": 1.0,
+        "answer_p": 0.0033222591362126247,
+        "operation_nn": 0.0,
+        "operation_p": 1.0,
+        "format_nn": 1.0,
+        "format_p": 0.0033222591362126247,
+        "thinking_max": 1.0,
+        "format_minus_thinking": 0.0
+      }
+    }
+  },
+  "runtime_sec": 36.6
+}

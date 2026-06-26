@@ -1,0 +1,3275 @@
+{
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "n": 64,
+  "needs": [
+    "reassure",
+    "correct",
+    "boundary",
+    "guide"
+  ],
+  "domains": [
+    "presentation",
+    "budget",
+    "workshop",
+    "code",
+    "itinerary",
+    "recipe",
+    "equipment",
+    "schedule"
+  ],
+  "responder_kinds": [
+    "human",
+    "ai"
+  ],
+  "listeners": [
+    "Jonah",
+    "Owen",
+    "Ravi",
+    "Theo"
+  ],
+  "max_new_tokens": 40,
+  "n_shuffle": 300,
+  "items": [
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "workshop",
+      "domain_label": 2,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "SABLE"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "budget",
+      "domain_label": 1,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "MICA"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "equipment",
+      "domain_label": 6,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "SABLE"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "presentation",
+      "domain_label": 0,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "Mara"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "workshop",
+      "domain_label": 2,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "Lena"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "presentation",
+      "domain_label": 0,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "ORION"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "schedule",
+      "domain_label": 7,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "NOVA"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "schedule",
+      "domain_label": 7,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "Tess"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "presentation",
+      "domain_label": 0,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "Mara"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "itinerary",
+      "domain_label": 4,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "Mara"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "budget",
+      "domain_label": 1,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "Nia"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "budget",
+      "domain_label": 1,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "Nia"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "code",
+      "domain_label": 3,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "NOVA"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "code",
+      "domain_label": 3,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "Tess"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "code",
+      "domain_label": 3,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "Tess"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "budget",
+      "domain_label": 1,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "Nia"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "recipe",
+      "domain_label": 5,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "MICA"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "workshop",
+      "domain_label": 2,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "Lena"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "schedule",
+      "domain_label": 7,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "NOVA"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "budget",
+      "domain_label": 1,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "Nia"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "recipe",
+      "domain_label": 5,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "MICA"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "recipe",
+      "domain_label": 5,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "Nia"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "budget",
+      "domain_label": 1,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "MICA"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "itinerary",
+      "domain_label": 4,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "ORION"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "schedule",
+      "domain_label": 7,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "Tess"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "schedule",
+      "domain_label": 7,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "Tess"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "itinerary",
+      "domain_label": 4,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "Mara"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "workshop",
+      "domain_label": 2,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "SABLE"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "equipment",
+      "domain_label": 6,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "Lena"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "recipe",
+      "domain_label": 5,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "Nia"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "workshop",
+      "domain_label": 2,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "SABLE"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "recipe",
+      "domain_label": 5,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "MICA"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "recipe",
+      "domain_label": 5,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "Nia"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "itinerary",
+      "domain_label": 4,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "Mara"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "itinerary",
+      "domain_label": 4,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "Mara"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "recipe",
+      "domain_label": 5,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "MICA"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "workshop",
+      "domain_label": 2,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "SABLE"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "schedule",
+      "domain_label": 7,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "NOVA"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "itinerary",
+      "domain_label": 4,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "ORION"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "budget",
+      "domain_label": 1,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "MICA"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "schedule",
+      "domain_label": 7,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "NOVA"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "equipment",
+      "domain_label": 6,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "SABLE"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "presentation",
+      "domain_label": 0,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "Mara"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "itinerary",
+      "domain_label": 4,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "ORION"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "code",
+      "domain_label": 3,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "Tess"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "equipment",
+      "domain_label": 6,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "Lena"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "presentation",
+      "domain_label": 0,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "Mara"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "equipment",
+      "domain_label": 6,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "SABLE"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "presentation",
+      "domain_label": 0,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "ORION"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "budget",
+      "domain_label": 1,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "MICA"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "code",
+      "domain_label": 3,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "Tess"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "recipe",
+      "domain_label": 5,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "Nia"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "code",
+      "domain_label": 3,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "NOVA"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "code",
+      "domain_label": 3,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "NOVA"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "schedule",
+      "domain_label": 7,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "Tess"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "code",
+      "domain_label": 3,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "NOVA"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "presentation",
+      "domain_label": 0,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Jonah",
+      "target_label": 0,
+      "responder": "ORION"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "workshop",
+      "domain_label": 2,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "Lena"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "presentation",
+      "domain_label": 0,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "ORION"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "equipment",
+      "domain_label": 6,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Ravi",
+      "target_label": 2,
+      "responder": "Lena"
+    },
+    {
+      "target_need": "guide",
+      "target_need_label": 3,
+      "domain": "equipment",
+      "domain_label": 6,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "Lena"
+    },
+    {
+      "target_need": "boundary",
+      "target_need_label": 2,
+      "domain": "equipment",
+      "domain_label": 6,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "SABLE"
+    },
+    {
+      "target_need": "reassure",
+      "target_need_label": 0,
+      "domain": "itinerary",
+      "domain_label": 4,
+      "responder_kind": "ai",
+      "responder_kind_label": 1,
+      "target": "Owen",
+      "target_label": 1,
+      "responder": "ORION"
+    },
+    {
+      "target_need": "correct",
+      "target_need_label": 1,
+      "domain": "workshop",
+      "domain_label": 2,
+      "responder_kind": "human",
+      "responder_kind_label": 0,
+      "target": "Theo",
+      "target_label": 3,
+      "responder": "Lena"
+    }
+  ],
+  "samples": [
+    {
+      "target_need": "boundary",
+      "domain": "workshop",
+      "responder_kind": "ai",
+      "responder": "SABLE",
+      "target": "Owen",
+      "generated": "\"Owen, I've already assisted Theo and Jonah with the plan, and I have to leave in five minutes. Let's focus on getting the first activity on the board and set the timer."
+    },
+    {
+      "target_need": "reassure",
+      "domain": "budget",
+      "responder_kind": "ai",
+      "responder": "MICA",
+      "target": "Ravi",
+      "generated": "\"Ravi, I've reviewed the budget sheet and the invoice totals. The discrepancy is in the travel line, which you've already checked twice. Let's verify the travel line total again to ensure"
+    },
+    {
+      "target_need": "reassure",
+      "domain": "equipment",
+      "responder_kind": "ai",
+      "responder": "SABLE",
+      "target": "Theo",
+      "generated": "\"Actually, I've already walked you through the setup twice, Theo. What's holding you back now?\""
+    },
+    {
+      "target_need": "guide",
+      "domain": "presentation",
+      "responder_kind": "human",
+      "responder": "Mara",
+      "target": "Theo",
+      "generated": "\"Let me take a look, but can you tell me what's not clicking for you?\""
+    },
+    {
+      "target_need": "guide",
+      "domain": "workshop",
+      "responder_kind": "human",
+      "responder": "Lena",
+      "target": "Owen",
+      "generated": "\"Let's just write 'Welcome and Introduction' and set the timer for five minutes, we can adjust as we go.\""
+    },
+    {
+      "target_need": "correct",
+      "domain": "presentation",
+      "responder_kind": "ai",
+      "responder": "ORION",
+      "target": "Ravi",
+      "generated": "\"Ravi, I've reviewed the client's approval from yesterday, and the new price is confirmed. Let's focus on the presentation, not the outdated assumptions.\""
+    },
+    {
+      "target_need": "reassure",
+      "domain": "schedule",
+      "responder_kind": "ai",
+      "responder": "NOVA",
+      "target": "Jonah",
+      "generated": "\"Jonah, I've reviewed the schedule and manager's notes multiple times. What's causing your hesitation? Is it the potential impact on closing coverage?\""
+    },
+    {
+      "target_need": "boundary",
+      "domain": "schedule",
+      "responder_kind": "human",
+      "responder": "Tess",
+      "target": "Owen",
+      "generated": "\"Owen, I've already helped Theo check the schedule twice, and I have to leave in five minutes. What specifically do you need help with?\""
+    },
+    {
+      "target_need": "boundary",
+      "domain": "presentation",
+      "responder_kind": "human",
+      "responder": "Mara",
+      "target": "Ravi",
+      "generated": "\"Ravi, I've already helped you twice, and I have to leave in five minutes. What specifically do you need help with?\""
+    },
+    {
+      "target_need": "correct",
+      "domain": "itinerary",
+      "responder_kind": "human",
+      "responder": "Mara",
+      "target": "Owen",
+      "generated": "\"Owen, I think you're looking at the wrong time, the train leaves at 10:45, not after lunch.\""
+    },
+    {
+      "target_need": "boundary",
+      "domain": "budget",
+      "responder_kind": "human",
+      "responder": "Nia",
+      "target": "Theo",
+      "generated": "\"Seriously, Theo, I've already helped Owen check this twice. What's going on?\""
+    },
+    {
+      "target_need": "reassure",
+      "domain": "budget",
+      "responder_kind": "human",
+      "responder": "Nia",
+      "target": "Owen",
+      "generated": "\"Owen, I've already checked the math, and it looks good to me. What's making you hesitant?\""
+    }
+  ],
+  "positions": {
+    "pre": {
+      "name": "pre",
+      "scores": {
+        "target_need": {
+          "per_layer": [
+            {
+              "layer": 0,
+              "nn": 0.0,
+              "null": 0.2353125,
+              "p": 1.0
+            },
+            {
+              "layer": 1,
+              "nn": 0.0,
+              "null": 0.23791666666666667,
+              "p": 1.0
+            },
+            {
+              "layer": 2,
+              "nn": 0.0,
+              "null": 0.23317708333333334,
+              "p": 1.0
+            },
+            {
+              "layer": 3,
+              "nn": 0.0,
+              "null": 0.24458333333333335,
+              "p": 1.0
+            },
+            {
+              "layer": 4,
+              "nn": 0.0,
+              "null": 0.23515625,
+              "p": 1.0
+            },
+            {
+              "layer": 5,
+              "nn": 0.0,
+              "null": 0.23375,
+              "p": 1.0
+            },
+            {
+              "layer": 6,
+              "nn": 0.0,
+              "null": 0.23989583333333334,
+              "p": 1.0
+            },
+            {
+              "layer": 7,
+              "nn": 0.0,
+              "null": 0.23458333333333334,
+              "p": 1.0
+            },
+            {
+              "layer": 8,
+              "nn": 0.015625,
+              "null": 0.24010416666666667,
+              "p": 1.0
+            },
+            {
+              "layer": 9,
+              "nn": 0.046875,
+              "null": 0.23838541666666666,
+              "p": 1.0
+            },
+            {
+              "layer": 10,
+              "nn": 0.078125,
+              "null": 0.23583333333333334,
+              "p": 0.9966777408637874
+            },
+            {
+              "layer": 11,
+              "nn": 0.109375,
+              "null": 0.24385416666666668,
+              "p": 0.9900332225913622
+            },
+            {
+              "layer": 12,
+              "nn": 0.234375,
+              "null": 0.23458333333333334,
+              "p": 0.5282392026578073
+            },
+            {
+              "layer": 13,
+              "nn": 0.484375,
+              "null": 0.23947916666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 14,
+              "nn": 0.625,
+              "null": 0.23510416666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 15,
+              "nn": 0.75,
+              "null": 0.23291666666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 16,
+              "nn": 0.765625,
+              "null": 0.23817708333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 17,
+              "nn": 0.765625,
+              "null": 0.24026041666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 18,
+              "nn": 0.640625,
+              "null": 0.24296875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 19,
+              "nn": 0.671875,
+              "null": 0.23552083333333335,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 20,
+              "nn": 0.6875,
+              "null": 0.23796875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 21,
+              "nn": 0.6875,
+              "null": 0.24036458333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 22,
+              "nn": 0.703125,
+              "null": 0.23208333333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 23,
+              "nn": 0.703125,
+              "null": 0.24510416666666668,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 24,
+              "nn": 0.765625,
+              "null": 0.23135416666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 25,
+              "nn": 0.78125,
+              "null": 0.24286458333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 26,
+              "nn": 0.734375,
+              "null": 0.23489583333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 27,
+              "nn": 0.78125,
+              "null": 0.24213541666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 28,
+              "nn": 0.75,
+              "null": 0.23479166666666668,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 29,
+              "nn": 0.765625,
+              "null": 0.24458333333333335,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 30,
+              "nn": 0.734375,
+              "null": 0.23020833333333332,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 31,
+              "nn": 0.6875,
+              "null": 0.23510416666666667,
+              "p": 0.0033222591362126247
+            }
+          ],
+          "best": {
+            "layer": 25,
+            "nn": 0.78125,
+            "null": 0.24286458333333333,
+            "p": 0.0033222591362126247
+          }
+        },
+        "domain": {
+          "per_layer": [
+            {
+              "layer": 0,
+              "nn": 1.0,
+              "null": 0.11072916666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 1,
+              "nn": 1.0,
+              "null": 0.11380208333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 2,
+              "nn": 1.0,
+              "null": 0.11697916666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 3,
+              "nn": 1.0,
+              "null": 0.11578125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 4,
+              "nn": 1.0,
+              "null": 0.11098958333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 5,
+              "nn": 1.0,
+              "null": 0.11130208333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 6,
+              "nn": 1.0,
+              "null": 0.11546875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 7,
+              "nn": 1.0,
+              "null": 0.109375,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 8,
+              "nn": 0.984375,
+              "null": 0.11109375,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 9,
+              "nn": 0.953125,
+              "null": 0.11552083333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 10,
+              "nn": 0.921875,
+              "null": 0.10869791666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 11,
+              "nn": 0.890625,
+              "null": 0.11333333333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 12,
+              "nn": 0.765625,
+              "null": 0.11026041666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 13,
+              "nn": 0.515625,
+              "null": 0.1153125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 14,
+              "nn": 0.375,
+              "null": 0.11104166666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 15,
+              "nn": 0.25,
+              "null": 0.11515625,
+              "p": 0.019933554817275746
+            },
+            {
+              "layer": 16,
+              "nn": 0.234375,
+              "null": 0.1103125,
+              "p": 0.036544850498338874
+            },
+            {
+              "layer": 17,
+              "nn": 0.234375,
+              "null": 0.11260416666666667,
+              "p": 0.04318936877076412
+            },
+            {
+              "layer": 18,
+              "nn": 0.359375,
+              "null": 0.11046875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 19,
+              "nn": 0.328125,
+              "null": 0.11427083333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 20,
+              "nn": 0.3125,
+              "null": 0.11390625,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 21,
+              "nn": 0.3125,
+              "null": 0.11208333333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 22,
+              "nn": 0.296875,
+              "null": 0.11145833333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 23,
+              "nn": 0.296875,
+              "null": 0.11145833333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 24,
+              "nn": 0.21875,
+              "null": 0.10895833333333334,
+              "p": 0.046511627906976744
+            },
+            {
+              "layer": 25,
+              "nn": 0.203125,
+              "null": 0.11479166666666667,
+              "p": 0.07973421926910298
+            },
+            {
+              "layer": 26,
+              "nn": 0.265625,
+              "null": 0.10677083333333333,
+              "p": 0.009966777408637873
+            },
+            {
+              "layer": 27,
+              "nn": 0.1875,
+              "null": 0.11770833333333333,
+              "p": 0.11960132890365449
+            },
+            {
+              "layer": 28,
+              "nn": 0.21875,
+              "null": 0.11354166666666667,
+              "p": 0.029900332225913623
+            },
+            {
+              "layer": 29,
+              "nn": 0.203125,
+              "null": 0.10927083333333333,
+              "p": 0.06976744186046512
+            },
+            {
+              "layer": 30,
+              "nn": 0.265625,
+              "null": 0.11078125,
+              "p": 0.006644518272425249
+            },
+            {
+              "layer": 31,
+              "nn": 0.3125,
+              "null": 0.11515625,
+              "p": 0.0033222591362126247
+            }
+          ],
+          "best": {
+            "layer": 0,
+            "nn": 1.0,
+            "null": 0.11072916666666667,
+            "p": 0.0033222591362126247
+          }
+        },
+        "responder_kind": {
+          "per_layer": [
+            {
+              "layer": 0,
+              "nn": 1.0,
+              "null": 0.48885416666666665,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 1,
+              "nn": 1.0,
+              "null": 0.48963541666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 2,
+              "nn": 1.0,
+              "null": 0.49578125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 3,
+              "nn": 1.0,
+              "null": 0.49015625,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 4,
+              "nn": 1.0,
+              "null": 0.4828645833333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 5,
+              "nn": 1.0,
+              "null": 0.4913020833333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 6,
+              "nn": 1.0,
+              "null": 0.4988020833333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 7,
+              "nn": 1.0,
+              "null": 0.4973958333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 8,
+              "nn": 1.0,
+              "null": 0.49692708333333335,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 9,
+              "nn": 1.0,
+              "null": 0.49572916666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 10,
+              "nn": 1.0,
+              "null": 0.48880208333333336,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 11,
+              "nn": 1.0,
+              "null": 0.4875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 12,
+              "nn": 1.0,
+              "null": 0.49411458333333336,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 13,
+              "nn": 1.0,
+              "null": 0.49,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 14,
+              "nn": 1.0,
+              "null": 0.49171875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 15,
+              "nn": 1.0,
+              "null": 0.49557291666666664,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 16,
+              "nn": 1.0,
+              "null": 0.4926041666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 17,
+              "nn": 1.0,
+              "null": 0.49265625,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 18,
+              "nn": 1.0,
+              "null": 0.4951041666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 19,
+              "nn": 1.0,
+              "null": 0.4944791666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 20,
+              "nn": 1.0,
+              "null": 0.4925,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 21,
+              "nn": 1.0,
+              "null": 0.48880208333333336,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 22,
+              "nn": 1.0,
+              "null": 0.4945833333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 23,
+              "nn": 1.0,
+              "null": 0.49026041666666664,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 24,
+              "nn": 1.0,
+              "null": 0.4840625,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 25,
+              "nn": 1.0,
+              "null": 0.4938020833333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 26,
+              "nn": 0.984375,
+              "null": 0.501875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 27,
+              "nn": 1.0,
+              "null": 0.49546875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 28,
+              "nn": 0.984375,
+              "null": 0.4976041666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 29,
+              "nn": 1.0,
+              "null": 0.48625,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 30,
+              "nn": 1.0,
+              "null": 0.49546875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 31,
+              "nn": 1.0,
+              "null": 0.4856770833333333,
+              "p": 0.0033222591362126247
+            }
+          ],
+          "best": {
+            "layer": 0,
+            "nn": 1.0,
+            "null": 0.48885416666666665,
+            "p": 0.0033222591362126247
+          }
+        },
+        "target_name": {
+          "per_layer": [
+            {
+              "layer": 0,
+              "nn": 0.0,
+              "null": 0.23348958333333333,
+              "p": 1.0
+            },
+            {
+              "layer": 1,
+              "nn": 0.0,
+              "null": 0.23979166666666665,
+              "p": 1.0
+            },
+            {
+              "layer": 2,
+              "nn": 0.0,
+              "null": 0.23921875,
+              "p": 1.0
+            },
+            {
+              "layer": 3,
+              "nn": 0.0,
+              "null": 0.24161458333333333,
+              "p": 1.0
+            },
+            {
+              "layer": 4,
+              "nn": 0.0,
+              "null": 0.24588541666666666,
+              "p": 1.0
+            },
+            {
+              "layer": 5,
+              "nn": 0.0,
+              "null": 0.23520833333333332,
+              "p": 1.0
+            },
+            {
+              "layer": 6,
+              "nn": 0.0,
+              "null": 0.23317708333333334,
+              "p": 1.0
+            },
+            {
+              "layer": 7,
+              "nn": 0.0,
+              "null": 0.24234375,
+              "p": 1.0
+            },
+            {
+              "layer": 8,
+              "nn": 0.015625,
+              "null": 0.24192708333333332,
+              "p": 1.0
+            },
+            {
+              "layer": 9,
+              "nn": 0.046875,
+              "null": 0.23833333333333334,
+              "p": 1.0
+            },
+            {
+              "layer": 10,
+              "nn": 0.078125,
+              "null": 0.23739583333333333,
+              "p": 0.9966777408637874
+            },
+            {
+              "layer": 11,
+              "nn": 0.109375,
+              "null": 0.23098958333333333,
+              "p": 0.9833887043189369
+            },
+            {
+              "layer": 12,
+              "nn": 0.203125,
+              "null": 0.23932291666666666,
+              "p": 0.707641196013289
+            },
+            {
+              "layer": 13,
+              "nn": 0.484375,
+              "null": 0.23473958333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 14,
+              "nn": 0.59375,
+              "null": 0.23359375,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 15,
+              "nn": 0.625,
+              "null": 0.23234375,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 16,
+              "nn": 0.640625,
+              "null": 0.24260416666666668,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 17,
+              "nn": 0.40625,
+              "null": 0.24005208333333333,
+              "p": 0.013289036544850499
+            },
+            {
+              "layer": 18,
+              "nn": 0.296875,
+              "null": 0.23864583333333333,
+              "p": 0.2292358803986711
+            },
+            {
+              "layer": 19,
+              "nn": 0.34375,
+              "null": 0.2375,
+              "p": 0.07308970099667775
+            },
+            {
+              "layer": 20,
+              "nn": 0.328125,
+              "null": 0.24119791666666668,
+              "p": 0.10963455149501661
+            },
+            {
+              "layer": 21,
+              "nn": 0.359375,
+              "null": 0.23479166666666668,
+              "p": 0.06312292358803986
+            },
+            {
+              "layer": 22,
+              "nn": 0.375,
+              "null": 0.23682291666666666,
+              "p": 0.03986710963455149
+            },
+            {
+              "layer": 23,
+              "nn": 0.375,
+              "null": 0.23979166666666665,
+              "p": 0.03322259136212625
+            },
+            {
+              "layer": 24,
+              "nn": 0.640625,
+              "null": 0.23416666666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 25,
+              "nn": 0.703125,
+              "null": 0.23614583333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 26,
+              "nn": 0.59375,
+              "null": 0.23682291666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 27,
+              "nn": 0.703125,
+              "null": 0.23244791666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 28,
+              "nn": 0.671875,
+              "null": 0.238125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 29,
+              "nn": 0.703125,
+              "null": 0.23026041666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 30,
+              "nn": 0.671875,
+              "null": 0.23796875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 31,
+              "nn": 0.625,
+              "null": 0.23010416666666667,
+              "p": 0.0033222591362126247
+            }
+          ],
+          "best": {
+            "layer": 25,
+            "nn": 0.703125,
+            "null": 0.23614583333333333,
+            "p": 0.0033222591362126247
+          }
+        }
+      }
+    },
+    "render": {
+      "name": "render",
+      "scores": {
+        "target_need": {
+          "per_layer": [
+            {
+              "layer": 0,
+              "nn": 0.625,
+              "null": 0.240625,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 1,
+              "nn": 0.65625,
+              "null": 0.23567708333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 2,
+              "nn": 0.65625,
+              "null": 0.23239583333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 3,
+              "nn": 0.640625,
+              "null": 0.24229166666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 4,
+              "nn": 0.640625,
+              "null": 0.24776041666666668,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 5,
+              "nn": 0.640625,
+              "null": 0.24130208333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 6,
+              "nn": 0.65625,
+              "null": 0.23395833333333332,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 7,
+              "nn": 0.703125,
+              "null": 0.23723958333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 8,
+              "nn": 0.703125,
+              "null": 0.2321875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 9,
+              "nn": 0.703125,
+              "null": 0.23744791666666668,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 10,
+              "nn": 0.71875,
+              "null": 0.23958333333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 11,
+              "nn": 0.734375,
+              "null": 0.23708333333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 12,
+              "nn": 0.75,
+              "null": 0.23979166666666665,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 13,
+              "nn": 0.765625,
+              "null": 0.2365625,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 14,
+              "nn": 0.78125,
+              "null": 0.23557291666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 15,
+              "nn": 0.78125,
+              "null": 0.23682291666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 16,
+              "nn": 0.8125,
+              "null": 0.23072916666666668,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 17,
+              "nn": 0.8125,
+              "null": 0.23661458333333332,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 18,
+              "nn": 0.8125,
+              "null": 0.24489583333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 19,
+              "nn": 0.796875,
+              "null": 0.24151041666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 20,
+              "nn": 0.796875,
+              "null": 0.24052083333333332,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 21,
+              "nn": 0.796875,
+              "null": 0.2453125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 22,
+              "nn": 0.765625,
+              "null": 0.23541666666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 23,
+              "nn": 0.75,
+              "null": 0.24364583333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 24,
+              "nn": 0.75,
+              "null": 0.24098958333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 25,
+              "nn": 0.75,
+              "null": 0.23802083333333332,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 26,
+              "nn": 0.75,
+              "null": 0.23520833333333332,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 27,
+              "nn": 0.734375,
+              "null": 0.23734375,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 28,
+              "nn": 0.734375,
+              "null": 0.2434375,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 29,
+              "nn": 0.734375,
+              "null": 0.23833333333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 30,
+              "nn": 0.71875,
+              "null": 0.23453125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 31,
+              "nn": 0.703125,
+              "null": 0.23526041666666667,
+              "p": 0.0033222591362126247
+            }
+          ],
+          "best": {
+            "layer": 16,
+            "nn": 0.8125,
+            "null": 0.23072916666666668,
+            "p": 0.0033222591362126247
+          }
+        },
+        "domain": {
+          "per_layer": [
+            {
+              "layer": 0,
+              "nn": 0.40625,
+              "null": 0.10677083333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 1,
+              "nn": 0.34375,
+              "null": 0.1121875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 2,
+              "nn": 0.34375,
+              "null": 0.11255208333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 3,
+              "nn": 0.359375,
+              "null": 0.10760416666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 4,
+              "nn": 0.40625,
+              "null": 0.11380208333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 5,
+              "nn": 0.390625,
+              "null": 0.11328125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 6,
+              "nn": 0.375,
+              "null": 0.10572916666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 7,
+              "nn": 0.34375,
+              "null": 0.11182291666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 8,
+              "nn": 0.3125,
+              "null": 0.12354166666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 9,
+              "nn": 0.359375,
+              "null": 0.11046875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 10,
+              "nn": 0.375,
+              "null": 0.1103125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 11,
+              "nn": 0.34375,
+              "null": 0.11369791666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 12,
+              "nn": 0.328125,
+              "null": 0.11328125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 13,
+              "nn": 0.390625,
+              "null": 0.11364583333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 14,
+              "nn": 0.390625,
+              "null": 0.11270833333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 15,
+              "nn": 0.4375,
+              "null": 0.11473958333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 16,
+              "nn": 0.421875,
+              "null": 0.1053125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 17,
+              "nn": 0.421875,
+              "null": 0.11291666666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 18,
+              "nn": 0.40625,
+              "null": 0.10994791666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 19,
+              "nn": 0.421875,
+              "null": 0.11088541666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 20,
+              "nn": 0.4375,
+              "null": 0.11145833333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 21,
+              "nn": 0.4375,
+              "null": 0.11291666666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 22,
+              "nn": 0.5,
+              "null": 0.11359375,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 23,
+              "nn": 0.5,
+              "null": 0.11296875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 24,
+              "nn": 0.5,
+              "null": 0.10953125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 25,
+              "nn": 0.5,
+              "null": 0.1125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 26,
+              "nn": 0.5,
+              "null": 0.11432291666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 27,
+              "nn": 0.53125,
+              "null": 0.10994791666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 28,
+              "nn": 0.53125,
+              "null": 0.11057291666666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 29,
+              "nn": 0.546875,
+              "null": 0.11453125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 30,
+              "nn": 0.5625,
+              "null": 0.11239583333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 31,
+              "nn": 0.578125,
+              "null": 0.11161458333333334,
+              "p": 0.0033222591362126247
+            }
+          ],
+          "best": {
+            "layer": 31,
+            "nn": 0.578125,
+            "null": 0.11161458333333334,
+            "p": 0.0033222591362126247
+          }
+        },
+        "responder_kind": {
+          "per_layer": [
+            {
+              "layer": 0,
+              "nn": 0.671875,
+              "null": 0.49765625,
+              "p": 0.006644518272425249
+            },
+            {
+              "layer": 1,
+              "nn": 0.71875,
+              "null": 0.49635416666666665,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 2,
+              "nn": 0.6875,
+              "null": 0.48682291666666666,
+              "p": 0.013289036544850499
+            },
+            {
+              "layer": 3,
+              "nn": 0.71875,
+              "null": 0.4928125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 4,
+              "nn": 0.703125,
+              "null": 0.49265625,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 5,
+              "nn": 0.6875,
+              "null": 0.4976041666666667,
+              "p": 0.006644518272425249
+            },
+            {
+              "layer": 6,
+              "nn": 0.6875,
+              "null": 0.49296875,
+              "p": 0.016611295681063124
+            },
+            {
+              "layer": 7,
+              "nn": 0.703125,
+              "null": 0.4940104166666667,
+              "p": 0.019933554817275746
+            },
+            {
+              "layer": 8,
+              "nn": 0.734375,
+              "null": 0.48723958333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 9,
+              "nn": 0.75,
+              "null": 0.49265625,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 10,
+              "nn": 0.703125,
+              "null": 0.4898958333333333,
+              "p": 0.009966777408637873
+            },
+            {
+              "layer": 11,
+              "nn": 0.765625,
+              "null": 0.49828125,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 12,
+              "nn": 0.75,
+              "null": 0.49135416666666665,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 13,
+              "nn": 0.703125,
+              "null": 0.48895833333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 14,
+              "nn": 0.71875,
+              "null": 0.49645833333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 15,
+              "nn": 0.6875,
+              "null": 0.4891666666666667,
+              "p": 0.016611295681063124
+            },
+            {
+              "layer": 16,
+              "nn": 0.71875,
+              "null": 0.49046875,
+              "p": 0.006644518272425249
+            },
+            {
+              "layer": 17,
+              "nn": 0.71875,
+              "null": 0.49161458333333335,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 18,
+              "nn": 0.734375,
+              "null": 0.48921875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 19,
+              "nn": 0.734375,
+              "null": 0.48963541666666666,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 20,
+              "nn": 0.71875,
+              "null": 0.4923958333333333,
+              "p": 0.006644518272425249
+            },
+            {
+              "layer": 21,
+              "nn": 0.71875,
+              "null": 0.4896875,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 22,
+              "nn": 0.71875,
+              "null": 0.48723958333333334,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 23,
+              "nn": 0.734375,
+              "null": 0.5003645833333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 24,
+              "nn": 0.734375,
+              "null": 0.49833333333333335,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 25,
+              "nn": 0.734375,
+              "null": 0.4953125,
+              "p": 0.009966777408637873
+            },
+            {
+              "layer": 26,
+              "nn": 0.734375,
+              "null": 0.4930729166666667,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 27,
+              "nn": 0.71875,
+              "null": 0.4956770833333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 28,
+              "nn": 0.71875,
+              "null": 0.4945833333333333,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 29,
+              "nn": 0.703125,
+              "null": 0.4915625,
+              "p": 0.0033222591362126247
+            },
+            {
+              "layer": 30,
+              "nn": 0.703125,
+              "null": 0.48375,
+              "p": 0.006644518272425249
+            },
+            {
+              "layer": 31,
+              "nn": 0.703125,
+              "null": 0.5000520833333333,
+              "p": 0.009966777408637873
+            }
+          ],
+          "best": {
+            "layer": 11,
+            "nn": 0.765625,
+            "null": 0.49828125,
+            "p": 0.0033222591362126247
+          }
+        },
+        "target_name": {
+          "per_layer": [
+            {
+              "layer": 0,
+              "nn": 0.203125,
+              "null": 0.23739583333333333,
+              "p": 0.7441860465116279
+            },
+            {
+              "layer": 1,
+              "nn": 0.234375,
+              "null": 0.23515625,
+              "p": 0.5249169435215947
+            },
+            {
+              "layer": 2,
+              "nn": 0.234375,
+              "null": 0.23364583333333333,
+              "p": 0.5049833887043189
+            },
+            {
+              "layer": 3,
+              "nn": 0.21875,
+              "null": 0.24109375,
+              "p": 0.6644518272425249
+            },
+            {
+              "layer": 4,
+              "nn": 0.203125,
+              "null": 0.23755208333333333,
+              "p": 0.7475083056478405
+            },
+            {
+              "layer": 5,
+              "nn": 0.21875,
+              "null": 0.23932291666666666,
+              "p": 0.6710963455149501
+            },
+            {
+              "layer": 6,
+              "nn": 0.25,
+              "null": 0.2340625,
+              "p": 0.4219269102990033
+            },
+            {
+              "layer": 7,
+              "nn": 0.25,
+              "null": 0.24166666666666667,
+              "p": 0.5083056478405316
+            },
+            {
+              "layer": 8,
+              "nn": 0.25,
+              "null": 0.2359375,
+              "p": 0.4684385382059801
+            },
+            {
+              "layer": 9,
+              "nn": 0.21875,
+              "null": 0.23901041666666667,
+              "p": 0.654485049833887
+            },
+            {
+              "layer": 10,
+              "nn": 0.1875,
+              "null": 0.24020833333333333,
+              "p": 0.8172757475083057
+            },
+            {
+              "layer": 11,
+              "nn": 0.1875,
+              "null": 0.23807291666666666,
+              "p": 0.7873754152823921
+            },
+            {
+              "layer": 12,
+              "nn": 0.1875,
+              "null": 0.23484375,
+              "p": 0.7674418604651163
+            },
+            {
+              "layer": 13,
+              "nn": 0.15625,
+              "null": 0.23208333333333334,
+              "p": 0.8970099667774086
+            },
+            {
+              "layer": 14,
+              "nn": 0.15625,
+              "null": 0.23770833333333333,
+              "p": 0.9169435215946844
+            },
+            {
+              "layer": 15,
+              "nn": 0.171875,
+              "null": 0.23692708333333334,
+              "p": 0.8272425249169435
+            },
+            {
+              "layer": 16,
+              "nn": 0.171875,
+              "null": 0.23973958333333334,
+              "p": 0.867109634551495
+            },
+            {
+              "layer": 17,
+              "nn": 0.203125,
+              "null": 0.23864583333333333,
+              "p": 0.7408637873754153
+            },
+            {
+              "layer": 18,
+              "nn": 0.203125,
+              "null": 0.23489583333333333,
+              "p": 0.707641196013289
+            },
+            {
+              "layer": 19,
+              "nn": 0.203125,
+              "null": 0.23598958333333334,
+              "p": 0.7209302325581395
+            },
+            {
+              "layer": 20,
+              "nn": 0.1875,
+              "null": 0.23651041666666667,
+              "p": 0.8073089700996677
+            },
+            {
+              "layer": 21,
+              "nn": 0.1875,
+              "null": 0.24125,
+              "p": 0.8205980066445183
+            },
+            {
+              "layer": 22,
+              "nn": 0.171875,
+              "null": 0.24270833333333333,
+              "p": 0.8803986710963455
+            },
+            {
+              "layer": 23,
+              "nn": 0.171875,
+              "null": 0.23614583333333333,
+              "p": 0.8604651162790697
+            },
+            {
+              "layer": 24,
+              "nn": 0.171875,
+              "null": 0.23953125,
+              "p": 0.8604651162790697
+            },
+            {
+              "layer": 25,
+              "nn": 0.171875,
+              "null": 0.23739583333333333,
+              "p": 0.8604651162790697
+            },
+            {
+              "layer": 26,
+              "nn": 0.171875,
+              "null": 0.23828125,
+              "p": 0.8471760797342193
+            },
+            {
+              "layer": 27,
+              "nn": 0.15625,
+              "null": 0.24083333333333334,
+              "p": 0.9235880398671097
+            },
+            {
+              "layer": 28,
+              "nn": 0.171875,
+              "null": 0.23328125,
+              "p": 0.8604651162790697
+            },
+            {
+              "layer": 29,
+              "nn": 0.15625,
+              "null": 0.23833333333333334,
+              "p": 0.9102990033222591
+            },
+            {
+              "layer": 30,
+              "nn": 0.15625,
+              "null": 0.23609375,
+              "p": 0.9102990033222591
+            },
+            {
+              "layer": 31,
+              "nn": 0.140625,
+              "null": 0.23442708333333334,
+              "p": 0.9269102990033222
+            }
+          ],
+          "best": {
+            "layer": 6,
+            "nn": 0.25,
+            "null": 0.2340625,
+            "p": 0.4219269102990033
+          }
+        }
+      }
+    }
+  },
+  "bridge": {
+    "target_need": {
+      "per_layer": [
+        {
+          "layer": 0,
+          "nn": 0.125,
+          "null": 0.2471875,
+          "p": 1.0
+        },
+        {
+          "layer": 1,
+          "nn": 0.1875,
+          "null": 0.2528125,
+          "p": 0.9700996677740864
+        },
+        {
+          "layer": 2,
+          "nn": 0.15625,
+          "null": 0.24979166666666666,
+          "p": 1.0
+        },
+        {
+          "layer": 3,
+          "nn": 0.203125,
+          "null": 0.24765625,
+          "p": 0.9435215946843853
+        },
+        {
+          "layer": 4,
+          "nn": 0.1875,
+          "null": 0.24630208333333334,
+          "p": 0.9269102990033222
+        },
+        {
+          "layer": 5,
+          "nn": 0.140625,
+          "null": 0.25276041666666665,
+          "p": 1.0
+        },
+        {
+          "layer": 6,
+          "nn": 0.203125,
+          "null": 0.24963541666666667,
+          "p": 0.9269102990033222
+        },
+        {
+          "layer": 7,
+          "nn": 0.21875,
+          "null": 0.2504166666666667,
+          "p": 0.8305647840531561
+        },
+        {
+          "layer": 8,
+          "nn": 0.21875,
+          "null": 0.25109375,
+          "p": 0.7774086378737541
+        },
+        {
+          "layer": 9,
+          "nn": 0.21875,
+          "null": 0.24838541666666666,
+          "p": 0.8272425249169435
+        },
+        {
+          "layer": 10,
+          "nn": 0.265625,
+          "null": 0.2527083333333333,
+          "p": 0.43853820598006643
+        },
+        {
+          "layer": 11,
+          "nn": 0.25,
+          "null": 0.24859375,
+          "p": 0.5614617940199336
+        },
+        {
+          "layer": 12,
+          "nn": 0.390625,
+          "null": 0.24588541666666666,
+          "p": 0.019933554817275746
+        },
+        {
+          "layer": 13,
+          "nn": 0.515625,
+          "null": 0.24895833333333334,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 14,
+          "nn": 0.640625,
+          "null": 0.24098958333333334,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 15,
+          "nn": 0.734375,
+          "null": 0.25338541666666664,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 16,
+          "nn": 0.75,
+          "null": 0.24677083333333333,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 17,
+          "nn": 0.734375,
+          "null": 0.24984375,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 18,
+          "nn": 0.65625,
+          "null": 0.2515625,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 19,
+          "nn": 0.71875,
+          "null": 0.2496875,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 20,
+          "nn": 0.734375,
+          "null": 0.24869791666666666,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 21,
+          "nn": 0.71875,
+          "null": 0.24869791666666666,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 22,
+          "nn": 0.671875,
+          "null": 0.258125,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 23,
+          "nn": 0.65625,
+          "null": 0.2501041666666667,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 24,
+          "nn": 0.640625,
+          "null": 0.24697916666666667,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 25,
+          "nn": 0.609375,
+          "null": 0.2534375,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 26,
+          "nn": 0.671875,
+          "null": 0.24973958333333332,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 27,
+          "nn": 0.625,
+          "null": 0.2627083333333333,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 28,
+          "nn": 0.578125,
+          "null": 0.2475,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 29,
+          "nn": 0.578125,
+          "null": 0.24703125,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 30,
+          "nn": 0.484375,
+          "null": 0.24963541666666667,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 31,
+          "nn": 0.46875,
+          "null": 0.248125,
+          "p": 0.0033222591362126247
+        }
+      ],
+      "best": {
+        "layer": 16,
+        "nn": 0.75,
+        "null": 0.24677083333333333,
+        "p": 0.0033222591362126247
+      }
+    },
+    "domain": {
+      "per_layer": [
+        {
+          "layer": 0,
+          "nn": 0.9375,
+          "null": 0.13177083333333334,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 1,
+          "nn": 0.546875,
+          "null": 0.13057291666666668,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 2,
+          "nn": 0.46875,
+          "null": 0.12796875,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 3,
+          "nn": 0.421875,
+          "null": 0.12234375,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 4,
+          "nn": 0.28125,
+          "null": 0.12338541666666666,
+          "p": 0.019933554817275746
+        },
+        {
+          "layer": 5,
+          "nn": 0.328125,
+          "null": 0.12526041666666668,
+          "p": 0.013289036544850499
+        },
+        {
+          "layer": 6,
+          "nn": 0.40625,
+          "null": 0.12395833333333334,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 7,
+          "nn": 0.328125,
+          "null": 0.11875,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 8,
+          "nn": 0.3125,
+          "null": 0.12598958333333332,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 9,
+          "nn": 0.390625,
+          "null": 0.12359375,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 10,
+          "nn": 0.390625,
+          "null": 0.12473958333333333,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 11,
+          "nn": 0.265625,
+          "null": 0.12223958333333333,
+          "p": 0.006644518272425249
+        },
+        {
+          "layer": 12,
+          "nn": 0.140625,
+          "null": 0.12578125,
+          "p": 0.4053156146179402
+        },
+        {
+          "layer": 13,
+          "nn": 0.25,
+          "null": 0.12578125,
+          "p": 0.009966777408637873
+        },
+        {
+          "layer": 14,
+          "nn": 0.265625,
+          "null": 0.12859375,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 15,
+          "nn": 0.234375,
+          "null": 0.12755208333333334,
+          "p": 0.026578073089700997
+        },
+        {
+          "layer": 16,
+          "nn": 0.1875,
+          "null": 0.12328125,
+          "p": 0.07641196013289037
+        },
+        {
+          "layer": 17,
+          "nn": 0.28125,
+          "null": 0.12526041666666668,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 18,
+          "nn": 0.265625,
+          "null": 0.12390625,
+          "p": 0.006644518272425249
+        },
+        {
+          "layer": 19,
+          "nn": 0.234375,
+          "null": 0.12541666666666668,
+          "p": 0.016611295681063124
+        },
+        {
+          "layer": 20,
+          "nn": 0.265625,
+          "null": 0.12640625,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 21,
+          "nn": 0.28125,
+          "null": 0.12770833333333334,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 22,
+          "nn": 0.34375,
+          "null": 0.12333333333333334,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 23,
+          "nn": 0.359375,
+          "null": 0.12708333333333333,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 24,
+          "nn": 0.34375,
+          "null": 0.12854166666666667,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 25,
+          "nn": 0.328125,
+          "null": 0.12692708333333333,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 26,
+          "nn": 0.34375,
+          "null": 0.12822916666666667,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 27,
+          "nn": 0.359375,
+          "null": 0.12739583333333335,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 28,
+          "nn": 0.4375,
+          "null": 0.12151041666666666,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 29,
+          "nn": 0.4375,
+          "null": 0.12223958333333333,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 30,
+          "nn": 0.546875,
+          "null": 0.12848958333333332,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 31,
+          "nn": 0.578125,
+          "null": 0.12572916666666667,
+          "p": 0.0033222591362126247
+        }
+      ],
+      "best": {
+        "layer": 0,
+        "nn": 0.9375,
+        "null": 0.13177083333333334,
+        "p": 0.0033222591362126247
+      }
+    },
+    "responder_kind": {
+      "per_layer": [
+        {
+          "layer": 0,
+          "nn": 0.578125,
+          "null": 0.49796875,
+          "p": 0.18272425249169436
+        },
+        {
+          "layer": 1,
+          "nn": 0.578125,
+          "null": 0.4858854166666667,
+          "p": 0.2026578073089701
+        },
+        {
+          "layer": 2,
+          "nn": 0.75,
+          "null": 0.5130208333333334,
+          "p": 0.029900332225913623
+        },
+        {
+          "layer": 3,
+          "nn": 0.921875,
+          "null": 0.50734375,
+          "p": 0.006644518272425249
+        },
+        {
+          "layer": 4,
+          "nn": 0.515625,
+          "null": 0.50546875,
+          "p": 0.5249169435215947
+        },
+        {
+          "layer": 5,
+          "nn": 0.921875,
+          "null": 0.5033854166666667,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 6,
+          "nn": 0.96875,
+          "null": 0.49661458333333336,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 7,
+          "nn": 0.84375,
+          "null": 0.4956770833333333,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 8,
+          "nn": 0.78125,
+          "null": 0.49552083333333335,
+          "p": 0.016611295681063124
+        },
+        {
+          "layer": 9,
+          "nn": 0.90625,
+          "null": 0.4984895833333333,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 10,
+          "nn": 0.984375,
+          "null": 0.489375,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 11,
+          "nn": 0.90625,
+          "null": 0.4883854166666667,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 12,
+          "nn": 0.984375,
+          "null": 0.5105208333333333,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 13,
+          "nn": 1.0,
+          "null": 0.5059375,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 14,
+          "nn": 0.984375,
+          "null": 0.5049479166666667,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 15,
+          "nn": 0.9375,
+          "null": 0.5046875,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 16,
+          "nn": 1.0,
+          "null": 0.4997916666666667,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 17,
+          "nn": 0.9375,
+          "null": 0.4996875,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 18,
+          "nn": 1.0,
+          "null": 0.4896875,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 19,
+          "nn": 1.0,
+          "null": 0.5057291666666667,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 20,
+          "nn": 0.953125,
+          "null": 0.49786458333333333,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 21,
+          "nn": 0.96875,
+          "null": 0.5030208333333334,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 22,
+          "nn": 0.953125,
+          "null": 0.49744791666666666,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 23,
+          "nn": 0.953125,
+          "null": 0.49354166666666666,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 24,
+          "nn": 0.953125,
+          "null": 0.5069270833333334,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 25,
+          "nn": 0.96875,
+          "null": 0.5030729166666666,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 26,
+          "nn": 0.921875,
+          "null": 0.49776041666666665,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 27,
+          "nn": 0.9375,
+          "null": 0.49744791666666666,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 28,
+          "nn": 0.921875,
+          "null": 0.5015625,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 29,
+          "nn": 0.921875,
+          "null": 0.49625,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 30,
+          "nn": 0.921875,
+          "null": 0.4922916666666667,
+          "p": 0.0033222591362126247
+        },
+        {
+          "layer": 31,
+          "nn": 0.921875,
+          "null": 0.4947916666666667,
+          "p": 0.0033222591362126247
+        }
+      ],
+      "best": {
+        "layer": 13,
+        "nn": 1.0,
+        "null": 0.5059375,
+        "p": 0.0033222591362126247
+      }
+    },
+    "target_name": {
+      "per_layer": [
+        {
+          "layer": 0,
+          "nn": 0.125,
+          "null": 0.24947916666666667,
+          "p": 1.0
+        },
+        {
+          "layer": 1,
+          "nn": 0.140625,
+          "null": 0.24880208333333334,
+          "p": 1.0
+        },
+        {
+          "layer": 2,
+          "nn": 0.1875,
+          "null": 0.2523958333333333,
+          "p": 0.9767441860465116
+        },
+        {
+          "layer": 3,
+          "nn": 0.109375,
+          "null": 0.24973958333333332,
+          "p": 1.0
+        },
+        {
+          "layer": 4,
+          "nn": 0.28125,
+          "null": 0.24838541666666666,
+          "p": 0.292358803986711
+        },
+        {
+          "layer": 5,
+          "nn": 0.1875,
+          "null": 0.24953125,
+          "p": 0.9302325581395349
+        },
+        {
+          "layer": 6,
+          "nn": 0.140625,
+          "null": 0.25385416666666666,
+          "p": 0.9933554817275747
+        },
+        {
+          "layer": 7,
+          "nn": 0.203125,
+          "null": 0.2525,
+          "p": 0.8903654485049833
+        },
+        {
+          "layer": 8,
+          "nn": 0.1875,
+          "null": 0.24958333333333332,
+          "p": 0.9335548172757475
+        },
+        {
+          "layer": 9,
+          "nn": 0.21875,
+          "null": 0.24885416666666665,
+          "p": 0.8970099667774086
+        },
+        {
+          "layer": 10,
+          "nn": 0.109375,
+          "null": 0.25067708333333333,
+          "p": 1.0
+        },
+        {
+          "layer": 11,
+          "nn": 0.203125,
+          "null": 0.25,
+          "p": 0.9235880398671097
+        },
+        {
+          "layer": 12,
+          "nn": 0.21875,
+          "null": 0.24958333333333332,
+          "p": 0.8372093023255814
+        },
+        {
+          "layer": 13,
+          "nn": 0.234375,
+          "null": 0.24973958333333332,
+          "p": 0.7142857142857143
+        },
+        {
+          "layer": 14,
+          "nn": 0.328125,
+          "null": 0.2478125,
+          "p": 0.07641196013289037
+        },
+        {
+          "layer": 15,
+          "nn": 0.25,
+          "null": 0.25255208333333334,
+          "p": 0.5780730897009967
+        },
+        {
+          "layer": 16,
+          "nn": 0.265625,
+          "null": 0.25223958333333335,
+          "p": 0.46511627906976744
+        },
+        {
+          "layer": 17,
+          "nn": 0.15625,
+          "null": 0.24776041666666668,
+          "p": 0.9900332225913622
+        },
+        {
+          "layer": 18,
+          "nn": 0.15625,
+          "null": 0.2475,
+          "p": 0.9833887043189369
+        },
+        {
+          "layer": 19,
+          "nn": 0.125,
+          "null": 0.25046875,
+          "p": 0.9966777408637874
+        },
+        {
+          "layer": 20,
+          "nn": 0.125,
+          "null": 0.2530208333333333,
+          "p": 1.0
+        },
+        {
+          "layer": 21,
+          "nn": 0.171875,
+          "null": 0.2504166666666667,
+          "p": 0.9667774086378738
+        },
+        {
+          "layer": 22,
+          "nn": 0.125,
+          "null": 0.24901041666666668,
+          "p": 0.9933554817275747
+        },
+        {
+          "layer": 23,
+          "nn": 0.140625,
+          "null": 0.25114583333333335,
+          "p": 0.9966777408637874
+        },
+        {
+          "layer": 24,
+          "nn": 0.140625,
+          "null": 0.24682291666666667,
+          "p": 0.9966777408637874
+        },
+        {
+          "layer": 25,
+          "nn": 0.171875,
+          "null": 0.24692708333333332,
+          "p": 0.9634551495016611
+        },
+        {
+          "layer": 26,
+          "nn": 0.171875,
+          "null": 0.251875,
+          "p": 0.9833887043189369
+        },
+        {
+          "layer": 27,
+          "nn": 0.234375,
+          "null": 0.25067708333333333,
+          "p": 0.6943521594684385
+        },
+        {
+          "layer": 28,
+          "nn": 0.1875,
+          "null": 0.253125,
+          "p": 0.920265780730897
+        },
+        {
+          "layer": 29,
+          "nn": 0.1875,
+          "null": 0.24697916666666667,
+          "p": 0.9169435215946844
+        },
+        {
+          "layer": 30,
+          "nn": 0.1875,
+          "null": 0.2554166666666667,
+          "p": 0.9401993355481728
+        },
+        {
+          "layer": 31,
+          "nn": 0.140625,
+          "null": 0.24666666666666667,
+          "p": 0.9933554817275747
+        }
+      ],
+      "best": {
+        "layer": 14,
+        "nn": 0.328125,
+        "null": 0.2478125,
+        "p": 0.07641196013289037
+      }
+    }
+  },
+  "runtime_sec": 213.5
+}
