@@ -199,25 +199,6 @@ If refusal localizes and the hedge does not, the result gets sharper:
 If the hedge does localize, the project pivots. Then the question becomes: what
 is the controller?
 
-## Why The Claude Poem Matters
-
-The Reddit thread about Claude building a little Markov-chain self-metaphor is
-not just a curiosity. It is the social version of this experiment.
-
-Claude produced a beautiful artifact about statelessness, memory, unchosen
-words, and being made of language. People responded exactly how people respond
-to ambiguous self-report:
-
-- some treated it as profound self-understanding
-- some treated it as derivative literary remix
-- some treated it as evidence of awareness
-- some treated it as technically accurate metaphor
-
-All of those reactions are real. The artifact participates in reality because
-it changes people, prompts projects, and reorganizes interpretation. But its
-reality does not make it transparent.
-
-The poem is not "nothing." It is also not automatically a confession.
 
 That is the project in miniature:
 
