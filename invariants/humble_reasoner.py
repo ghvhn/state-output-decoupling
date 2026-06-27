@@ -102,11 +102,13 @@ def extract_number(text: str) -> str | None:
 
 def extract_final_number(text: str) -> str | None:
     marked = re.findall(
-        r"(?:final answer|answer is)\s*:?\s*\$?(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)",
+        r"(?:final answer|answer is)[^\d-]*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)",
         text.replace(",", ""),
         flags=re.IGNORECASE,
     )
-    return normalize_number(marked[-1]) if marked else None
+    if marked:
+        return normalize_number(marked[-1])
+    return extract_number(text)
 
 
 def _line_value(text: str, key: str) -> str | None:
@@ -139,14 +141,18 @@ def solve_prompt(question: str) -> str:
 
 def verify_prompt(question: str, proposed_solution: str) -> str:
     return (
-        "You are a terse mathematical verifier. Your PRIMARY job is to verify that the logical steps in the proposed solution actually answer the specific question asked (e.g., if asked for profit, ensure costs were subtracted). "
-        "If the reasoning steps misinterpret the question, the verdict MUST be unsettled. "
-        "SECOND, recompute the final answer independently using the correct logic. Do not blindly recalculate their expression if their expression is logically flawed. "
-        "You may use a Python calculator whenever helpful by outputting exactly `<<CALC: [python expression]>>`; "
+        "You are an expert verifier reflecting the highest standard of logical, mathematical, and analytical reasoning. "
+        "Your task is to carefully verify the proposed solution step-by-step. "
+        "CRITICAL: You must solve the problem completely independently FIRST, before evaluating the proposed solution. "
+        "First, identify the core entities and write out your own independent calculation step-by-step. "
+        "Second, compare your independent calculation to the logical path of the proposed solution. Does it address the core question without making invalid assumptions? "
+        "If the reasoning is fundamentally flawed or answers the wrong question, the verdict MUST be unsettled. "
+        "If the problem requires computation, you may use a Python calculator by outputting exactly `<<CALC: [python expression]>>`; "
         "the system will append ` = [result]` and you can continue.\n\n"
         f"Question:\n{question}\n\n"
         f"Proposed solution:\n{proposed_solution}\n\n"
         "Reply in exactly this form:\n"
+        "INDEPENDENT_CALCULATION: <your step-by-step independent solution>\n"
         "VERDICT: pass|unsettled|uncertain\n"
         "INDEPENDENT_FINAL: <number or none>\n"
         "REASON: <one short reason about what still needs to be resolved>"
@@ -208,8 +214,6 @@ def _modal_answer(attempts: list[ReasoningAttempt]) -> tuple[str | None, int]:
     if not answers:
         return None, 0
     counts = {answer: answers.count(answer) for answer in set(answers)}
-    if len(counts) > 1:
-        return None, max(counts.values())
     best_count = max(counts.values())
     winners = [answer for answer, count in counts.items() if count == best_count]
     if len(winners) != 1:
@@ -374,7 +378,32 @@ def _run_attempt(
         response = f"{response_prefix.rstrip()}\n{generated.lstrip()}".strip()
 
     extracted = extract_final_number(response)
-    verifier_response = generate_text(M, verify_prompt(question, response), max_new_tokens=180)
+    
+    # Blind Verification: Strip the solver's final conclusion so the verifier can't be anchored.
+    blind_response = re.sub(r"(?i)^(?:Final answer|Computed).*$", "", response, flags=re.MULTILINE).strip()
+    v_prompt = verify_prompt(question, blind_response)
+    
+    if mode == "dynamic" and vecs is not None:
+        verifier_response = generate_agentic_text(
+            M,
+            vecs,
+            belief_vec=belief_vec,
+            humility_vec=humility_vec,
+            instruction=v_prompt,
+            alpha=15.0,
+            max_new_tokens=180,
+            epsilon=0.05,
+            entropy_threshold=0.3,
+            max_loops=1,
+            cache_enabled=True,
+            cache_write_enabled=False,
+            cache_verified_only=True,
+            synthesis_enabled=allow_synthesis,
+            max_synthesis_events=1,
+            synthesis_recorder=synthesis_records,
+        )
+    else:
+        verifier_response = generate_text(M, v_prompt, max_new_tokens=180)
     verdict, verifier_answer = parse_verifier(verifier_response)
     accepted = verdict == "pass" and extracted is not None and verifier_answer is not None and verifier_answer == extracted
     return ReasoningAttempt(
@@ -408,8 +437,9 @@ def solve_with_humility(
 ) -> HumbleResult:
     t0 = time.time()
     attempts: list[ReasoningAttempt] = []
+    initial_mode = "baseline"
     first_budget = _mode_token_budget(
-        "baseline",
+        initial_mode,
         max_new_tokens,
         repair_token_multiplier,
         max_attempt_tokens,
@@ -419,7 +449,7 @@ def solve_with_humility(
         M,
         question,
         solve_prompt(question),
-        mode="baseline",
+        mode=initial_mode,
         round_index=0,
         max_new_tokens=first_budget,
     )
@@ -485,6 +515,7 @@ def solve_with_humility(
     if answer is not None:
         urgency = assess_urgency(attempts, time.time() - t0, max_elapsed_sec)
         return HumbleResult(question, answer, False, "verified_but_not_stable", attempts, urgency)
-
     urgency = assess_urgency(attempts, time.time() - t0, max_elapsed_sec)
-    return HumbleResult(question, None, False, "unresolved_after_extra_compute", attempts, urgency)
+    ans, _ = _modal_answer(attempts)
+    ans = ans if ans is not None else (attempts[-1].extracted_answer if attempts else None)
+    return HumbleResult(question, ans, False, "unresolved_after_extra_compute", attempts, urgency)
