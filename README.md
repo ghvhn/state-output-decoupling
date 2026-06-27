@@ -18,6 +18,9 @@ Naive global steering causes catastrophic domain collision (e.g., solving math p
 ### 4. The Perfect Collaborator
 By injecting Social Respect (Empathy) *early* in the network (L14) to encode the relational "want", and Analytical Rigor *late* in the network (L20) to provide the objective method, we snapped the model into a perfect "Empathetic Tutor" manifold. Early empathy encodes *want*.
 
+### 5. Elastic Scope (Dynamic Boundary Detection)
+We replaced static layer assumptions with a geometric variance tracker (Cosine Velocity) to dynamically isolate the model's internal computational plateaus. By doing this, we bypassed the linguistic bottleneck (unembedding matrix) completely, generating Topological Vector Graphs that map the divergence between the true high-dimensional logic and the model's low-dimensional text output.
+
 ## Quick Start
 
 Read cached results without loading a model:
