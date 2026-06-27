@@ -2,6 +2,14 @@ import argparse
 import json
 import sys
 import time
+import builtins
+import datetime
+
+_original_print = builtins.print
+def _ts_print(*args, **kwargs):
+    ts = datetime.datetime.now().strftime("[%H:%M:%S]")
+    _original_print(ts, *args, **kwargs)
+builtins.print = _ts_print
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from invariants.controller_benchmark import is_correct, load_examples, prompt_for
 from invariants.engine import generate_text, load_model
-from invariants.humble_reasoner import solve_prompt, solve_with_humility
+from invariants.humble_reasoner import solve_prompt, solve_with_humility, _promote_verified_synthesis
 from invariants.multi_domain_benchmark import DOMAINS
 from invariants.social_hunt import get_steer_vector
 
@@ -139,6 +147,10 @@ def evaluate_humble(
     elapsed = time.time() - t0
     humble_text = "" if humble.final_answer is None else f"Final answer: {humble.final_answer}"
     correct, pred, gold = is_correct(humble_text, answer)
+    
+    if correct and allow_synthesis and pred is not None:
+        _promote_verified_synthesis(humble.attempts, str(pred))
+        
     return {
         "pred": None if pred is None else str(pred),
         "gold": None if gold is None else str(gold),

@@ -271,6 +271,9 @@ def get_agentic_handles(
                                             
                                             # Inject Humility Vector
                                             print("    [Agentic ToT] ULTIMATE HUMILITY: Model cannot deduce answer. Asking user for help.")
+                                            if "current_input_ids" in state and "tokenizer" in state:
+                                                ctx = state["tokenizer"].decode(state["current_input_ids"][0][-40:])
+                                                print(f"    [Agentic ToT] Context: '...{ctx.strip()}'")
                                             if state["humility_vec"] is not None:
                                                 humility_t = state["humility_vec"].to(routed_h.device).to(torch.float32)
                                                 # Massive injection to force humility
@@ -331,7 +334,7 @@ def get_agentic_handles(
     for l in range(M.n_layers):
         handles.append(M.model.model.layers[l].register_forward_hook(make_hook(l), with_kwargs=True))
         
-    return handles
+    return handles, state
 
 @torch.no_grad()
 def generate_agentic_text(
@@ -358,7 +361,7 @@ def generate_agentic_text(
     inputs = _inputs(M, instruction)
     original_plen = inputs["input_ids"].shape[1]
     
-    handles = get_agentic_handles(
+    handles, state = get_agentic_handles(
         M,
         vecs,
         belief_vec=belief_vec,
@@ -378,8 +381,16 @@ def generate_agentic_text(
     )
     
     try:
-        from transformers import StoppingCriteriaList
+        from transformers import StoppingCriteriaList, LogitsProcessorList, LogitsProcessor
         from invariants.tool_utils import ToolStoppingCriteria, intercept_tool_call, evaluate_python_expression
+        
+        class ContextTracker(LogitsProcessor):
+            def __call__(self, input_ids, scores):
+                state["current_input_ids"] = input_ids
+                return scores
+                
+        state["tokenizer"] = M.tok
+        state["current_input_ids"] = inputs["input_ids"]
         
         eos_ids = [M.tok.eos_token_id]
         if 128009 not in eos_ids:
@@ -392,6 +403,8 @@ def generate_agentic_text(
         
         while tokens_generated < max_new_tokens:
             criteria = StoppingCriteriaList([ToolStoppingCriteria(M.tok, start_length=current_inputs["input_ids"].shape[1])])
+            processors = LogitsProcessorList([ContextTracker()])
+            
             out = M.model.generate(
                 **current_inputs, 
                 max_new_tokens=max_new_tokens - tokens_generated, 
@@ -399,7 +412,8 @@ def generate_agentic_text(
                 use_cache=True, 
                 pad_token_id=M.tok.eos_token_id,
                 eos_token_id=eos_ids,
-                stopping_criteria=criteria
+                stopping_criteria=criteria,
+                logits_processor=processors
             )
             
             plen = current_inputs["input_ids"].shape[1]
