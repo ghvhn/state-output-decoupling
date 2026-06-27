@@ -21,3 +21,11 @@ Thumbs.db
 *.safetensors
 *.bin
 *.log
+
+# Scratch scripts
+scratch_*.py
+
+# Benchmark Outputs
+invariants/out/*.json
+invariants/out/*.html
+invariants/out/*.pid

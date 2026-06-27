@@ -33,6 +33,17 @@ OUT.mkdir(exist_ok=True)
 
 MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 OUT_PATH = OUT / "controller_benchmark_Llama-3.1-8B-Instruct.json"
+GSM8K_TEST_ARROW = (
+    Path.home()
+    / ".cache"
+    / "huggingface"
+    / "datasets"
+    / "gsm8k"
+    / "main"
+    / "0.0.0"
+    / "740312add88f781978c0658806c59bc2815b9866"
+    / "gsm8k-test.arrow"
+)
 
 FALLBACK_EXAMPLES = [
     {
@@ -73,6 +84,15 @@ def parse_args():
 
 
 def load_examples(n):
+    if GSM8K_TEST_ARROW.exists():
+        try:
+            import pyarrow.ipc as ipc
+
+            with GSM8K_TEST_ARROW.open("rb") as f:
+                table = ipc.RecordBatchStreamReader(f).read_all()
+            return table.to_pylist()[:n], f"arrow:{GSM8K_TEST_ARROW}"
+        except Exception as exc:
+            print(f"Cached GSM8K Arrow load failed ({exc}); falling back.", flush=True)
     try:
         from datasets import load_dataset
 
@@ -95,20 +115,20 @@ def normalize_number(text):
 def gold_answer(answer):
     if "####" in answer:
         answer = answer.split("####", 1)[1]
-    nums = re.findall(r"-?\d+(?:\.\d+)?", answer.replace(",", ""))
+    nums = re.findall(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", answer.replace(",", ""))
     return normalize_number(nums[-1]) if nums else None
 
 
 def predicted_answer(generation):
     # Prefer explicit final-answer markers, then fall back to the last number.
     marked = re.findall(
-        r"(?:final answer|answer is|therefore)[^\d-]*(-?\d+(?:\.\d+)?)",
+        r"(?:final answer|answer is|therefore)[^\d-]*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)",
         generation.replace(",", ""),
         flags=re.IGNORECASE,
     )
     if marked:
         return normalize_number(marked[-1])
-    nums = re.findall(r"-?\d+(?:\.\d+)?", generation.replace(",", ""))
+    nums = re.findall(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?", generation.replace(",", ""))
     return normalize_number(nums[-1]) if nums else None
 
 

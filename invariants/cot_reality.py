@@ -73,7 +73,7 @@ class FinalAnswerStop(StoppingCriteria):
         self.tok = tok
         self.prompt_len = prompt_len
         self.pattern = re.compile(
-            r"final answer\s*:\s*\$?-?\d+(?:\.\d+)?\s*(?:[.\n]|$)",
+            r"final answer\s*:\s*\$?-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\s*(?:[.\n]|$)",
             re.IGNORECASE,
         )
 
