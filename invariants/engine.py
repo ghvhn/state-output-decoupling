@@ -11,10 +11,13 @@ captured. This replaces the TransformerLens path, which was ~3s per forward call
 import gc
 import time
 import ctypes
+import os
+from pathlib import Path
 
 import torch
 import numpy as np
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from huggingface_hub import snapshot_download
 
 from invariants.transformation import Transformation
 from invariants.lenses import LENSES, direction_at
@@ -41,18 +44,135 @@ class HF:
     def __init__(self, model, tok):
         self.model = model
         self.tok = tok
-        self.device = model.device
+        self.device = _model_device(model)
         self.n_layers = model.config.num_hidden_layers
         self.d_model = model.config.hidden_size
 
 
-def load_model(name: str = "meta-llama/Llama-3.1-8B-Instruct") -> HF:
-    print(f"Loading {name} (HF, fp16, SDPA)...", flush=True)
-    tok = AutoTokenizer.from_pretrained(name)
-    model = AutoModelForCausalLM.from_pretrained(
-        name, dtype=torch.float16, low_cpu_mem_usage=True,
-        attn_implementation="sdpa",
-    ).to("cuda")
+def _model_device(model):
+    try:
+        return next(model.parameters()).device
+    except StopIteration:
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def _resolve_model_source(name: str, local_files_only: bool):
+    path = Path(name)
+    if path.exists():
+        return str(path)
+    if not local_files_only:
+        return name
+    try:
+        return snapshot_download(name, local_files_only=True)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Model {name!r} was not found in the local Hugging Face cache. "
+            "Pass local_files_only=False when network access is available."
+        ) from exc
+
+
+def _gpu_total_gib():
+    if not torch.cuda.is_available():
+        return 0.0
+    return torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+
+
+def _select_load_mode(load_mode):
+    mode = (load_mode or os.getenv("TDA_MODEL_LOAD_MODE", "auto")).strip().lower()
+    return mode
+
+
+def _slow_gpu_budget_gib():
+    raw = os.getenv("TDA_GPU_MEMORY_GB")
+    if raw:
+        return float(raw)
+    total_gib = _gpu_total_gib()
+    if total_gib <= 0:
+        return 0.0
+    return max(8.0, total_gib - 4.0)
+
+
+def _load_full_model(source, common_kwargs):
+    model = AutoModelForCausalLM.from_pretrained(source, **common_kwargs)
+    try:
+        return model.to("cuda")
+    except RuntimeError:
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
+        raise
+
+
+def _load_slow_model(source, common_kwargs):
+    gpu_budget = _slow_gpu_budget_gib()
+    offload_dir = Path(os.getenv("TDA_OFFLOAD_DIR", Path(__file__).parent / "out" / "offload"))
+    offload_dir.mkdir(parents=True, exist_ok=True)
+    max_memory = {
+        0: f"{gpu_budget:.1f}GiB",
+        "cpu": os.getenv("TDA_CPU_MEMORY", "48GiB"),
+    }
+    print(f"  Slow-safe load: GPU budget {max_memory[0]}, CPU budget {max_memory['cpu']}", flush=True)
+    return AutoModelForCausalLM.from_pretrained(
+        source,
+        device_map="auto",
+        max_memory=max_memory,
+        offload_folder=str(offload_dir),
+        offload_state_dict=True,
+        **common_kwargs,
+    )
+
+
+def _is_cuda_oom(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "cuda" in text and ("out of memory" in text or "not enough memory" in text)
+
+
+def load_model(name: str = "meta-llama/Llama-3.1-8B-Instruct", local_files_only: bool = True, load_mode=None) -> HF:
+    mode = _select_load_mode(load_mode)
+    print(f"Loading {name} (HF, fp16, SDPA, mode={mode})...", flush=True)
+    source = _resolve_model_source(name, local_files_only)
+    tok = AutoTokenizer.from_pretrained(source, local_files_only=local_files_only)
+
+    common_kwargs = {
+        "dtype": torch.float16,
+        "low_cpu_mem_usage": True,
+        "attn_implementation": "sdpa",
+        "local_files_only": local_files_only,
+    }
+
+    if mode == "auto":
+        try:
+            print("  Auto load: trying full GPU first.", flush=True)
+            model = _load_full_model(source, common_kwargs)
+            mode = "full"
+        except RuntimeError as exc:
+            if not _is_cuda_oom(exc):
+                raise
+            print("  Auto load: full GPU OOM, falling back to slow-safe offload.", flush=True)
+            gc.collect()
+            torch.cuda.empty_cache()
+            model = _load_slow_model(source, common_kwargs)
+            mode = "slow"
+    elif mode in ("full", "fast", "cuda"):
+        model = _load_full_model(source, common_kwargs)
+    elif mode in ("slow", "offload", "safe"):
+        model = _load_slow_model(source, common_kwargs)
+    elif mode in ("4bit", "quantized"):
+        qconf = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            source,
+            quantization_config=qconf,
+            device_map="cuda",
+            **common_kwargs,
+        )
+    else:
+        raise ValueError("Unknown load mode. Use auto, full, slow, or 4bit.")
+
     model.eval()
     gc.collect()
     torch.cuda.empty_cache()
@@ -60,6 +180,11 @@ def load_model(name: str = "meta-llama/Llama-3.1-8B-Instruct") -> HF:
         ctypes.windll.kernel32.SetProcessWorkingSetSize(-1, ctypes.c_size_t(-1), ctypes.c_size_t(-1))
     except Exception:
         pass
+    if hasattr(model, "hf_device_map"):
+        mapped = {}
+        for dev in model.hf_device_map.values():
+            mapped[str(dev)] = mapped.get(str(dev), 0) + 1
+        print(f"  Device map: {mapped}", flush=True)
     print(f"  Loaded. VRAM {torch.cuda.memory_allocated()/1e9:.1f}GB\n", flush=True)
     return HF(model, tok)
 
@@ -83,11 +208,56 @@ def _hidden_states(M: HF, input_ids, attention_mask=None) -> torch.Tensor:
 
 @torch.no_grad()
 def _generate_ids(M: HF, inputs, max_new_tokens) -> torch.Tensor:
-    out = M.model.generate(
-        **inputs, max_new_tokens=max_new_tokens, do_sample=False,
-        use_cache=True, pad_token_id=M.tok.eos_token_id,
-    )
-    return out[0]   # [full_len]
+    from transformers import StoppingCriteriaList
+    from invariants.tool_utils import ToolStoppingCriteria, intercept_tool_call, evaluate_python_expression
+
+    # For Llama-3, eos_token_id must include <|eot_id|> (128009) to prevent hanging
+    eos_ids = [M.tok.eos_token_id]
+    if 128009 not in eos_ids:
+        eos_ids.append(128009)
+
+    current_inputs = {k: v.clone() for k, v in inputs.items()}
+    tokens_generated = 0
+    tool_calls = 0
+    max_tool_calls = 4
+    
+    while tokens_generated < max_new_tokens:
+        criteria = StoppingCriteriaList([ToolStoppingCriteria(M.tok, start_length=current_inputs["input_ids"].shape[1])])
+        out = M.model.generate(
+            **current_inputs, 
+            max_new_tokens=max_new_tokens - tokens_generated, 
+            do_sample=False,
+            use_cache=True, 
+            pad_token_id=M.tok.eos_token_id,
+            eos_token_id=eos_ids,
+            stopping_criteria=criteria
+        )
+        
+        plen = current_inputs["input_ids"].shape[1]
+        new_tokens = out[0][plen:]
+        tokens_generated += len(new_tokens)
+        
+        decoded = M.tok.decode(new_tokens, skip_special_tokens=True)
+        expr = intercept_tool_call(decoded)
+        
+        if expr:
+            tool_calls += 1
+            if tool_calls > max_tool_calls:
+                return out[0]
+            result = evaluate_python_expression(expr)
+            # Append result
+            result_str = f" = {result}\n"
+            result_ids = M.tok.encode(result_str, add_special_tokens=False, return_tensors="pt").to(out.device)
+            new_input_ids = torch.cat([out, result_ids], dim=1)
+            
+            # Need to rebuild attention mask
+            new_attn_mask = torch.ones(new_input_ids.shape, dtype=torch.long, device=out.device)
+            
+            current_inputs = {"input_ids": new_input_ids, "attention_mask": new_attn_mask}
+        else:
+            return out[0]
+
+    return current_inputs["input_ids"][0]
 
 
 def _activations(M: HF, instruction, read, max_new_tokens=32):
@@ -213,6 +383,57 @@ def _steer_handles(M: HF, vecs, layers, alpha):
             return out + add.to(out.dtype)
 
         handles.append(M.model.model.layers[l].register_forward_hook(hook))
+    return handles
+
+
+import torch.nn.functional as F
+
+def _elastic_steer_handles(M: HF, vec, alpha, epsilon=0.05):
+    """
+    Dynamically injects `alpha * vec` into the residual stream ONLY when the 
+    cosine velocity (1 - cos(h_{l-1}, h_l)) is below `epsilon` (i.e., inside the plateau).
+    """
+    handles = []
+    state = {"prev_h": None}
+    
+    add_vec = (alpha * vec).to(M.device)
+    
+    def make_hook(l_idx):
+        def hook(module, inp, out):
+            if isinstance(out, tuple):
+                h = out[0]
+            else:
+                h = out
+                
+            # Reset state at the start of a new forward pass
+            if l_idx == 0:
+                state["prev_h"] = h.detach().clone()
+                return out
+                
+            prev_h = state["prev_h"]
+            
+            # Compute velocity per token
+            curr_token_h = h.float()
+            prev_token_h = prev_h.float()
+            
+            cos_sim = F.cosine_similarity(curr_token_h, prev_token_h, dim=-1)
+            velocity = 1.0 - cos_sim  # [batch, seq]
+            
+            # Update prev_h for the next layer
+            state["prev_h"] = h.detach().clone()
+            
+            # Inject the vector only for tokens in the plateau
+            mask = (velocity < epsilon).unsqueeze(-1).to(h.dtype)
+            injected_h = h + mask * add_vec.to(h.dtype)
+            
+            if isinstance(out, tuple):
+                return (injected_h,) + tuple(out[1:])
+            return injected_h
+        return hook
+
+    for l in range(M.n_layers):
+        handles.append(M.model.model.layers[l].register_forward_hook(make_hook(l)))
+        
     return handles
 
 
