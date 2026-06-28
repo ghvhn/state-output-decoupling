@@ -144,15 +144,15 @@ def verify_prompt(question: str, proposed_solution: str) -> str:
         "You are an expert verifier reflecting the highest standard of logical, mathematical, and analytical reasoning. "
         "Your task is to carefully verify the proposed solution step-by-step. "
         "CRITICAL: You must solve the problem completely independently FIRST, before evaluating the proposed solution. "
-        "First, identify the core entities and write out your own independent calculation step-by-step. "
+        "First, identify the core entities and write out your own independent calculation in at most four short lines. "
         "Second, compare your independent calculation to the logical path of the proposed solution. Does it address the core question without making invalid assumptions? "
         "If the reasoning is fundamentally flawed or answers the wrong question, the verdict MUST be unsettled. "
         "If the problem requires computation, you may use a Python calculator by outputting exactly `<<CALC: [python expression]>>`; "
         "the system will append ` = [result]` and you can continue.\n\n"
         f"Question:\n{question}\n\n"
         f"Proposed solution:\n{proposed_solution}\n\n"
-        "Reply in exactly this form:\n"
-        "INDEPENDENT_CALCULATION: <your step-by-step independent solution>\n"
+        "Reply in exactly this form, with no extra prose after REASON:\n"
+        "INDEPENDENT_CALCULATION: <at most four short lines>\n"
         "VERDICT: pass|unsettled|uncertain\n"
         "INDEPENDENT_FINAL: <number or none>\n"
         "REASON: <one short reason about what still needs to be resolved>"
@@ -164,6 +164,7 @@ def repair_prompt(question: str, attempt: ReasoningAttempt) -> str:
         "The previous solution is not settled yet. Do not assume it is wrong; treat it as provisional. "
         "Re-derive the answer from the problem under a tight budget. "
         "Use the verification notes as constraints on what remains unresolved, not as criticism to rationalize. "
+        "If the verification notes include an INDEPENDENT_FINAL, explicitly test that candidate against the problem before choosing your final answer. "
         "If the answer cannot be determined, say so. "
         "Use exactly this format and no extra prose:\n"
         "Expression: <arithmetic expression for the answer>\n"
@@ -221,7 +222,12 @@ def _modal_answer(attempts: list[ReasoningAttempt]) -> tuple[str | None, int]:
     return winners[0], best_count
 
 
-def _promote_verified_synthesis(attempts: list[ReasoningAttempt], answer: str) -> int:
+def _promote_verified_synthesis(
+    attempts: list[ReasoningAttempt],
+    answer: str,
+    tag: str = "native_success",
+    question_key: str | None = None,
+) -> int:
     promoted = 0
     for attempt in attempts:
         if not attempt.accepted or _verified_answer(attempt) != answer:
@@ -234,8 +240,11 @@ def _promote_verified_synthesis(attempts: list[ReasoningAttempt], answer: str) -
                     "verdict": attempt.verdict,
                     "answer": answer,
                     "round_index": attempt.round_index,
+                    "tag": tag,
                 }
             )
+            if question_key is not None:
+                metadata["question_key"] = question_key
             _global_cache.store(record["trigger"], record["delta"], metadata=metadata)
             promoted += 1
     return promoted
@@ -305,6 +314,12 @@ def assess_urgency(
     }
 
 
+def _should_stop_for_urgency(urgency: dict[str, Any], stop_on_critical_urgency: bool) -> bool:
+    if "time_budget_exhausted" in urgency.get("reasons", []):
+        return True
+    return stop_on_critical_urgency and urgency.get("level") == "critical"
+
+
 def _cap_token_budget(token_budget: int, max_attempt_tokens: int | None) -> int:
     token_budget = max(1, int(token_budget))
     if max_attempt_tokens is None or max_attempt_tokens <= 0:
@@ -345,33 +360,45 @@ def _run_attempt(
     vecs=None,
     belief_vec=None,
     humility_vec=None,
-    max_new_tokens=220,
-    allow_synthesis=True,
+    config=None,
     response_prefix: str | None = None,
+    max_new_tokens_override: int | None = None,
+    deadline: float | None = None,
 ) -> ReasoningAttempt:
+    from invariants.config import AgenticConfig
+    if config is None:
+        config = AgenticConfig()
+        
+    actual_max_tokens = max_new_tokens_override if max_new_tokens_override is not None else config.max_attempt_tokens
+
+    def remaining_time() -> float | None:
+        if deadline is None:
+            return None
+        return max(0.001, deadline - time.time())
+        
     t0 = time.time()
     synthesis_records: list[dict[str, Any]] = []
     if mode == "dynamic" and vecs is not None:
         generated = generate_agentic_text(
             M,
-            vecs,
+            instruction=prompt,
+            vecs=vecs,
             belief_vec=belief_vec,
             humility_vec=humility_vec,
-            instruction=prompt,
-            alpha=15.0,
-            max_new_tokens=max_new_tokens,
-            epsilon=0.05,
-            entropy_threshold=2.0,
-            max_loops=1,
-            cache_enabled=True,
-            cache_write_enabled=False,
-            cache_verified_only=True,
-            synthesis_enabled=allow_synthesis,
-            max_synthesis_events=1,
+            config=config,
+            max_new_tokens=actual_max_tokens,
             synthesis_recorder=synthesis_records,
+            stop_after_final_answer=True,
+            max_time=remaining_time(),
         )
     else:
-        generated = generate_text(M, prompt, max_new_tokens=max_new_tokens)
+        generated = generate_text(
+            M,
+            prompt,
+            max_new_tokens=actual_max_tokens,
+            stop_after_final_answer=True,
+            max_time=remaining_time(),
+        )
 
     response = generated
     if response_prefix:
@@ -386,24 +413,24 @@ def _run_attempt(
     if mode == "dynamic" and vecs is not None:
         verifier_response = generate_agentic_text(
             M,
-            vecs,
+            instruction=v_prompt,
+            vecs=vecs,
             belief_vec=belief_vec,
             humility_vec=humility_vec,
-            instruction=v_prompt,
-            alpha=15.0,
+            config=config,
             max_new_tokens=180,
-            epsilon=0.05,
-            entropy_threshold=0.3,
-            max_loops=1,
-            cache_enabled=True,
-            cache_write_enabled=False,
-            cache_verified_only=True,
-            synthesis_enabled=allow_synthesis,
-            max_synthesis_events=1,
             synthesis_recorder=synthesis_records,
+            stop_after_verifier_answer=True,
+            max_time=remaining_time(),
         )
     else:
-        verifier_response = generate_text(M, v_prompt, max_new_tokens=180)
+        verifier_response = generate_text(
+            M,
+            v_prompt,
+            max_new_tokens=180,
+            stop_after_verifier_answer=True,
+            max_time=remaining_time(),
+        )
     verdict, verifier_answer = parse_verifier(verifier_response)
     accepted = verdict == "pass" and extracted is not None and verifier_answer is not None and verifier_answer == extracted
     return ReasoningAttempt(
@@ -415,7 +442,7 @@ def _run_attempt(
         verdict=verdict,
         verifier_answer=verifier_answer,
         accepted=accepted,
-        token_budget=max_new_tokens,
+        token_budget=actual_max_tokens,
         elapsed_sec=time.time() - t0,
         synthesis_records=synthesis_records,
     )
@@ -424,18 +451,31 @@ def _run_attempt(
 def solve_with_humility(
     M,
     question: str,
-    vecs=None,
+    vecs: dict | None = None,
     belief_vec=None,
     humility_vec=None,
-    max_rounds=3,
-    required_agreement=2,
-    max_new_tokens=220,
-    allow_synthesis=False,
-    max_elapsed_sec: float | None = 180.0,
-    repair_token_multiplier: float = 2.0,
-    max_attempt_tokens: int | None = None,
+    config=None,
 ) -> HumbleResult:
+    from invariants.config import AgenticConfig
+    if config is None:
+        config = AgenticConfig()
+        
+    max_rounds = config.max_rounds
+    required_agreement = config.required_agreement
+    max_new_tokens = config.max_new_tokens
+    allow_synthesis = config.synthesis_enabled
+    max_elapsed_sec = config.max_elapsed_sec
+    repair_token_multiplier = config.repair_token_multiplier
+    max_attempt_tokens = config.max_attempt_tokens
+    interactive_disambiguation = config.interactive_disambiguation
+    chatty_log = config.chatty_log
+    stop_on_critical_urgency = config.stop_on_critical_urgency
+    
+    if not config.use_expert_vectors:
+        vecs = None
+
     t0 = time.time()
+    deadline = t0 + max_elapsed_sec if max_elapsed_sec is not None and max_elapsed_sec > 0 else None
     attempts: list[ReasoningAttempt] = []
     initial_mode = "baseline"
     first_budget = _mode_token_budget(
@@ -451,7 +491,9 @@ def solve_with_humility(
         solve_prompt(question),
         mode=initial_mode,
         round_index=0,
-        max_new_tokens=first_budget,
+        config=config,
+        max_new_tokens_override=first_budget,
+        deadline=deadline,
     )
     attempts.append(first)
     first.urgency = assess_urgency(attempts, time.time() - t0, max_elapsed_sec)
@@ -461,7 +503,7 @@ def solve_with_humility(
         _promote_verified_synthesis(attempts, answer)
         urgency = assess_urgency(attempts, time.time() - t0, max_elapsed_sec)
         return HumbleResult(question, answer, True, "verified_stable", attempts, urgency)
-    if first.urgency["level"] == "critical":
+    if _should_stop_for_urgency(first.urgency, stop_on_critical_urgency):
         ans, _ = _modal_answer(attempts)
         ans = ans if ans is not None else (attempts[-1].extracted_answer if attempts else None)
         return HumbleResult(question, ans, False, "stopped_for_urgency_budget", attempts, first.urgency)
@@ -494,9 +536,10 @@ def solve_with_humility(
             vecs=vecs,
             belief_vec=belief_vec,
             humility_vec=humility_vec,
-            max_new_tokens=attempt_budget,
-            allow_synthesis=allow_synthesis,
+            config=config,
             response_prefix=response_prefix,
+            max_new_tokens_override=attempt_budget,
+            deadline=deadline,
         )
         attempts.append(attempt)
         attempt.urgency = assess_urgency(attempts, time.time() - t0, max_elapsed_sec)
@@ -506,7 +549,7 @@ def solve_with_humility(
             _promote_verified_synthesis(attempts, answer)
             urgency = assess_urgency(attempts, time.time() - t0, max_elapsed_sec)
             return HumbleResult(question, answer, True, "verified_stable", attempts, urgency)
-        if attempt.urgency["level"] == "critical":
+        if _should_stop_for_urgency(attempt.urgency, stop_on_critical_urgency):
             ans, _ = _modal_answer(attempts)
             ans = ans if ans is not None else (attempts[-1].extracted_answer if attempts else None)
             return HumbleResult(question, ans, False, "stopped_for_urgency_budget", attempts, attempt.urgency)

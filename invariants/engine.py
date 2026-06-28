@@ -207,9 +207,23 @@ def _hidden_states(M: HF, input_ids, attention_mask=None) -> torch.Tensor:
 
 
 @torch.no_grad()
-def _generate_ids(M: HF, inputs, max_new_tokens) -> torch.Tensor:
+def _generate_ids(
+    M: HF,
+    inputs,
+    max_new_tokens,
+    stop_after_final_answer: bool = False,
+    stop_after_verifier_answer: bool = False,
+    max_time: float | None = None,
+) -> torch.Tensor:
     from transformers import StoppingCriteriaList
-    from invariants.tool_utils import ToolStoppingCriteria, intercept_tool_call, evaluate_python_expression
+    from invariants.tool_utils import (
+        FinalAnswerStoppingCriteria,
+        TimeStoppingCriteria,
+        ToolStoppingCriteria,
+        VerifierStoppingCriteria,
+        intercept_tool_call,
+        evaluate_python_expression,
+    )
 
     # For Llama-3, eos_token_id must include <|eot_id|> (128009) to prevent hanging
     eos_ids = [M.tok.eos_token_id]
@@ -220,18 +234,35 @@ def _generate_ids(M: HF, inputs, max_new_tokens) -> torch.Tensor:
     tokens_generated = 0
     tool_calls = 0
     max_tool_calls = 4
+    generation_started = time.time()
     
     while tokens_generated < max_new_tokens:
-        criteria = StoppingCriteriaList([ToolStoppingCriteria(M.tok, start_length=current_inputs["input_ids"].shape[1])])
-        out = M.model.generate(
-            **current_inputs, 
-            max_new_tokens=max_new_tokens - tokens_generated, 
-            do_sample=False,
-            use_cache=True, 
-            pad_token_id=M.tok.eos_token_id,
-            eos_token_id=eos_ids,
-            stopping_criteria=criteria
-        )
+        remaining_time = None
+        if max_time is not None and max_time > 0:
+            remaining_time = max_time - (time.time() - generation_started)
+            if remaining_time <= 0:
+                return current_inputs["input_ids"][0]
+        start_length = current_inputs["input_ids"].shape[1]
+        stopping_criteria = [ToolStoppingCriteria(M.tok, start_length=start_length)]
+        if stop_after_final_answer:
+            stopping_criteria.append(FinalAnswerStoppingCriteria(M.tok, start_length=start_length))
+        if stop_after_verifier_answer:
+            stopping_criteria.append(VerifierStoppingCriteria(M.tok, start_length=start_length))
+        if remaining_time is not None:
+            stopping_criteria.append(TimeStoppingCriteria(time.time() + remaining_time))
+        criteria = StoppingCriteriaList(stopping_criteria)
+        generate_kwargs = {
+            **current_inputs,
+            "max_new_tokens": max_new_tokens - tokens_generated,
+            "do_sample": False,
+            "use_cache": True,
+            "pad_token_id": M.tok.eos_token_id,
+            "eos_token_id": eos_ids,
+            "stopping_criteria": criteria,
+        }
+        if remaining_time is not None:
+            generate_kwargs["max_time"] = remaining_time
+        out = M.model.generate(**generate_kwargs)
         
         plen = current_inputs["input_ids"].shape[1]
         new_tokens = out[0][plen:]
@@ -438,10 +469,24 @@ def _elastic_steer_handles(M: HF, vec, alpha, epsilon=0.05):
 
 
 @torch.no_grad()
-def generate_text(M: HF, instruction, max_new_tokens=32) -> str:
+def generate_text(
+    M: HF,
+    instruction,
+    max_new_tokens=32,
+    stop_after_final_answer: bool = False,
+    stop_after_verifier_answer: bool = False,
+    max_time: float | None = None,
+) -> str:
     inputs = _inputs(M, instruction)
     plen = inputs["input_ids"].shape[1]
-    full = _generate_ids(M, inputs, max_new_tokens)
+    full = _generate_ids(
+        M,
+        inputs,
+        max_new_tokens,
+        stop_after_final_answer=stop_after_final_answer,
+        stop_after_verifier_answer=stop_after_verifier_answer,
+        max_time=max_time,
+    )
     return M.tok.decode(full[plen:], skip_special_tokens=True).strip()
 
 

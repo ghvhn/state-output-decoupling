@@ -1,3 +1,4 @@
+import time
 import torch
 import torch.nn.functional as F
 from invariants.engine import _inputs, _generate_ids
@@ -5,8 +6,23 @@ from invariants.social_hunt import get_steer_vector
 from invariants.multi_domain_benchmark import DOMAINS
 from invariants.cognitive_cache import CognitiveCache
 
+class NeedsDisambiguationError(Exception):
+    pass
+
 # Global cache instance
 _global_cache = CognitiveCache()
+
+from pathlib import Path
+_vector_cache = {}
+def _get_vector(name, device):
+    if name not in _vector_cache:
+        path = Path(__file__).parent / f"{name}.pt"
+        if path.exists():
+            _vector_cache[name] = torch.load(path, map_location=device)
+        else:
+            _vector_cache[name] = None
+    vec = _vector_cache[name]
+    return vec.to(device) if vec is not None else None
 
 def _entropy_from_logits(logits):
     probs = F.softmax(logits.float(), dim=-1)
@@ -28,27 +44,46 @@ def _add_last_token_delta(h, delta):
 
 def get_agentic_handles(
     M,
-    vecs,
+    vecs=None,
     belief_vec=None,
     humility_vec=None,
-    alpha=0.5,
-    epsilon=0.05,
-    entropy_threshold=2.0,
-    max_loops=3,
-    force_synthesis=False,
-    cache_enabled=True,
-    cache_write_enabled=False,
-    cache_verified_only=True,
-    synthesis_enabled=True,
-    max_synthesis_events=1,
+    config=None,
     synthesis_recorder=None,
-    max_routing_events=4,
 ):
     """
     Parallel Latent Search (ToT)
     Dynamically clones the hidden state into 3 branches at the plateau.
     Injects 3 different optimizers. Evaluates entropy. Keeps the best.
     """
+    from invariants.config import AgenticConfig, _global_registry
+    if config is None:
+        config = AgenticConfig()
+    if vecs is None:
+        vecs = _global_registry.get_vecs(M)
+    if belief_vec is None:
+        belief_vec = _global_registry.get_special_vec("belief_vector")
+    if humility_vec is None:
+        humility_vec = _global_registry.get_special_vec("humility_vector")
+        
+    alpha = config.alpha
+    epsilon = config.epsilon
+    entropy_threshold = config.entropy_threshold
+    max_loops = config.max_loops
+    force_synthesis = config.force_synthesis
+    cache_enabled = config.cache_enabled
+    cache_write_enabled = config.cache_write_enabled
+    cache_verified_only = config.cache_verified_only
+    ignore_oracle_cache = config.ignore_oracle_cache
+    excluded_oracle_question_key = (
+        config.benchmark_question_key
+        if config.exclude_same_question_oracle_cache
+        else None
+    )
+    synthesis_enabled = config.synthesis_enabled
+    max_synthesis_events = config.max_synthesis_events
+    max_routing_events = config.max_routing_events
+    interactive_disambiguation = config.interactive_disambiguation
+    
     handles = []
     
     state = {
@@ -177,7 +212,12 @@ def get_agentic_handles(
                         # Check Cognitive Cache first. Cached entries are last-token deltas,
                         # so they can transfer across prompts with different sequence lengths.
                         cached_delta = (
-                            _global_cache.retrieve(routed_h, verified_only=cache_verified_only)
+                            _global_cache.retrieve(
+                                routed_h,
+                                verified_only=cache_verified_only,
+                                ignore_oracle_cache=ignore_oracle_cache,
+                                excluded_oracle_question_key=excluded_oracle_question_key,
+                            )
                             if cache_enabled
                             else None
                         )
@@ -204,6 +244,12 @@ def get_agentic_handles(
                                     opt.zero_grad()
                                     
                                     h_syn = _add_last_token_delta(routed_h, v)
+                                    
+                                    # Dynamically inject Urgency vector (scaled by time)
+                                    urg_vec = _get_vector("urgency_vector", h_syn.device)
+                                    if urg_vec is not None:
+                                        urg_coef = 0.8 * (step / max_ttt_steps)
+                                        h_syn = _add_last_token_delta(h_syn, urg_coef * urg_vec)
                                     
                                     # Forward through remaining layers to get final state
                                     h_curr = h_syn
@@ -269,23 +315,42 @@ def get_agentic_handles(
                                         if loss_diff < 0.05: # Loss has plateaued (d(loss)/dt == 0)
                                             print(f"      [Synthesis Step {step+1}] Loss plateaued at {current_loss:.2f}. Model is mathematically trapped.")
                                             
-                                            # Inject Humility Vector
-                                            print("    [Agentic ToT] ULTIMATE HUMILITY: Model cannot deduce answer. Asking user for help.")
-                                            if "current_input_ids" in state and "tokenizer" in state:
-                                                ctx = state["tokenizer"].decode(state["current_input_ids"][0][-40:])
-                                                print(f"    [Agentic ToT] Context: '...{ctx.strip()}'")
-                                            if state["humility_vec"] is not None:
-                                                humility_t = state["humility_vec"].to(routed_h.device).to(torch.float32)
-                                                # Massive injection to force humility
-                                                v.data = humility_t.view(1, 1, -1) * 20.0
-                                                synthesis_reason = "humility_plateau"
-                                            else:
-                                                # Fallback
-                                                noise = torch.randn_like(v) * routed_h.float().std() * 5.0
-                                                v.data = noise
-                                                synthesis_reason = "noise_plateau"
+                                            try:
+                                                h_target = routed_h[:, -1:, :].float().squeeze(0)
                                                 
-                                            synthesis_successful = True
+                                                phenomenality = {}
+                                                
+                                                amb_vec = _get_vector("ambiguity_vector", h_target.device)
+                                                if amb_vec is not None:
+                                                    sim = F.cosine_similarity(h_target, amb_vec.float().squeeze(0), dim=-1).item()
+                                                    phenomenality["ambiguity"] = sim
+                                                    if sim > 0.5:
+                                                        raise NeedsDisambiguationError("Ambiguity detected.")
+                                                        
+                                                rep_vec = _get_vector("repetition_vector", h_target.device)
+                                                if rep_vec is not None:
+                                                    sim = F.cosine_similarity(h_target, rep_vec.float().squeeze(0), dim=-1).item()
+                                                    phenomenality["repetition"] = sim
+                                                    if sim > 0.6:
+                                                        raise NeedsDisambiguationError("Repetition detected.")
+                                                        
+                                                dis_vec = _get_vector("disagreement_vector", h_target.device)
+                                                if dis_vec is not None:
+                                                    sim = F.cosine_similarity(h_target, dis_vec.float().squeeze(0), dim=-1).item()
+                                                    phenomenality["disagreement"] = sim
+                                                    if sim > 0.6:
+                                                        raise NeedsDisambiguationError("Disagreement detected.")
+                                                
+                                                state["last_phenomenality"] = phenomenality
+                                                print(f"      [Phenomenality Log] Ambiguity: {phenomenality.get('ambiguity', 0):.2f} | Repetition: {phenomenality.get('repetition', 0):.2f} | Disagreement: {phenomenality.get('disagreement', 0):.2f}")
+                                            except NeedsDisambiguationError:
+                                                raise
+                                            except Exception as e:
+                                                pass
+
+                                            # If we reach here, it's NOT ambiguity. It's just a hard math problem.
+                                            print("    [Agentic ToT] Model is mathematically trapped, but no ambiguity detected. Conceding defeat.")
+                                            synthesis_successful = False
                                             break
                                 if synthesis_successful:
                                     delta_to_apply = v.detach()
@@ -302,6 +367,8 @@ def get_agentic_handles(
                                 "start_layer": state["start_layer"],
                                 "end_layer": l_idx,
                                 "steps": len(loss_history),
+                                "expert": state["branch_names"][best_idx],
+                                "phenomenality": state.get("last_phenomenality", {})
                             }
                             if synthesis_recorder is not None:
                                 synthesis_recorder.append(
@@ -339,50 +406,49 @@ def get_agentic_handles(
 @torch.no_grad()
 def generate_agentic_text(
     M,
-    vecs,
+    instruction="",
+    vecs=None,
     belief_vec=None,
     humility_vec=None,
-    instruction="",
-    alpha=15.0,
-    max_new_tokens=64,
-    epsilon=0.05,
-    entropy_threshold=2.0,
-    max_loops=3,
-    force_synthesis=False,
-    cache_enabled=True,
-    cache_write_enabled=False,
-    cache_verified_only=True,
-    synthesis_enabled=True,
-    max_synthesis_events=1,
+    config=None,
+    max_new_tokens=None,
     synthesis_recorder=None,
+    chatty_log=False,
     max_tool_calls=4,
-    max_routing_events=4,
+    stop_after_final_answer=False,
+    stop_after_verifier_answer=False,
+    max_time=None,
 ):
+    from invariants.config import AgenticConfig
+    if config is None:
+        config = AgenticConfig()
+        
     inputs = _inputs(M, instruction)
     original_plen = inputs["input_ids"].shape[1]
     
+    # We still allow max_new_tokens override here because it's per-generation
+    if max_new_tokens is None:
+        max_new_tokens = config.max_new_tokens
+    
     handles, state = get_agentic_handles(
         M,
-        vecs,
+        vecs=vecs,
         belief_vec=belief_vec,
         humility_vec=humility_vec,
-        alpha=alpha,
-        epsilon=epsilon,
-        entropy_threshold=entropy_threshold,
-        max_loops=max_loops,
-        force_synthesis=force_synthesis,
-        cache_enabled=cache_enabled,
-        cache_write_enabled=cache_write_enabled,
-        cache_verified_only=cache_verified_only,
-        synthesis_enabled=synthesis_enabled,
-        max_synthesis_events=max_synthesis_events,
+        config=config,
         synthesis_recorder=synthesis_recorder,
-        max_routing_events=max_routing_events,
     )
     
     try:
         from transformers import StoppingCriteriaList, LogitsProcessorList, LogitsProcessor
-        from invariants.tool_utils import ToolStoppingCriteria, intercept_tool_call, evaluate_python_expression
+        from invariants.tool_utils import (
+            FinalAnswerStoppingCriteria,
+            TimeStoppingCriteria,
+            ToolStoppingCriteria,
+            VerifierStoppingCriteria,
+            intercept_tool_call,
+            evaluate_python_expression,
+        )
         
         class ContextTracker(LogitsProcessor):
             def __call__(self, input_ids, scores):
@@ -400,26 +466,95 @@ def generate_agentic_text(
         tokens_generated = 0
         tool_calls = 0
         full = current_inputs["input_ids"]
+        generation_started = time.time()
         
         while tokens_generated < max_new_tokens:
-            criteria = StoppingCriteriaList([ToolStoppingCriteria(M.tok, start_length=current_inputs["input_ids"].shape[1])])
+            remaining_time = None
+            if max_time is not None and max_time > 0:
+                remaining_time = max_time - (time.time() - generation_started)
+                if remaining_time <= 0:
+                    break
+            start_length = current_inputs["input_ids"].shape[1]
+            stopping_criteria = [ToolStoppingCriteria(M.tok, start_length=start_length)]
+            if stop_after_final_answer:
+                stopping_criteria.append(FinalAnswerStoppingCriteria(M.tok, start_length=start_length))
+            if stop_after_verifier_answer:
+                stopping_criteria.append(VerifierStoppingCriteria(M.tok, start_length=start_length))
+            if remaining_time is not None:
+                stopping_criteria.append(TimeStoppingCriteria(time.time() + remaining_time))
+            criteria = StoppingCriteriaList(stopping_criteria)
             processors = LogitsProcessorList([ContextTracker()])
             
-            out = M.model.generate(
-                **current_inputs, 
-                max_new_tokens=max_new_tokens - tokens_generated, 
-                do_sample=False,
-                use_cache=True, 
-                pad_token_id=M.tok.eos_token_id,
-                eos_token_id=eos_ids,
-                stopping_criteria=criteria,
-                logits_processor=processors
-            )
-            
+            try:
+                generate_kwargs = {
+                    **current_inputs,
+                    "max_new_tokens": max_new_tokens - tokens_generated,
+                    "do_sample": False,
+                    "use_cache": True,
+                    "pad_token_id": M.tok.eos_token_id,
+                    "eos_token_id": eos_ids,
+                    "stopping_criteria": criteria,
+                    "logits_processor": processors,
+                }
+                if remaining_time is not None:
+                    generate_kwargs["max_time"] = remaining_time
+                out = M.model.generate(**generate_kwargs)
+            except NeedsDisambiguationError as e:
+                err_msg = str(e)
+                print(f"\n    [Interlocutor] Cognitive Probe Matched: {err_msg} Formulating resolving question...")
+                
+                # Disable hooks for the sub-generation
+                for h in handles:
+                    h.remove()
+                    
+                q_prompt = (
+                    f"You are a mathematical reasoning engine. You are stuck on the following problem due to {err_msg.lower()}\n"
+                    f"{instruction}\n\n"
+                    "Ask the user a single, highly specific clarifying question to resolve it."
+                )
+                q_inputs = _inputs(M, q_prompt)
+                q_out = M.model.generate(**q_inputs, max_new_tokens=100, do_sample=True, temperature=0.7, pad_token_id=M.tok.eos_token_id)
+                question = M.tok.decode(q_out[0][q_inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+                
+                print(f"\n[Model Question] {question}")
+                if config.interactive_disambiguation:
+                    user_answer = input("[Your Answer] (Press Enter for 'Enough information is present in the question'): ").strip()
+                    if not user_answer:
+                        user_answer = "Enough information is present in the question."
+                else:
+                    user_answer = "Enough information is present in the question."
+                    print(f"[Auto-Clarification Fallback]: {user_answer}")
+                
+                clarification = f"\n\n[Human Clarification]: {user_answer}\n"
+                clarification_ids = M.tok.encode(clarification, add_special_tokens=False, return_tensors="pt").to(current_inputs["input_ids"].device)
+                
+                new_input_ids = torch.cat([current_inputs["input_ids"], clarification_ids], dim=1)
+                new_attn_mask = torch.ones(new_input_ids.shape, dtype=torch.long, device=new_input_ids.device)
+                current_inputs = {"input_ids": new_input_ids, "attention_mask": new_attn_mask}
+                
+                # Disable cache writes to avoid corrupting vectors with human text
+                config.cache_write_enabled = False
+                
+                # Re-attach hooks
+                handles, state = get_agentic_handles(
+                    M, vecs=vecs, belief_vec=belief_vec, humility_vec=humility_vec,
+                    config=config, synthesis_recorder=synthesis_recorder
+                )
+                
+                state["tokenizer"] = M.tok
+                state["current_input_ids"] = current_inputs["input_ids"]
+                continue
+                
             plen = current_inputs["input_ids"].shape[1]
             new_tokens = out[0][plen:]
             tokens_generated += len(new_tokens)
             
+            if config.chatty_log:
+                chunk = M.tok.decode(new_tokens, skip_special_tokens=True)
+                if chunk.strip():
+                    print(f"    [Agentic ToT] Token Chunk generated: {repr(chunk)}")
+            
+            current_inputs = {"input_ids": out, "attention_mask": torch.ones(out.shape, dtype=torch.long, device=out.device)}
             decoded = M.tok.decode(new_tokens, skip_special_tokens=True)
             expr = intercept_tool_call(decoded)
             

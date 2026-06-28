@@ -1,15 +1,10 @@
 import argparse
+import hashlib
 import json
 import sys
 import time
 import builtins
 import datetime
-
-_original_print = builtins.print
-def _ts_print(*args, **kwargs):
-    ts = datetime.datetime.now().strftime("[%H:%M:%S]")
-    _original_print(ts, *args, **kwargs)
-builtins.print = _ts_print
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +31,11 @@ DEFAULT_METHODS = (
 )
 
 
+def benchmark_question_key(question: str) -> str:
+    normalized = " ".join(question.strip().split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+
 def parse_args():
     p = argparse.ArgumentParser(
         description=(
@@ -52,8 +52,15 @@ def parse_args():
     p.add_argument("--repair-token-multiplier", type=float, default=3.0)
     p.add_argument("--max-attempt-tokens", type=int, default=300)
     p.add_argument("--max-elapsed-sec", type=float, default=180.0)
+    p.add_argument("--base-max-new-tokens", type=int, default=None, help="Optional token cap for base generations only.")
+    p.add_argument("--base-max-time-sec", type=float, default=None, help="Optional wall-clock cap for each base generation.")
     p.add_argument("--load-mode", default=None, help="auto, slow, full, or 4bit.")
     p.add_argument("--resume", action="store_true", help="Resume from an existing output JSON.")
+    p.add_argument("--interactive", action="store_true", help="Prompt the user when ambiguity is detected.")
+    p.add_argument("--hard-only", action="store_true", help="Skip humble methods if the base model gets it right.")
+    p.add_argument("--verbose", action="store_true", help="Print exact token chunks as they are generated (chatty log).")
+    p.add_argument("--no-timestamps", action="store_true", help="Disable print statement timestamps (on by default).")
+    p.add_argument("--skip-indices", default="", help="Comma-separated zero-based example indices to record as skipped.")
     p.add_argument("--output", default=str(OUT / "humble_full_suite_gsm8k.json"))
     return p.parse_args()
 
@@ -77,6 +84,15 @@ def parse_methods(raw: str) -> list[str]:
     if unknown:
         raise ValueError(f"Unknown methods: {unknown}. Allowed: {sorted(allowed)}")
     return methods
+
+
+def parse_index_set(raw: str) -> set[int]:
+    indices: set[int] = set()
+    for part in (raw or "").split(","):
+        part = part.strip()
+        if part:
+            indices.add(int(part))
+    return indices
 
 
 def adaptive_budget(base_tokens: int, multiplier: float, cap: int | None) -> int:
@@ -103,9 +119,21 @@ def load_requested_examples(raw_n: str) -> tuple[list[dict[str, Any]], str, bool
     return examples, source, False
 
 
-def evaluate_generation(M, prompt: str, answer: str, max_new_tokens: int) -> dict[str, Any]:
+def evaluate_generation(
+    M,
+    prompt: str,
+    answer: str,
+    max_new_tokens: int,
+    max_time: float | None = None,
+) -> dict[str, Any]:
     t0 = time.time()
-    response = generate_text(M, prompt, max_new_tokens=max_new_tokens)
+    response = generate_text(
+        M,
+        prompt,
+        max_new_tokens=max_new_tokens,
+        stop_after_final_answer=True,
+        max_time=max_time,
+    )
     elapsed = time.time() - t0
     correct, pred, gold = is_correct(response, answer)
     return {
@@ -122,34 +150,58 @@ def evaluate_humble(
     M,
     question: str,
     answer: str,
-    vecs,
-    max_rounds: int,
-    required_agreement: int,
-    max_new_tokens: int,
-    repair_token_multiplier: float,
-    max_attempt_tokens: int | None,
-    max_elapsed_sec: float | None,
-    allow_synthesis: bool,
+    config=None,
+    vecs=None,
 ) -> dict[str, Any]:
+    from invariants.config import AgenticConfig
+    if config is None:
+        config = AgenticConfig()
+    question_key = benchmark_question_key(question)
+    config.benchmark_question_key = question_key
+    config.exclude_same_question_oracle_cache = True
+        
     t0 = time.time()
     humble = solve_with_humility(
         M,
         question,
         vecs=vecs,
-        max_rounds=max_rounds,
-        required_agreement=required_agreement,
-        max_new_tokens=max_new_tokens,
-        allow_synthesis=allow_synthesis,
-        max_elapsed_sec=max_elapsed_sec,
-        repair_token_multiplier=repair_token_multiplier,
-        max_attempt_tokens=max_attempt_tokens,
+        config=config,
     )
     elapsed = time.time() - t0
     humble_text = "" if humble.final_answer is None else f"Final answer: {humble.final_answer}"
     correct, pred, gold = is_correct(humble_text, answer)
     
-    if correct and allow_synthesis and pred is not None:
-        _promote_verified_synthesis(humble.attempts, str(pred))
+    if correct and config.synthesis_enabled and pred is not None:
+        _promote_verified_synthesis(
+            humble.attempts,
+            str(pred),
+            tag="native_success",
+            question_key=question_key,
+        )
+    elif not correct and config.synthesis_enabled and pred is not None and gold is not None:
+        oracle_prompt = (
+            f"Question: {question}\n\n"
+            f"You previously answered {pred}, but the true correct answer is {gold}. "
+            f"Analyze both answers. Step-by-step, deduce why {pred} is mathematically flawed, "
+            f"and prove why {gold} is the only correct answer."
+        )
+        print("    [Oracle Curriculum] Model failed. Forcing backwards reasoning synthesis...")
+        oracle_humble = solve_with_humility(
+            M,
+            oracle_prompt,
+            vecs=vecs,
+            config=config,
+        )
+        oracle_text = "" if oracle_humble.final_answer is None else f"Final answer: {oracle_humble.final_answer}"
+        oracle_correct, oracle_pred, _ = is_correct(oracle_text, answer)
+        if oracle_correct:
+            print("    [Oracle Curriculum] SUCCESS! Forging distilled vectors to cache...")
+            _promote_verified_synthesis(
+                oracle_humble.attempts,
+                str(oracle_pred),
+                tag="oracle_repair",
+                question_key=question_key,
+            )
         
     return {
         "pred": None if pred is None else str(pred),
@@ -212,11 +264,28 @@ def write_results(output: Path, results: dict[str, Any], methods: list[str], sta
     output.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
 
+def print_progress(row_index: int, total: int, method: str) -> None:
+    if method not in {"legacy", "compact", "compact_long"}:
+        return
+    total = max(int(total), 1)
+    current = min(row_index + 1, total)
+    print(f"  base {method} item {current}/{total}", flush=True)
+
+
 def main():
     args = parse_args()
+    
+    if not args.no_timestamps:
+        _original_print = builtins.print
+        def _ts_print(*pargs, **kwargs):
+            ts = datetime.datetime.now().strftime("[%H:%M:%S]")
+            _original_print(ts, *pargs, **kwargs)
+        builtins.print = _ts_print
+        
     started_at = time.time()
     output = Path(args.output)
     methods = parse_methods(args.methods)
+    skip_indices = parse_index_set(args.skip_indices)
     long_budget = adaptive_budget(args.max_new_tokens, args.repair_token_multiplier, args.max_attempt_tokens)
 
     print("humble_full_suite - default model baselines + verifier/dynamic/synthesis", flush=True)
@@ -231,6 +300,21 @@ def main():
     if args.resume and output.exists():
         results = json.loads(output.read_text(encoding="utf-8"))
         completed_indices = {int(row["index"]) for row in results.get("rows", [])}
+        results["methods"] = methods
+        results["max_rounds"] = args.max_rounds
+        results["required_agreement"] = args.required_agreement
+        results["max_new_tokens"] = args.max_new_tokens
+        results["base_max_new_tokens"] = args.base_max_new_tokens
+        results["repair_token_multiplier"] = args.repair_token_multiplier
+        results["max_attempt_tokens"] = args.max_attempt_tokens
+        results["adaptive_max_new_tokens"] = adaptive_budget(
+            args.max_new_tokens,
+            args.repair_token_multiplier,
+            args.max_attempt_tokens,
+        )
+        results["max_elapsed_sec"] = args.max_elapsed_sec
+        results["base_max_time_sec"] = args.base_max_time_sec
+        results["stop_on_critical_urgency"] = False
         print(f"Resuming {output}; completed rows: {len(completed_indices)}", flush=True)
 
     if results is None:
@@ -243,21 +327,36 @@ def main():
             "max_rounds": args.max_rounds,
             "required_agreement": args.required_agreement,
             "max_new_tokens": args.max_new_tokens,
+            "base_max_new_tokens": args.base_max_new_tokens,
             "repair_token_multiplier": args.repair_token_multiplier,
             "max_attempt_tokens": args.max_attempt_tokens,
             "adaptive_max_new_tokens": long_budget,
             "max_elapsed_sec": args.max_elapsed_sec,
+            "base_max_time_sec": args.base_max_time_sec,
+            "stop_on_critical_urgency": False,
             "answer_key_visible_to_verifier": False,
             "answer_key_use": "scoring_only_after_generation",
             "rows": [],
         }
 
-    M = load_model(args.model, load_mode=args.load_mode)
+        try:
+            with open(output, "r", encoding="utf-8") as f:
+                old_results = json.load(f)
+            if "rows" in old_results:
+                results["rows"] = old_results["rows"]
+                completed_indices = {r["index"] for r in results["rows"]}
+                if "started_at" in old_results:
+                    started_at = old_results["started_at"]
+            print(f"Resuming {output}; completed rows: {len(completed_indices)}")
+        except Exception as e:
+            print(f"Failed to resume {output}: {e}")
 
-    needs_dynamic = any(method in methods for method in ("humble_dynamic", "humble_synthesis"))
+    M = load_model("meta-llama/Llama-3.1-8B-Instruct", load_mode=args.load_mode)
+    long_budget = int(args.max_new_tokens * args.repair_token_multiplier)
+    base_budget = args.base_max_new_tokens if args.base_max_new_tokens is not None else args.max_new_tokens
+    
     vecs = None
-    if needs_dynamic:
-        print("\nExtracting dynamic branch vectors...", flush=True)
+    if any(method in methods for method in ("humble_dynamic", "humble_synthesis")):
         vecs = build_domain_vecs(M)
 
     for i, ex in enumerate(examples):
@@ -268,55 +367,124 @@ def main():
         answer = ex["answer"]
         print(f"\n[{i+1}/{len(examples)}] {q}", flush=True)
         row = {"index": i, "question": q, "methods": {}}
+        if i in skip_indices:
+            row["skipped"] = True
+            row["skip_reason"] = "manual_skip_indices"
+            print(f"  [skip] item {i+1}/{len(examples)} index={i}", flush=True)
+            results["rows"].append(row)
+            write_results(output, results, methods, started_at)
+            continue
 
         if "legacy" in methods:
-            row["methods"]["legacy"] = evaluate_generation(M, prompt_for(q), answer, args.max_new_tokens)
+            print_progress(i, len(examples), "legacy")
+            row["methods"]["legacy"] = evaluate_generation(
+                M,
+                prompt_for(q),
+                answer,
+                base_budget,
+                max_time=args.base_max_time_sec,
+            )
+            if args.hard_only and row["methods"]["legacy"].get("correct", False):
+                row["hard_only_skipped_after"] = "legacy"
+                print("  [hard-only] Legacy base model succeeded. Skipping remaining methods.", flush=True)
+                results["rows"].append(row)
+                write_results(output, results, methods, started_at)
+                continue
         if "compact" in methods:
-            row["methods"]["compact"] = evaluate_generation(M, solve_prompt(q), answer, args.max_new_tokens)
+            print_progress(i, len(examples), "compact")
+            row["methods"]["compact"] = evaluate_generation(
+                M,
+                solve_prompt(q),
+                answer,
+                base_budget,
+                max_time=args.base_max_time_sec,
+            )
+        if args.hard_only:
+            early_base_correct = any(
+                res.get("correct", False)
+                for k, res in row["methods"].items()
+                if k in ("legacy", "compact")
+            )
+            if early_base_correct:
+                row["hard_only_skipped_after"] = "compact"
+                print("  [hard-only] Base model succeeded before compact_long. Skipping remaining methods.", flush=True)
+                results["rows"].append(row)
+                write_results(output, results, methods, started_at)
+                continue
         if "compact_long" in methods:
-            row["methods"]["compact_long"] = evaluate_generation(M, solve_prompt(q), answer, long_budget)
+            print_progress(i, len(examples), "compact_long")
+            row["methods"]["compact_long"] = evaluate_generation(
+                M,
+                solve_prompt(q),
+                answer,
+                long_budget,
+                max_time=args.base_max_time_sec,
+            )
+
+        if args.hard_only:
+            base_correct = any(
+                res.get("correct", False) 
+                for k, res in row["methods"].items() 
+                if k in ("legacy", "compact", "compact_long")
+            )
+            if base_correct:
+                print("  [hard-only] Base model succeeded. Skipping humble methods.", flush=True)
+                results["rows"].append(row)
+                write_results(output, results, methods, started_at)
+                continue
+        
+        from invariants.config import AgenticConfig
+        
         if "humble_verifier" in methods:
-            row["methods"]["humble_verifier"] = evaluate_humble(
-                M,
-                q,
-                answer,
-                vecs=None,
-                max_rounds=args.max_rounds,
-                required_agreement=args.required_agreement,
-                max_new_tokens=args.max_new_tokens,
-                repair_token_multiplier=args.repair_token_multiplier,
-                max_attempt_tokens=args.max_attempt_tokens,
-                max_elapsed_sec=args.max_elapsed_sec,
-                allow_synthesis=False,
-            )
+            config = AgenticConfig.from_preset("default")
+            config.max_rounds = args.max_rounds
+            config.required_agreement = args.required_agreement
+            config.max_new_tokens = args.max_new_tokens
+            config.repair_token_multiplier = args.repair_token_multiplier
+            config.max_attempt_tokens = args.max_attempt_tokens
+            config.max_elapsed_sec = args.max_elapsed_sec
+            config.stop_on_critical_urgency = False
+            config.synthesis_enabled = False
+            config.use_expert_vectors = False
+            config.interactive_disambiguation = args.interactive
+            config.chatty_log = args.verbose
+            
+            print_progress(i, len(examples), "humble_verifier")
+            row["methods"]["humble_verifier"] = evaluate_humble(M, q, answer, config=config)
+            
         if "humble_dynamic" in methods:
-            row["methods"]["humble_dynamic"] = evaluate_humble(
-                M,
-                q,
-                answer,
-                vecs=vecs,
-                max_rounds=args.max_rounds,
-                required_agreement=args.required_agreement,
-                max_new_tokens=args.max_new_tokens,
-                repair_token_multiplier=args.repair_token_multiplier,
-                max_attempt_tokens=args.max_attempt_tokens,
-                max_elapsed_sec=args.max_elapsed_sec,
-                allow_synthesis=False,
-            )
+            config = AgenticConfig.from_preset("default")
+            config.max_rounds = args.max_rounds
+            config.required_agreement = args.required_agreement
+            config.max_new_tokens = args.max_new_tokens
+            config.repair_token_multiplier = args.repair_token_multiplier
+            config.max_attempt_tokens = args.max_attempt_tokens
+            config.max_elapsed_sec = args.max_elapsed_sec
+            config.stop_on_critical_urgency = False
+            config.synthesis_enabled = False
+            config.interactive_disambiguation = args.interactive
+            config.chatty_log = args.verbose
+            
+            print_progress(i, len(examples), "humble_dynamic")
+            row["methods"]["humble_dynamic"] = evaluate_humble(M, q, answer, config=config, vecs=vecs)
+            
         if "humble_synthesis" in methods:
-            row["methods"]["humble_synthesis"] = evaluate_humble(
-                M,
-                q,
-                answer,
-                vecs=vecs,
-                max_rounds=args.max_rounds,
-                required_agreement=args.required_agreement,
-                max_new_tokens=args.max_new_tokens,
-                repair_token_multiplier=args.repair_token_multiplier,
-                max_attempt_tokens=args.max_attempt_tokens,
-                max_elapsed_sec=args.max_elapsed_sec,
-                allow_synthesis=True,
-            )
+            config = AgenticConfig.from_preset("thorough")
+            config.max_rounds = args.max_rounds
+            config.required_agreement = args.required_agreement
+            config.max_new_tokens = args.max_new_tokens
+            config.repair_token_multiplier = args.repair_token_multiplier
+            config.max_attempt_tokens = args.max_attempt_tokens
+            config.max_elapsed_sec = args.max_elapsed_sec
+            config.stop_on_critical_urgency = False
+            config.synthesis_enabled = True
+            config.interactive_disambiguation = args.interactive
+            config.chatty_log = args.verbose
+            config.cache_enabled = True
+            config.cache_write_enabled = True
+            
+            print_progress(i, len(examples), "humble_synthesis")
+            row["methods"]["humble_synthesis"] = evaluate_humble(M, q, answer, config=config, vecs=vecs)
 
         for method in methods:
             item = row["methods"].get(method)
