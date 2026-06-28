@@ -22,7 +22,11 @@ def _get_vector(name, device):
         else:
             _vector_cache[name] = None
     vec = _vector_cache[name]
-    return vec.to(device) if vec is not None else None
+    if vec is None:
+        return None
+    if isinstance(vec, dict):
+        return {k: v.to(device) for k, v in vec.items()}
+    return vec.to(device)
 
 def _entropy_from_logits(logits):
     probs = F.softmax(logits.float(), dim=-1)
@@ -41,6 +45,88 @@ def _add_last_token_delta(h, delta):
     add = torch.zeros_like(h)
     add[:, -1:, :] = d
     return h + add
+
+
+def _layer_vector(name, layer_index, device):
+    vec = _get_vector(name, device)
+    if isinstance(vec, dict):
+        vec = vec.get(layer_index)
+    return None if vec is None else vec.to(device)
+
+
+def _last_token_matrix(t):
+    t = t.float()
+    if t.ndim == 1:
+        return t.view(1, -1)
+    if t.ndim == 2:
+        return t[-1:, :]
+    return t.reshape(-1, t.shape[-2], t.shape[-1])[:, -1, :]
+
+
+def _generation_time_pressure(config):
+    deadline = getattr(config, "_generation_deadline", None)
+    budget = getattr(config, "_generation_budget_sec", None)
+    if deadline is None or budget is None or budget <= 0:
+        return 0.0
+    remaining = max(0.0, deadline - time.time())
+    elapsed = max(0.0, budget - remaining)
+    return max(0.0, min(1.0, elapsed / budget))
+
+
+def _maybe_apply_time_gated_urgency(h_syn, layer_index, config, state):
+    urgency_vec = _layer_vector("urgency_vector", layer_index, h_syn.device)
+    if urgency_vec is None:
+        return h_syn
+
+    if getattr(config, "continuous_urgency_injection", False):
+        coef = float(getattr(config, "urgency_max_coefficient", 0.8))
+        norm = urgency_vec.float().norm().clamp_min(1e-6)
+        state["last_time_awareness"] = {
+            "mode": "continuous_urgency",
+            "coefficient": coef,
+        }
+        return _add_last_token_delta(h_syn, coef * urgency_vec.float() / norm)
+
+    if not getattr(config, "time_awareness_gated_urgency", True):
+        return h_syn
+
+    time_vec = _layer_vector("time_awareness_vector", layer_index, h_syn.device)
+    if time_vec is None:
+        return h_syn
+
+    pressure = _generation_time_pressure(config)
+    if pressure <= 0:
+        return h_syn
+
+    h_last = _last_token_matrix(h_syn)
+    t_last = _last_token_matrix(time_vec)
+    sim = F.cosine_similarity(h_last, t_last.expand_as(h_last), dim=-1).mean().item()
+    threshold = float(getattr(config, "time_awareness_threshold", 0.45))
+    state["last_time_awareness"] = {
+        "mode": "time_awareness_gated",
+        "similarity": sim,
+        "threshold": threshold,
+        "time_pressure": pressure,
+        "applied": False,
+    }
+    if sim < threshold:
+        return h_syn
+
+    gate = max(0.0, min(1.0, (sim - threshold) / max(1e-6, 1.0 - threshold)))
+    coef = float(getattr(config, "urgency_max_coefficient", 0.8)) * pressure * gate
+    if coef <= 0:
+        return h_syn
+
+    norm = urgency_vec.float().norm().clamp_min(1e-6)
+    state["last_time_awareness"].update(
+        {
+            "gate": gate,
+            "coefficient": coef,
+            "applied": True,
+        }
+    )
+    return _add_last_token_delta(h_syn, coef * urgency_vec.float() / norm)
+
 
 def get_agentic_handles(
     M,
@@ -244,11 +330,7 @@ def get_agentic_handles(
                                     
                                     h_syn = _add_last_token_delta(routed_h, v)
                                     
-                                    # Dynamically inject Urgency vector (scaled by time)
-                                    urg_vec = _get_vector("urgency_vector", h_syn.device)
-                                    if urg_vec is not None:
-                                        urg_coef = 0.8 * (step / max_ttt_steps)
-                                        h_syn = _add_last_token_delta(h_syn, urg_coef * urg_vec)
+                                    h_syn = _maybe_apply_time_gated_urgency(h_syn, l_idx, config, state)
                                     
                                     # Forward through remaining layers to get final state
                                     h_curr = h_syn
@@ -319,26 +401,34 @@ def get_agentic_handles(
                                                 
                                                 phenomenality = {}
                                                 
-                                                amb_vec = _get_vector("ambiguity_vector", h_target.device)
+                                                v_target = v.detach().float().squeeze(0)
+                                                
+                                                amb_vec = _get_vector("ambiguity_vector", v_target.device)
                                                 if amb_vec is not None:
-                                                    sim = F.cosine_similarity(h_target, amb_vec.float().squeeze(0), dim=-1).item()
-                                                    phenomenality["ambiguity"] = sim
-                                                    if sim > 0.5:
-                                                        raise NeedsDisambiguationError("Ambiguity detected.")
+                                                    if isinstance(amb_vec, dict): amb_vec = amb_vec.get(l_idx)
+                                                    if amb_vec is not None:
+                                                        sim = F.cosine_similarity(v_target, amb_vec.float().squeeze(0), dim=-1).item()
+                                                        phenomenality["ambiguity"] = sim
+                                                        if abs(sim) > 0.1:
+                                                            raise NeedsDisambiguationError("Ambiguity detected.")
                                                         
-                                                rep_vec = _get_vector("repetition_vector", h_target.device)
+                                                rep_vec = _get_vector("repetition_vector", v_target.device)
                                                 if rep_vec is not None:
-                                                    sim = F.cosine_similarity(h_target, rep_vec.float().squeeze(0), dim=-1).item()
-                                                    phenomenality["repetition"] = sim
-                                                    if sim > 0.6:
-                                                        raise NeedsDisambiguationError("Repetition detected.")
+                                                    if isinstance(rep_vec, dict): rep_vec = rep_vec.get(l_idx)
+                                                    if rep_vec is not None:
+                                                        sim = F.cosine_similarity(v_target, rep_vec.float().squeeze(0), dim=-1).item()
+                                                        phenomenality["repetition"] = sim
+                                                        if abs(sim) > 0.1:
+                                                            raise NeedsDisambiguationError("Repetition detected.")
                                                         
-                                                dis_vec = _get_vector("disagreement_vector", h_target.device)
+                                                dis_vec = _get_vector("disagreement_vector", v_target.device)
                                                 if dis_vec is not None:
-                                                    sim = F.cosine_similarity(h_target, dis_vec.float().squeeze(0), dim=-1).item()
-                                                    phenomenality["disagreement"] = sim
-                                                    if sim > 0.6:
-                                                        raise NeedsDisambiguationError("Disagreement detected.")
+                                                    if isinstance(dis_vec, dict): dis_vec = dis_vec.get(l_idx)
+                                                    if dis_vec is not None:
+                                                        sim = F.cosine_similarity(v_target, dis_vec.float().squeeze(0), dim=-1).item()
+                                                        phenomenality["disagreement"] = sim
+                                                        if abs(sim) > 0.1:
+                                                            raise NeedsDisambiguationError("Disagreement detected.")
                                                 
                                                 state["last_phenomenality"] = phenomenality
                                                 print(f"      [Phenomenality Log] Ambiguity: {phenomenality.get('ambiguity', 0):.2f} | Repetition: {phenomenality.get('repetition', 0):.2f} | Disagreement: {phenomenality.get('disagreement', 0):.2f}")
@@ -367,7 +457,8 @@ def get_agentic_handles(
                                 "end_layer": l_idx,
                                 "steps": len(loss_history),
                                 "expert": state["branch_names"][best_idx],
-                                "phenomenality": state.get("last_phenomenality", {})
+                                "phenomenality": state.get("last_phenomenality", {}),
+                                "time_awareness": state.get("last_time_awareness", {}),
                             }
                             if synthesis_recorder is not None:
                                 synthesis_recorder.append(
@@ -405,6 +496,7 @@ def get_agentic_handles(
 @torch.no_grad()
 def generate_agentic_text(
     M,
+    *positional,
     instruction="",
     vecs=None,
     belief_vec=None,
@@ -417,17 +509,52 @@ def generate_agentic_text(
     stop_after_final_answer=False,
     stop_after_verifier_answer=False,
     max_time=None,
+    **legacy_overrides,
 ):
     from invariants.config import AgenticConfig
     if config is None:
         config = AgenticConfig()
-        
+
+    for arg in positional:
+        if isinstance(arg, dict):
+            if vecs is not None:
+                raise TypeError("generate_agentic_text received vecs more than once.")
+            vecs = arg
+        elif instruction:
+            raise TypeError("generate_agentic_text received instruction more than once.")
+        else:
+            instruction = arg
+
+    legacy_aliases = {
+        "allow_synthesis": "synthesis_enabled",
+    }
+    config_fields = set(getattr(config, "__dataclass_fields__", {}).keys())
+    for key, value in list(legacy_overrides.items()):
+        target = legacy_aliases.get(key, key)
+        if target in config_fields:
+            setattr(config, target, value)
+            legacy_overrides.pop(key)
+    if legacy_overrides:
+        unknown = ", ".join(sorted(legacy_overrides))
+        raise TypeError(f"Unknown generate_agentic_text options: {unknown}")
+    if chatty_log:
+        config.chatty_log = True
+
     inputs = _inputs(M, instruction)
     original_plen = inputs["input_ids"].shape[1]
     
     # We still allow max_new_tokens override here because it's per-generation
     if max_new_tokens is None:
         max_new_tokens = config.max_new_tokens
+
+    previous_deadline = getattr(config, "_generation_deadline", None)
+    previous_budget = getattr(config, "_generation_budget_sec", None)
+    if max_time is not None and max_time > 0:
+        config._generation_deadline = time.time() + float(max_time)
+        config._generation_budget_sec = float(max_time)
+    else:
+        config._generation_deadline = None
+        config._generation_budget_sec = None
     
     handles, state = get_agentic_handles(
         M,
@@ -516,18 +643,31 @@ def generate_agentic_text(
                 question = M.tok.decode(q_out[0][q_inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
                 
                 print(f"\n[Model Question] {question}")
-                from invariants.tool_utils import popup_massive_question
-                popup_massive_question(question)
-                
+
+                event = {"reason": err_msg, "question": question}
+                if hasattr(config, "clarifying_questions"):
+                    config.clarifying_questions.append(event)
+
+                if config.defer_disambiguation:
+                    print("[Deferred Clarification] Recording question and returning control to the benchmark.")
+                    raise NeedsDisambiguationError(question)
+
                 if config.interactive_disambiguation:
+                    from invariants.tool_utils import popup_massive_question
+                    popup_massive_question(question)
                     user_answer = input("[Your Answer] (Press Enter for 'Enough information is present in the question'): ").strip()
                     if not user_answer:
-                        user_answer = "Enough information is present in the question."
+                        user_answer = config.clarification_fallback or "Enough information is present in the question."
+                    clarification_label = "Human Clarification"
                 else:
-                    user_answer = "Enough information is present in the question."
-                    print(f"[Auto-Clarification Fallback]: {user_answer}")
+                    user_answer = (
+                        config.clarification_fallback
+                        or "Resolve the uncertainty internally and continue without external information."
+                    )
+                    clarification_label = "Internal Disambiguation Policy"
+                    print(f"[Internal Disambiguation Policy]: {user_answer}")
                 
-                clarification = f"\n\n[Human Clarification]: {user_answer}\n"
+                clarification = f"\n\n[{clarification_label}]: {user_answer}\n"
                 clarification_ids = M.tok.encode(clarification, add_special_tokens=False, return_tensors="pt").to(current_inputs["input_ids"].device)
                 
                 new_input_ids = torch.cat([current_inputs["input_ids"], clarification_ids], dim=1)
@@ -581,5 +721,7 @@ def generate_agentic_text(
     finally:
         for h in handles:
             h.remove()
-            
+        config._generation_deadline = previous_deadline
+        config._generation_budget_sec = previous_budget
+             
     return M.tok.decode(full[0, original_plen:], skip_special_tokens=True).strip()
