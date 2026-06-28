@@ -513,7 +513,7 @@ def generate_agentic_text(
                     "Ask the user a single, highly specific clarifying question to resolve it."
                 )
                 q_inputs = _inputs(M, q_prompt)
-                q_out = M.model.generate(**q_inputs, max_new_tokens=100, do_sample=True, temperature=0.7, pad_token_id=M.tok.eos_token_id)
+                q_out = M.model.generate(**q_inputs, max_new_tokens=500, do_sample=True, temperature=0.7, pad_token_id=M.tok.eos_token_id)
                 question = M.tok.decode(q_out[0][q_inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
                 
                 print(f"\n[Model Question] {question}")
