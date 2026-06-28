@@ -134,3 +134,34 @@ def intercept_tool_call(decoded_text: str):
         if re.fullmatch(r"(?=.*\d)[0-9+\-*/().,\s=]+", expr):
             return expr
     return None
+
+def popup_massive_question(question: str):
+    """Pops up a massive Tkinter window to display a question to the user from afar."""
+    try:
+        import tkinter as tk
+        root = tk.Tk()
+        root.title("Agentic ToT: Disambiguation Required")
+        root.attributes('-topmost', True)
+        
+        window_width = 1200
+        window_height = 600
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+        center_x = int(screen_width/2 - window_width / 2)
+        center_y = int(screen_height/2 - window_height / 2)
+        root.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
+        
+        root.configure(bg='#1e1e1e')
+        
+        lbl_title = tk.Label(root, text="SYSTEM HALTED: COGNITIVE TRAP DETECTED", font=("Helvetica", 24, "bold"), fg="#ff5555", bg="#1e1e1e")
+        lbl_title.pack(pady=30)
+        
+        lbl_question = tk.Label(root, text=question, font=("Helvetica", 36), fg="white", bg="#1e1e1e", wraplength=1100, justify="center")
+        lbl_question.pack(expand=True, fill='both', padx=50, pady=20)
+        
+        btn = tk.Button(root, text="ACKNOWLEDGE", font=("Helvetica", 20), command=root.destroy, bg="#333333", fg="white", padx=20, pady=10)
+        btn.pack(pady=40)
+        
+        root.mainloop()
+    except Exception as e:
+        print(f"Failed to show popup: {e}")

@@ -517,6 +517,9 @@ def generate_agentic_text(
                 question = M.tok.decode(q_out[0][q_inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
                 
                 print(f"\n[Model Question] {question}")
+                from invariants.tool_utils import popup_massive_question
+                popup_massive_question(question)
+                
                 if config.interactive_disambiguation:
                     user_answer = input("[Your Answer] (Press Enter for 'Enough information is present in the question'): ").strip()
                     if not user_answer:
