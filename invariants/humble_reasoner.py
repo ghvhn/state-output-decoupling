@@ -16,7 +16,7 @@ import time
 from typing import Any
 
 from invariants.engine import generate_text
-from invariants.agentic_engine import _global_cache, generate_agentic_text
+from invariants.agentic_engine import NeedsDisambiguationError, _global_cache, generate_agentic_text
 
 
 NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
@@ -36,6 +36,9 @@ class ReasoningAttempt:
     elapsed_sec: float = 0.0
     urgency: dict[str, Any] | None = None
     synthesis_records: list[dict[str, Any]] | None = None
+    needs_clarification: bool = False
+    clarifying_question: str | None = None
+    ambiguity_type: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         records = self.synthesis_records or []
@@ -53,6 +56,9 @@ class ReasoningAttempt:
             "urgency": self.urgency or {},
             "synthesis_record_count": len(records),
             "synthesis_records": [dict(record.get("metadata", {})) for record in records],
+            "needs_clarification": self.needs_clarification,
+            "clarifying_question": self.clarifying_question,
+            "ambiguity_type": self.ambiguity_type,
         }
 
 
@@ -327,6 +333,34 @@ def _cap_token_budget(token_budget: int, max_attempt_tokens: int | None) -> int:
     return max(1, min(token_budget, int(max_attempt_tokens)))
 
 
+def _with_time_context(prompt: str, config, remaining_sec: float | None) -> str:
+    if not getattr(config, "provide_time_context", True) or remaining_sec is None:
+        return prompt
+    total = getattr(config, "max_elapsed_sec", None)
+    if total is not None and total > 0:
+        elapsed = max(0.0, float(total) - remaining_sec)
+        ratio = remaining_sec / float(total)
+        if ratio <= 0.15:
+            pressure = "critical"
+        elif ratio <= 0.35:
+            pressure = "high"
+        elif ratio <= 0.65:
+            pressure = "medium"
+        else:
+            pressure = "low"
+        context = (
+            f"[Time Context]: about {elapsed:.0f}s elapsed, about {remaining_sec:.0f}s remaining, "
+            f"time pressure is {pressure}. Use this only to decide whether to continue, summarize, "
+            "defer, or answer concisely; do not let it change the arithmetic."
+        )
+    else:
+        context = (
+            f"[Time Context]: about {remaining_sec:.0f}s remains in the current generation budget. "
+            "Use this only for pacing, not for arithmetic."
+        )
+    return f"{prompt.rstrip()}\n\n{context}"
+
+
 def _scaled_token_budget(
     base_tokens: int,
     multiplier: float,
@@ -335,6 +369,48 @@ def _scaled_token_budget(
     multiplier = max(1.0, float(multiplier))
     scaled = max(int(base_tokens), int(round(base_tokens * multiplier)))
     return _cap_token_budget(scaled, max_attempt_tokens)
+
+
+def _apply_config_overrides(config, overrides: dict[str, Any]) -> None:
+    aliases = {
+        "allow_synthesis": "synthesis_enabled",
+    }
+    fields = set(getattr(config, "__dataclass_fields__", {}).keys())
+    unknown: list[str] = []
+    for key, value in overrides.items():
+        target = aliases.get(key, key)
+        if target in fields:
+            setattr(config, target, value)
+        else:
+            unknown.append(key)
+    if unknown:
+        raise TypeError(f"Unknown solve_with_humility options: {', '.join(sorted(unknown))}")
+
+
+def _clarification_attempt(
+    mode: str,
+    round_index: int,
+    question: str,
+    token_budget: int | None,
+    elapsed_sec: float,
+    synthesis_records: list[dict[str, Any]],
+) -> ReasoningAttempt:
+    return ReasoningAttempt(
+        mode=mode,
+        round_index=round_index,
+        response=f"Clarifying question: {question}",
+        extracted_answer=None,
+        verifier_response="Needs user clarification before scoring.",
+        verdict="unsettled",
+        verifier_answer=None,
+        accepted=False,
+        token_budget=token_budget,
+        elapsed_sec=elapsed_sec,
+        synthesis_records=synthesis_records,
+        needs_clarification=True,
+        clarifying_question=question,
+        ambiguity_type="disambiguation",
+    )
 
 
 def _mode_token_budget(
@@ -378,26 +454,38 @@ def _run_attempt(
         
     t0 = time.time()
     synthesis_records: list[dict[str, Any]] = []
-    if mode == "dynamic" and vecs is not None:
-        generated = generate_agentic_text(
-            M,
-            instruction=prompt,
-            vecs=vecs,
-            belief_vec=belief_vec,
-            humility_vec=humility_vec,
-            config=config,
-            max_new_tokens=actual_max_tokens,
-            synthesis_recorder=synthesis_records,
-            stop_after_final_answer=True,
-            max_time=remaining_time(),
-        )
-    else:
-        generated = generate_text(
-            M,
-            prompt,
-            max_new_tokens=actual_max_tokens,
-            stop_after_final_answer=True,
-            max_time=remaining_time(),
+    remaining_before_generation = remaining_time()
+    prompt_for_generation = _with_time_context(prompt, config, remaining_before_generation)
+    try:
+        if mode == "dynamic" and vecs is not None:
+            generated = generate_agentic_text(
+                M,
+                instruction=prompt_for_generation,
+                vecs=vecs,
+                belief_vec=belief_vec,
+                humility_vec=humility_vec,
+                config=config,
+                max_new_tokens=actual_max_tokens,
+                synthesis_recorder=synthesis_records,
+                stop_after_final_answer=True,
+                max_time=remaining_before_generation,
+            )
+        else:
+            generated = generate_text(
+                M,
+                prompt_for_generation,
+                max_new_tokens=actual_max_tokens,
+                stop_after_final_answer=True,
+                max_time=remaining_before_generation,
+            )
+    except NeedsDisambiguationError as e:
+        return _clarification_attempt(
+            mode,
+            round_index,
+            str(e),
+            actual_max_tokens,
+            time.time() - t0,
+            synthesis_records,
         )
 
     response = generated
@@ -408,28 +496,39 @@ def _run_attempt(
     
     # Blind Verification: Strip the solver's final conclusion so the verifier can't be anchored.
     blind_response = re.sub(r"(?i)^(?:Final answer|Computed).*$", "", response, flags=re.MULTILINE).strip()
-    v_prompt = verify_prompt(question, blind_response)
+    verifier_remaining = remaining_time()
+    v_prompt = _with_time_context(verify_prompt(question, blind_response), config, verifier_remaining)
     
-    if mode == "dynamic" and vecs is not None:
-        verifier_response = generate_agentic_text(
-            M,
-            instruction=v_prompt,
-            vecs=vecs,
-            belief_vec=belief_vec,
-            humility_vec=humility_vec,
-            config=config,
-            max_new_tokens=180,
-            synthesis_recorder=synthesis_records,
-            stop_after_verifier_answer=True,
-            max_time=remaining_time(),
-        )
-    else:
-        verifier_response = generate_text(
-            M,
-            v_prompt,
-            max_new_tokens=180,
-            stop_after_verifier_answer=True,
-            max_time=remaining_time(),
+    try:
+        if mode == "dynamic" and vecs is not None:
+            verifier_response = generate_agentic_text(
+                M,
+                instruction=v_prompt,
+                vecs=vecs,
+                belief_vec=belief_vec,
+                humility_vec=humility_vec,
+                config=config,
+                max_new_tokens=180,
+                synthesis_recorder=synthesis_records,
+                stop_after_verifier_answer=True,
+                max_time=verifier_remaining,
+            )
+        else:
+            verifier_response = generate_text(
+                M,
+                v_prompt,
+                max_new_tokens=180,
+                stop_after_verifier_answer=True,
+                max_time=verifier_remaining,
+            )
+    except NeedsDisambiguationError as e:
+        return _clarification_attempt(
+            mode,
+            round_index,
+            str(e),
+            actual_max_tokens,
+            time.time() - t0,
+            synthesis_records,
         )
     verdict, verifier_answer = parse_verifier(verifier_response)
     accepted = verdict == "pass" and extracted is not None and verifier_answer is not None and verifier_answer == extracted
@@ -455,10 +554,12 @@ def solve_with_humility(
     belief_vec=None,
     humility_vec=None,
     config=None,
+    **legacy_overrides,
 ) -> HumbleResult:
     from invariants.config import AgenticConfig
     if config is None:
         config = AgenticConfig()
+    _apply_config_overrides(config, legacy_overrides)
         
     max_rounds = config.max_rounds
     required_agreement = config.required_agreement
@@ -497,6 +598,8 @@ def solve_with_humility(
     )
     attempts.append(first)
     first.urgency = assess_urgency(attempts, time.time() - t0, max_elapsed_sec)
+    if first.needs_clarification and config.defer_disambiguation:
+        return HumbleResult(question, None, False, "needs_user_clarification", attempts, first.urgency)
 
     answer, count = _modal_answer(attempts)
     if answer is not None and count >= required_agreement:
@@ -543,6 +646,8 @@ def solve_with_humility(
         )
         attempts.append(attempt)
         attempt.urgency = assess_urgency(attempts, time.time() - t0, max_elapsed_sec)
+        if attempt.needs_clarification and config.defer_disambiguation:
+            return HumbleResult(question, None, False, "needs_user_clarification", attempts, attempt.urgency)
 
         answer, count = _modal_answer(attempts)
         if answer is not None and count >= required_agreement:

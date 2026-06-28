@@ -18,8 +18,19 @@ class AgenticConfig:
     exclude_same_question_oracle_cache: bool = False
     benchmark_question_key: Optional[str] = None
     interactive_disambiguation: bool = False
+    defer_disambiguation: bool = False
+    clarification_fallback: Optional[str] = (
+        "Resolve the uncertainty internally: list the plausible interpretations, "
+        "choose the one best supported by the original wording, and continue without external information."
+    )
+    clarifying_questions: list[Dict[str, Any]] = field(default_factory=list)
     chatty_log: bool = False
     force_synthesis: bool = False
+    provide_time_context: bool = True
+    time_awareness_gated_urgency: bool = True
+    time_awareness_threshold: float = 0.45
+    urgency_max_coefficient: float = 0.8
+    continuous_urgency_injection: bool = False
     
     # Hyperparameters
     max_loops: int = 3

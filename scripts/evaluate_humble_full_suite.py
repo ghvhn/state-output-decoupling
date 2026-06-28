@@ -56,7 +56,44 @@ def parse_args():
     p.add_argument("--base-max-time-sec", type=float, default=None, help="Optional wall-clock cap for each base generation.")
     p.add_argument("--load-mode", default=None, help="auto, slow, full, or 4bit.")
     p.add_argument("--resume", action="store_true", help="Resume from an existing output JSON.")
-    p.add_argument("--interactive", action="store_true", help="Prompt the user when ambiguity is detected.")
+    p.add_argument(
+        "--run-kind",
+        choices=["bench-standard", "bench-informed"],
+        default="bench-standard",
+        help="Canonical benchmark run label. bench-standard defers ambiguity; bench-informed asks for clarification immediately.",
+    )
+    p.add_argument(
+        "--interactive",
+        action="store_true",
+        default=None,
+        help="Advanced override: prompt the user when ambiguity is detected.",
+    )
+    p.add_argument(
+        "--ambiguity-mode",
+        choices=["auto_resolve", "strict_gold", "ask_allowed", "answered_clarification"],
+        default=None,
+        help="Advanced override for ambiguity behavior.",
+    )
+    p.add_argument(
+        "--interactive-disambiguation",
+        choices=["defer", "instant"],
+        default=None,
+        help="Advanced override: when interactive, defer questions to the end or ask immediately.",
+    )
+    p.add_argument(
+        "--clarification-fallback",
+        default=(
+            "Resolve the uncertainty internally: list the plausible interpretations, "
+            "choose the one best supported by the original wording, and continue without external information."
+        ),
+        help="Internal policy injected when ambiguity is detected without an instant human answer.",
+    )
+    p.add_argument(
+        "--oracle-cache-mode",
+        choices=["ignore_oracle", "exclude_same_question", "use_all"],
+        default="ignore_oracle",
+        help="Benchmark cache policy. Default ignores oracle-repair cache; use_all reads every cache entry.",
+    )
     p.add_argument("--hard-only", action="store_true", help="Skip humble methods if the base model gets it right.")
     p.add_argument("--verbose", action="store_true", help="Print exact token chunks as they are generated (chatty log).")
     p.add_argument("--no-timestamps", action="store_true", help="Disable print statement timestamps (on by default).")
@@ -158,7 +195,6 @@ def evaluate_humble(
         config = AgenticConfig()
     question_key = benchmark_question_key(question)
     config.benchmark_question_key = question_key
-    config.exclude_same_question_oracle_cache = True
         
     t0 = time.time()
     humble = solve_with_humility(
@@ -170,6 +206,12 @@ def evaluate_humble(
     elapsed = time.time() - t0
     humble_text = "" if humble.final_answer is None else f"Final answer: {humble.final_answer}"
     correct, pred, gold = is_correct(humble_text, answer)
+    clarifying_question = None
+    for attempt in humble.attempts:
+        if getattr(attempt, "needs_clarification", False):
+            clarifying_question = attempt.clarifying_question
+            break
+    needs_clarification = humble.reason == "needs_user_clarification"
     
     if correct and config.synthesis_enabled and pred is not None:
         _promote_verified_synthesis(
@@ -203,7 +245,7 @@ def evaluate_humble(
                 question_key=question_key,
             )
         
-    return {
+    result = {
         "pred": None if pred is None else str(pred),
         "gold": None if gold is None else str(gold),
         "correct": correct,
@@ -212,7 +254,17 @@ def evaluate_humble(
         "urgency": humble.urgency,
         "time_sec": round(elapsed, 2),
         "result": humble.to_dict(),
+        "needs_clarification": needs_clarification,
+        "clarifying_question": clarifying_question,
     }
+    if needs_clarification:
+        result.update(
+            {
+                "skipped_for_ambiguity": True,
+                "score_excluded_reason": "needs_user_clarification",
+            }
+        )
+    return result
 
 
 def summarize_rows(rows: list[dict[str, Any]], methods: list[str]) -> dict[str, Any]:
@@ -222,11 +274,14 @@ def summarize_rows(rows: list[dict[str, Any]], methods: list[str]) -> dict[str, 
     }
     for method in methods:
         present = [row["methods"][method] for row in rows if method in row.get("methods", {})]
-        correct = sum(1 for item in present if item.get("correct"))
+        scored = [item for item in present if not item.get("score_excluded_reason")]
+        correct = sum(1 for item in scored if item.get("correct"))
         method_summary: dict[str, Any] = {
-            "n": len(present),
+            "n": len(scored),
+            "attempted_n": len(present),
+            "score_excluded": len(present) - len(scored),
             "correct": correct,
-            "accuracy": correct / len(present) if present else None,
+            "accuracy": correct / len(scored) if scored else None,
             "mean_time_sec": (
                 sum(float(item.get("time_sec", 0.0)) for item in present) / len(present)
                 if present
@@ -234,8 +289,8 @@ def summarize_rows(rows: list[dict[str, Any]], methods: list[str]) -> dict[str, 
             ),
         }
         if method.startswith("humble"):
-            confident = sum(1 for item in present if item.get("confident"))
-            confident_correct = sum(1 for item in present if item.get("confident") and item.get("correct"))
+            confident = sum(1 for item in scored if item.get("confident"))
+            confident_correct = sum(1 for item in scored if item.get("confident") and item.get("correct"))
             synthesis_records = 0
             cache_hits = 0
             for item in present:
@@ -248,7 +303,7 @@ def summarize_rows(rows: list[dict[str, Any]], methods: list[str]) -> dict[str, 
                 {
                     "confident": confident,
                     "confident_correct": confident_correct,
-                    "coverage": confident / len(present) if present else None,
+                    "coverage": confident / len(scored) if scored else None,
                     "selective_accuracy": confident_correct / confident if confident else None,
                     "synthesis_record_count": synthesis_records,
                     "cache_hit_count": cache_hits,
@@ -272,8 +327,50 @@ def print_progress(row_index: int, total: int, method: str) -> None:
     print(f"  base {method} item {current}/{total}", flush=True)
 
 
+def resolve_run_policy(args) -> None:
+    policies = {
+        "bench-standard": {
+            "interactive": False,
+            "ambiguity_mode": "ask_allowed",
+            "interactive_disambiguation": "defer",
+        },
+        "bench-informed": {
+            "interactive": True,
+            "ambiguity_mode": "answered_clarification",
+            "interactive_disambiguation": "instant",
+        },
+    }
+    policy = dict(policies[args.run_kind])
+    if args.interactive is not None:
+        policy["interactive"] = args.interactive
+    if args.ambiguity_mode is not None:
+        policy["ambiguity_mode"] = args.ambiguity_mode
+    if args.interactive_disambiguation is not None:
+        policy["interactive_disambiguation"] = args.interactive_disambiguation
+
+    args.interactive = policy["interactive"]
+    args.ambiguity_mode = policy["ambiguity_mode"]
+    args.interactive_disambiguation = policy["interactive_disambiguation"]
+
+
+def apply_disambiguation_policy(config, args) -> None:
+    defer_for_benchmark = args.ambiguity_mode == "ask_allowed" and (
+        not args.interactive or args.interactive_disambiguation == "defer"
+    )
+    interactive_instant = args.interactive and args.interactive_disambiguation == "instant"
+    config.interactive_disambiguation = interactive_instant
+    config.defer_disambiguation = defer_for_benchmark
+    config.clarification_fallback = args.clarification_fallback
+
+
+def apply_oracle_cache_policy(config, args) -> None:
+    config.ignore_oracle_cache = args.oracle_cache_mode == "ignore_oracle"
+    config.exclude_same_question_oracle_cache = args.oracle_cache_mode == "exclude_same_question"
+
+
 def main():
     args = parse_args()
+    resolve_run_policy(args)
     
     if not args.no_timestamps:
         _original_print = builtins.print
@@ -315,9 +412,16 @@ def main():
         results["max_elapsed_sec"] = args.max_elapsed_sec
         results["base_max_time_sec"] = args.base_max_time_sec
         results["stop_on_critical_urgency"] = False
+        results["run_kind"] = args.run_kind
+        results["benchmark_mode"] = args.ambiguity_mode
+        results["oracle_cache_mode"] = args.oracle_cache_mode
+        results["interactive"] = args.interactive
+        results["interactive_disambiguation"] = args.interactive_disambiguation if args.interactive else None
         print(f"Resuming {output}; completed rows: {len(completed_indices)}", flush=True)
 
     if results is None:
+        if output.exists():
+            print(f"Starting fresh; existing {output} will be overwritten. Use --resume to continue it.", flush=True)
         results = {
             "model": args.model,
             "example_source": source,
@@ -334,25 +438,19 @@ def main():
             "max_elapsed_sec": args.max_elapsed_sec,
             "base_max_time_sec": args.base_max_time_sec,
             "stop_on_critical_urgency": False,
+            "run_kind": args.run_kind,
+            "benchmark_mode": args.ambiguity_mode,
+            "oracle_cache_mode": args.oracle_cache_mode,
+            "interactive": args.interactive,
+            "interactive_disambiguation": args.interactive_disambiguation if args.interactive else None,
+            "clarification_fallback": args.clarification_fallback,
             "answer_key_visible_to_verifier": False,
             "answer_key_use": "scoring_only_after_generation",
             "rows": [],
         }
 
-        try:
-            with open(output, "r", encoding="utf-8") as f:
-                old_results = json.load(f)
-            if "rows" in old_results:
-                results["rows"] = old_results["rows"]
-                completed_indices = {r["index"] for r in results["rows"]}
-                if "started_at" in old_results:
-                    started_at = old_results["started_at"]
-            print(f"Resuming {output}; completed rows: {len(completed_indices)}")
-        except Exception as e:
-            print(f"Failed to resume {output}: {e}")
-
-    M = load_model("meta-llama/Llama-3.1-8B-Instruct", load_mode=args.load_mode)
-    long_budget = int(args.max_new_tokens * args.repair_token_multiplier)
+    M = load_model(args.model, load_mode=args.load_mode)
+    long_budget = adaptive_budget(args.max_new_tokens, args.repair_token_multiplier, args.max_attempt_tokens)
     base_budget = args.base_max_new_tokens if args.base_max_new_tokens is not None else args.max_new_tokens
     
     vecs = None
@@ -446,7 +544,8 @@ def main():
             config.stop_on_critical_urgency = False
             config.synthesis_enabled = False
             config.use_expert_vectors = False
-            config.interactive_disambiguation = args.interactive
+            apply_disambiguation_policy(config, args)
+            apply_oracle_cache_policy(config, args)
             config.chatty_log = args.verbose
             
             print_progress(i, len(examples), "humble_verifier")
@@ -462,7 +561,8 @@ def main():
             config.max_elapsed_sec = args.max_elapsed_sec
             config.stop_on_critical_urgency = False
             config.synthesis_enabled = False
-            config.interactive_disambiguation = args.interactive
+            apply_disambiguation_policy(config, args)
+            apply_oracle_cache_policy(config, args)
             config.chatty_log = args.verbose
             
             print_progress(i, len(examples), "humble_dynamic")
@@ -478,7 +578,8 @@ def main():
             config.max_elapsed_sec = args.max_elapsed_sec
             config.stop_on_critical_urgency = False
             config.synthesis_enabled = True
-            config.interactive_disambiguation = args.interactive
+            apply_disambiguation_policy(config, args)
+            apply_oracle_cache_policy(config, args)
             config.chatty_log = args.verbose
             config.cache_enabled = True
             config.cache_write_enabled = True
