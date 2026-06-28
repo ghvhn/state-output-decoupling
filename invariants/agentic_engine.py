@@ -1,9 +1,10 @@
 import time
 import torch
 import torch.nn.functional as F
-from invariants.engine import _inputs, _generate_ids
+from pathlib import Path
+
+from invariants.engine import _inputs
 from invariants.social_hunt import get_steer_vector
-from invariants.multi_domain_benchmark import DOMAINS
 from invariants.cognitive_cache import CognitiveCache
 
 class NeedsDisambiguationError(Exception):
@@ -12,7 +13,6 @@ class NeedsDisambiguationError(Exception):
 # Global cache instance
 _global_cache = CognitiveCache()
 
-from pathlib import Path
 _vector_cache = {}
 def _get_vector(name, device):
     if name not in _vector_cache:
