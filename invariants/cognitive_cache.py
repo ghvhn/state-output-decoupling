@@ -87,7 +87,13 @@ class CognitiveCache:
         self.save()
         print(f"    [Cognitive Cache] Epiphany stored! Total memories: {len(self.memory)}")
         
-    def retrieve(self, current_state, verified_only=False):
+    def retrieve(
+        self,
+        current_state,
+        verified_only=False,
+        ignore_oracle_cache=False,
+        excluded_oracle_question_key=None,
+    ):
         """
         Computes cosine similarity between current state and all saved triggers.
         Returns the learned vector if similarity > threshold.
@@ -109,6 +115,15 @@ class CognitiveCache:
             if verified_only and (
                 not isinstance(metadata, dict)
                 or metadata.get("promoted_by") != "humble_verifier"
+            ):
+                continue
+            if ignore_oracle_cache and isinstance(metadata, dict) and metadata.get("tag") == "oracle_repair":
+                continue
+            if (
+                excluded_oracle_question_key is not None
+                and isinstance(metadata, dict)
+                and metadata.get("tag") == "oracle_repair"
+                and metadata.get("question_key") == excluded_oracle_question_key
             ):
                 continue
             trigger = entry["trigger"]
