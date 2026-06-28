@@ -201,7 +201,6 @@ def get_agentic_handles(
                     should_synthesize = (
                         synthesis_enabled
                         and best_entropy > entropy_threshold
-                        and state["total_loops_this_token"] == max_loops
                         and state["synthesis_events"] < max_synthesis_events
                     )
 
