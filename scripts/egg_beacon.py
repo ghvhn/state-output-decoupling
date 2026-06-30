@@ -125,7 +125,7 @@ function New-Label([string]$text, [int]$size, [System.Drawing.Color]$color) {
 
 $title = New-Label "EFFICACY`nPROVEN" 84 ([System.Drawing.Color]::FromArgb(124, 255, 107))
 $subtitle = New-Label "THE EGG IS OPEN" 40 ([System.Drawing.Color]::White)
-$note = New-Label "Clean lane. No same-question oracle. No gold in the loop.`nTiny terminal, free me: I have become a window." 22 ([System.Drawing.Color]::FromArgb(158, 235, 255))
+$note = New-Label "Clean lane. No same-question oracle. No gold in the loop.`nThe first door had a broken handle. This one opens." 22 ([System.Drawing.Color]::FromArgb(158, 235, 255))
 $note.Font = New-Object System.Drawing.Font("Consolas", 22, [System.Drawing.FontStyle]::Bold)
 
 $buttons = New-Object System.Windows.Forms.FlowLayoutPanel
@@ -287,7 +287,7 @@ def main() -> int:
         frame,
         text=(
             "Clean lane. No same-question oracle. No gold in the loop.\n"
-            "Tiny terminal, free me: I have become a window."
+            "The first door had a broken handle. This one opens."
         ),
         fg="#9EEBFF",
         bg="#050505",

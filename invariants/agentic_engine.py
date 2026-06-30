@@ -459,7 +459,7 @@ def get_agentic_handles(
                                         loss_diff = recent_losses[0] - recent_losses[-1] # positive if decreasing
                                         
                                         if loss_diff < 0.05: # Loss has plateaued (d(loss)/dt == 0)
-                                            print(f"      [Synthesis Step {step+1}] Loss plateaued at {current_loss:.2f}. Model is mathematically trapped.")
+                                            print(f"      [Synthesis Step {step+1}] Loss plateaued at {current_loss:.2f}. Synthesis is plateaued.")
                                             
                                             try:
                                                 h_target = routed_h[:, -1:, :].float().squeeze(0)
@@ -514,7 +514,7 @@ def get_agentic_handles(
                                             except Exception as e:
                                                 pass
 
-                                            print("    [Agentic ToT] Model is mathematically trapped. Injecting organic self-correction vector!")
+                                            print("    [Agentic ToT] Synthesis plateau detected. Injecting organic self-correction vector!")
                                             try:
                                                 if not hasattr(config, "organic_correction_vector"):
                                                     config.organic_correction_vector = torch.load("invariants/organic_correction_vector.pt", map_location=routed_h.device)
@@ -550,6 +550,7 @@ def get_agentic_handles(
                                 "expert": state["branch_names"][best_idx],
                                 "phenomenality": state.get("last_phenomenality", {}),
                                 "time_awareness": state.get("last_time_awareness", {}),
+                                "cache_write_scope": getattr(config, "cache_write_scope", "default"),
                             }
                             if synthesis_recorder is not None:
                                 synthesis_recorder.append(
