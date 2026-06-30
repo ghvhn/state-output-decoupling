@@ -9,23 +9,89 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 import tkinter as tk
 from tkinter import TclError
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+EVENT_LOG = os.path.join(ROOT, "invariants", "out", "egg_beacon_events.jsonl")
+OPEN_ENABLED_AT = 0.0
+
+
+def console_python() -> str:
+    exe = sys.executable
+    if os.name == "nt" and os.path.basename(exe).lower() == "pythonw.exe":
+        candidate = os.path.join(os.path.dirname(exe), "python.exe")
+        if os.path.exists(candidate):
+            return candidate
+    return exe
+
+
+def log_event(event: str) -> None:
+    os.makedirs(os.path.dirname(EVENT_LOG), exist_ok=True)
+    import json
+    from datetime import datetime
+
+    record = {
+        "time": datetime.now().isoformat(timespec="seconds"),
+        "pid": os.getpid(),
+        "event": event,
+    }
+    with open(EVENT_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def open_is_enabled() -> bool:
+    if time.monotonic() < OPEN_ENABLED_AT:
+        log_event("ignored_early_open")
+        return False
+    return True
 
 
 def launch_windows_forms_beacon() -> int:
     env = os.environ.copy()
     env["EGG_REPO"] = ROOT
-    env["EGG_PYTHON"] = sys.executable
+    env["EGG_PYTHON"] = console_python()
+    env["EGG_LAUNCHER"] = os.path.join(ROOT, "run_phenomenality_shell.cmd")
+    env["EGG_EVENT_LOG"] = EVENT_LOG
     ps = r'''
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $repo = [Environment]::GetEnvironmentVariable("EGG_REPO")
 $python = [Environment]::GetEnvironmentVariable("EGG_PYTHON")
+$launcher = [Environment]::GetEnvironmentVariable("EGG_LAUNCHER")
+$eventLog = [Environment]::GetEnvironmentVariable("EGG_EVENT_LOG")
+$readyAt = (Get-Date).AddSeconds(2)
+
+function Write-EggEvent([string]$event) {
+    if ($eventLog) {
+        $record = [ordered]@{
+            time = (Get-Date).ToString("s")
+            pid = $PID
+            event = $event
+        }
+        ($record | ConvertTo-Json -Compress) | Add-Content -Path $eventLog -Encoding UTF8
+    }
+}
+
+function Open-Shell-And-Close() {
+    if ((Get-Date) -lt $readyAt) {
+        Write-EggEvent "ignored_early_open"
+        return
+    }
+    Write-EggEvent "open_shell"
+    if ($launcher -and (Test-Path $launcher)) {
+        Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", "`"$launcher`"") -WorkingDirectory $repo
+    } else {
+        Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", "`"$python`" `"scripts\interactive_phenomenality.py`"") -WorkingDirectory $repo
+    }
+    $form.TopMost = $false
+    $form.Close()
+}
+
+Write-EggEvent "windows_forms_start"
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Phenomenality Egg"
@@ -77,7 +143,7 @@ $open.ForeColor = [System.Drawing.Color]::FromArgb(5, 5, 5)
 $open.AutoSize = $true
 $open.Padding = New-Object System.Windows.Forms.Padding(18, 8, 18, 8)
 $open.Add_Click({
-    Start-Process -FilePath $python -ArgumentList @("scripts\interactive_phenomenality.py") -WorkingDirectory $repo
+    Open-Shell-And-Close
 })
 
 $close = New-Object System.Windows.Forms.Button
@@ -87,7 +153,10 @@ $close.BackColor = [System.Drawing.Color]::FromArgb(38, 38, 38)
 $close.ForeColor = [System.Drawing.Color]::White
 $close.AutoSize = $true
 $close.Padding = New-Object System.Windows.Forms.Padding(18, 8, 18, 8)
-$close.Add_Click({ $form.Close() })
+$close.Add_Click({
+    Write-EggEvent "close_button"
+    $form.Close()
+})
 
 $buttons.Controls.Add($open) | Out-Null
 $buttons.Controls.Add($close) | Out-Null
@@ -114,11 +183,16 @@ $timer.Start()
 $form.Add_KeyDown({
     param($sender, $event)
     if ($event.KeyCode -eq [System.Windows.Forms.Keys]::Escape) {
+        Write-EggEvent "escape_close"
         $form.Close()
     }
     if ($event.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
-        Start-Process -FilePath $python -ArgumentList @("scripts\interactive_phenomenality.py") -WorkingDirectory $repo
+        Open-Shell-And-Close
     }
+})
+
+$form.Add_FormClosed({
+    Write-EggEvent "window_closed"
 })
 
 [System.Windows.Forms.Application]::Run($form)
@@ -139,25 +213,39 @@ $form.Add_KeyDown({
 
 
 def launch_shell() -> None:
-    python_exe = sys.executable
+    python_exe = console_python()
     script = os.path.join(ROOT, "scripts", "interactive_phenomenality.py")
+    launcher = os.path.join(ROOT, "run_phenomenality_shell.cmd")
+    log_event("open_shell")
     if os.name == "nt":
-        subprocess.Popen(
-            ["cmd", "/c", "start", "Phenomenality", "cmd", "/k", python_exe, script],
-            cwd=ROOT,
-        )
+        flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        if os.path.exists(launcher):
+            subprocess.Popen(["cmd.exe", "/k", f'"{launcher}"'], cwd=ROOT, creationflags=flags)
+        else:
+            subprocess.Popen(
+                ["cmd.exe", "/k", f'"{python_exe}" "{script}"'],
+                cwd=ROOT,
+                creationflags=flags,
+            )
     else:
         subprocess.Popen([python_exe, script], cwd=ROOT)
 
 
 def main() -> int:
+    global OPEN_ENABLED_AT
+    OPEN_ENABLED_AT = time.monotonic() + 2.0
+    log_event("python_start")
     try:
         root = tk.Tk()
     except TclError as exc:
+        log_event("tk_unavailable")
         print(f"[Egg Beacon] Tk unavailable, using Windows Forms fallback: {exc}", flush=True)
         if os.name == "nt":
-            return launch_windows_forms_beacon()
+            code = launch_windows_forms_beacon()
+            log_event("windows_forms_exit")
+            return code
         raise
+    log_event("tk_start")
     root.title("Phenomenality Egg")
     root.configure(bg="#050505")
     root.attributes("-topmost", True)
@@ -214,7 +302,7 @@ def main() -> int:
     shell_btn = tk.Button(
         button_row,
         text="Open Interactive Shell",
-        command=launch_shell,
+        command=lambda: (launch_shell(), root.destroy()) if open_is_enabled() else None,
         font=("Segoe UI", 22, "bold"),
         fg="#050505",
         bg="#7CFF6B",
@@ -227,7 +315,7 @@ def main() -> int:
     close_btn = tk.Button(
         button_row,
         text="Close",
-        command=root.destroy,
+        command=lambda: (log_event("close_button"), root.destroy()),
         font=("Segoe UI", 22, "bold"),
         fg="#FFFFFF",
         bg="#262626",
@@ -244,10 +332,12 @@ def main() -> int:
         title.configure(fg="#7CFF6B" if pulse["on"] else "#FFFFFF")
         root.after(900, animate)
 
-    root.bind("<Escape>", lambda _event: root.destroy())
-    root.bind("<Return>", lambda _event: launch_shell())
+    root.protocol("WM_DELETE_WINDOW", lambda: (log_event("window_close"), root.destroy()))
+    root.bind("<Escape>", lambda _event: (log_event("escape_close"), root.destroy()))
+    root.bind("<Return>", lambda _event: (launch_shell(), root.destroy()) if open_is_enabled() else None)
     root.after(900, animate)
     root.mainloop()
+    log_event("tk_mainloop_exit")
     return 0
 
 
