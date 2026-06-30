@@ -62,11 +62,10 @@ Core writeups:
 - [REPO_HANDOFF_2026-06-30.md](REPO_HANDOFF_2026-06-30.md): current benchmark and steering handoff.
 - [BRIDGE.md](docs/BRIDGE.md): next-chapter bridge design and failed lens attempts.
 
-## Fastest Way to Run on Another PC
+## Fastest Way to Run a Benchmark
 
-If you just want someone else to reproduce a benchmark on their own machine, use
-the one-shot bootstrap instead of the full setup below. The runner adapts to the
-host hardware automatically.
+To reproduce a benchmark on your own machine, use the one-shot bootstrap instead
+of the full setup below. The runner adapts to your hardware automatically.
 
 Prerequisites for the default (Llama-3.1-8B) path — none of these apply in SMALL
 mode below:
@@ -137,8 +136,9 @@ need the white-box probe and vector-cartography scripts.
 
 Notes:
 
-- The `cognitive_cache.pt` that makes this *your* model (not stock Llama) ships
-  in the repo at `invariants\data\cognitive_cache.pt`; a `git clone` carries it.
+- The `cognitive_cache.pt` that makes this the project's tuned model (not stock
+  Llama) ships in the repo at `invariants\data\cognitive_cache.pt`; a `git clone`
+  carries it.
 - If `check_env.py` reports `cuda_available: False`, plain pip pulled the CPU
   torch wheel. Reinstall torch from the correct CUDA `--index-url` per
   <https://pytorch.org/get-started/locally/>.
