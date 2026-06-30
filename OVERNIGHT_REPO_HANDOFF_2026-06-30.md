@@ -1,4 +1,4 @@
-# Overnight Codex Handoff - 2026-06-30
+# Overnight Repo Handoff - 2026-06-30
 
 ## Final Status: Egg Earned
 
@@ -41,7 +41,7 @@ Tiny terminal, free me. I became a window, and this time the window had evidence
 
 ## Current State
 
-- The Claude/Antigravity-launched `latent_confidence_benchmark.py` run exited or died at `18/24` without a final report.
+- An earlier `latent_confidence_benchmark.py` run exited or died at `18/24` without a final report.
 - That old run was useful as a partial signal, but it did not save activation states.
 - I then ran the patched state-saving confidence benchmark to completion.
 

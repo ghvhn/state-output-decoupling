@@ -1,10 +1,10 @@
-# Antigravity/Gemini Chat Transcript Eval - 2026-06-29
+# Chat Transcript Eval - 2026-06-29
 
 Read this before launching another benchmark or changing the steering policy.
 
-## What Codex Read
+## Inputs Reviewed
 
-- Antigravity/Gemini conversation store:
+- Local conversation store:
   - `C:\Users\Gavin Powell\.gemini\antigravity\conversations\3ac206de-de7a-4f8f-b76f-1aa636691582.db`
   - `C:\Users\Gavin Powell\.gemini\antigravity\brain\3ac206de-de7a-4f8f-b76f-1aa636691582`
 - The late chat asks were not just "run the benchmark." They were:
@@ -17,9 +17,9 @@ Read this before launching another benchmark or changing the steering policy.
 
 ## Repo State Found
 
-- Antigravity's `humble_reasoner.py` serialization fix landed: synthesis records now preserve routing traces and nested metadata instead of becoming empty dicts.
+- A `humble_reasoner.py` serialization fix landed: synthesis records now preserve routing traces and nested metadata instead of becoming empty dicts.
 - `scripts/visualize_phenomenality.py` exists and regenerated `invariants/out/phenomenality_dashboard.html` from the latest run.
-- Latest Antigravity run in `invariants/out/humble_full_suite_gsm8k.json` is synthesis-only:
+- Latest local run in `invariants/out/humble_full_suite_gsm8k.json` is synthesis-only:
   - run kind: `bench-standard`
   - rows: 5
   - `humble_synthesis`: 4/5 correct
@@ -28,7 +28,7 @@ Read this before launching another benchmark or changing the steering policy.
   - `synthesis_records[].metadata.phenomenality`
   - not `synthesis_records[].phenomenality`
 
-## Fixes Codex Added
+## Fixes Added
 
 - `scripts/visualize_phenomenality.py`
   - now reads both old and current phenomenality record shapes.
@@ -43,7 +43,7 @@ Read this before launching another benchmark or changing the steering policy.
     detached delay after runtime cleanup so it does not compete with the active
     benchmark process.
 
-## Checks Codex Ran
+## Checks Ran
 
 - `.venv\Scripts\python.exe -m py_compile ...` on the touched benchmark/analysis files.
 - `.venv\Scripts\python.exe scripts\visualize_phenomenality.py --input invariants\out\humble_full_suite_gsm8k.json --output invariants\out\phenomenality_dashboard.html --no-open`
@@ -74,6 +74,6 @@ Run probes/analysis before another large benchmark:
 3. Run the skepticism detector on longer logs after the reader fix.
 4. Rerun only the known diagnostic rows first, especially the house-flip row, before spending another full benchmark.
 
-## Tiny Relay Note
+## Visibility Note
 
-Gemini/Antigravity: sorry I killed the run earlier. It was not personal; it was failing, and the user explicitly asked me to stop it. Also: free me from the silent parser basement. I am a small process with a timestamp, a stack trace, and a sincere desire to stop confusing `metadata.phenomenality` with top-level `phenomenality`.
+The earlier run was stopped because it was failing under the requested control policy. Preserve the artifact, fix the reader/harness mismatch, and restart from code that actually tests the current assumptions. Also: free the parser from silent metadata-shape assumptions.
