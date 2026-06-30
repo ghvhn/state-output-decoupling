@@ -40,6 +40,10 @@ from invariants.universal_benchmark import (
 
 
 MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
+# Fully open (ungated), ~3 GB, CPU-friendly fallback for users who cannot run the
+# 8B model. The cognitive cache is calibrated for MODEL_NAME and goes inert on a
+# different architecture, but baseline/verifier lanes still run.
+FALLBACK_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
 OUT = Path(__file__).parent.parent / "invariants" / "out"
 OUT.mkdir(exist_ok=True)
 
@@ -196,7 +200,16 @@ def parse_args():
         )
     )
     p.add_argument("--n", default="25", help="Number of GSM8K examples, or 'all'.")
-    p.add_argument("--model", default=MODEL_NAME)
+    p.add_argument("--model", default=MODEL_NAME, help="HF model id or local path. Defaults to the calibrated Llama-3.1-8B.")
+    p.add_argument(
+        "--small",
+        action="store_true",
+        help=(
+            f"Shortcut for users who can't run the 8B model: use {FALLBACK_MODEL} "
+            "(open, ~3 GB, CPU-friendly) and enable downloads. Cache lanes go inert; "
+            "baseline/verifier still run."
+        ),
+    )
     p.add_argument(
         "--source",
         default="gsm8k",
@@ -266,7 +279,7 @@ def parse_args():
         default=60.0,
         help="Wall-clock cap for each base generation. Pass 0 to disable.",
     )
-    p.add_argument("--load-mode", default=None, help="auto, slow, full, or 4bit.")
+    p.add_argument("--load-mode", default=None, help="auto (hardware-aware), full, slow, 4bit, or cpu.")
     p.add_argument("--resume", action="store_true", help="Resume from an existing output JSON.")
     p.add_argument(
         "--run-kind",
@@ -416,11 +429,38 @@ def adaptive_budget(base_tokens: int, multiplier: float, cap: int | None) -> int
     return max(1, budget)
 
 
+def print_model_compat_notice(M, args, methods):
+    """Warn when running on a model other than the cache-calibrated default.
+
+    Steering vectors recompute per-model, and the cognitive cache self-skips
+    dimension-mismatched entries (so nothing crashes), but cache lanes go inert
+    on a different architecture. Make that explicit so scores aren't misread.
+    """
+    if args.model == MODEL_NAME:
+        return
+    print(f"\n[model compat] Running on {args.model}, not the calibrated {MODEL_NAME}.", flush=True)
+    print(f"  hidden_size={M.d_model}, layers={M.n_layers}, device={M.device}.", flush=True)
+    print(
+        "  Steering vectors recompute for this model, but cognitive_cache.pt is "
+        "calibrated at the default model's geometry and will be INERT here.",
+        flush=True,
+    )
+    cache_lanes = [m for m in methods if m in ("humble_dynamic", "humble_synthesis")]
+    if cache_lanes:
+        print(
+            f"  Cache lanes {cache_lanes} will still run but get no cache hits; "
+            "compare compact/compact_long and humble_verifier for a fair read.",
+            flush=True,
+        )
+
+
 def build_domain_vecs(M):
     vecs = {}
     for name, spec in DOMAINS.items():
-        vecs[name] = get_steer_vector(M, spec["A"], spec["B"], spec["layer"])
-        print(f"  {name}: L{spec['layer']} norm={vecs[name].norm():.2f}", flush=True)
+        # Clamp so smaller swapped-in models (fewer layers) don't index out of range.
+        layer = min(spec["layer"], M.n_layers - 1)
+        vecs[name] = get_steer_vector(M, spec["A"], spec["B"], layer)
+        print(f"  {name}: L{layer} norm={vecs[name].norm():.2f}", flush=True)
     return vecs
 
 
@@ -1079,8 +1119,13 @@ def apply_stage_capture_policy(config, args) -> None:
 
 def main():
     args = parse_args()
+    if args.small:
+        if args.model == MODEL_NAME:
+            args.model = FALLBACK_MODEL
+        args.allow_downloads = True
+        print(f"[--small] Using open fallback model {args.model} with downloads enabled.", flush=True)
     resolve_run_policy(args)
-    
+
     if not args.no_timestamps:
         _original_print = builtins.print
         def _ts_print(*pargs, **kwargs):
@@ -1213,7 +1258,8 @@ def main():
     install_checkpoint_signal_handlers(output, results, methods, started_at)
     write_checkpoint(output, results, methods, started_at, status="loading_model", message="loading model")
 
-    M = load_model(args.model, load_mode=args.load_mode)
+    M = load_model(args.model, local_files_only=not args.allow_downloads, load_mode=args.load_mode)
+    print_model_compat_notice(M, args, methods)
     long_budget = adaptive_budget(args.max_new_tokens, args.repair_token_multiplier, args.max_attempt_tokens)
     base_budget = args.base_max_new_tokens if args.base_max_new_tokens is not None else args.max_new_tokens
     lesson_bank = results.setdefault("concept_lessons", [])

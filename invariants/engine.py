@@ -93,6 +93,51 @@ def _slow_gpu_budget_gib():
     return max(8.0, total_gib - 4.0)
 
 
+def _bitsandbytes_available() -> bool:
+    """4bit needs both a CUDA GPU and a working bitsandbytes (fragile on Windows)."""
+    if not torch.cuda.is_available():
+        return False
+    try:
+        import bitsandbytes  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_auto_mode() -> str:
+    """Pick a concrete load mode from the detected hardware.
+
+    full   (>= 18 GB VRAM): fp16 fully on GPU.
+    4bit   (10-18 GB VRAM): nf4 on GPU, much faster than CPU-offload.
+    slow   (< 10 GB VRAM):  GPU/CPU split with disk offload.
+    cpu    (no CUDA):       float32 on CPU; only sane for small models.
+    """
+    if not torch.cuda.is_available():
+        print(
+            "  Auto load: no CUDA GPU detected -> CPU float32 "
+            "(slow; use a small --model and a low --n).",
+            flush=True,
+        )
+        return "cpu"
+    vram = _gpu_total_gib()
+    if vram >= 18.0:
+        choice = "full"
+    elif vram >= 10.0:
+        if _bitsandbytes_available():
+            choice = "4bit"
+        else:
+            choice = "slow"
+            print(
+                "  Auto load: 4bit would fit but bitsandbytes is unavailable; "
+                "using slow CPU-offload instead (install bitsandbytes for speed).",
+                flush=True,
+            )
+    else:
+        choice = "slow"
+    print(f"  Auto load: {vram:.1f} GB VRAM detected -> {choice} mode.", flush=True)
+    return choice
+
+
 def _load_full_model(source, common_kwargs):
     model = AutoModelForCausalLM.from_pretrained(source, **common_kwargs)
     try:
@@ -123,6 +168,13 @@ def _load_slow_model(source, common_kwargs):
     )
 
 
+def _load_cpu_model(source, common_kwargs):
+    kwargs = dict(common_kwargs)
+    kwargs["dtype"] = torch.float32  # fp16 math is slow/unsupported on most CPUs
+    model = AutoModelForCausalLM.from_pretrained(source, **kwargs)
+    return model.to("cpu")
+
+
 def _is_cuda_oom(exc: BaseException) -> bool:
     text = str(exc).lower()
     return "cuda" in text and ("out of memory" in text or "not enough memory" in text)
@@ -130,7 +182,9 @@ def _is_cuda_oom(exc: BaseException) -> bool:
 
 def load_model(name: str = "meta-llama/Llama-3.1-8B-Instruct", local_files_only: bool = True, load_mode=None) -> HF:
     mode = _select_load_mode(load_mode)
-    print(f"Loading {name} (HF, fp16, SDPA, mode={mode})...", flush=True)
+    if mode == "auto":
+        mode = _resolve_auto_mode()
+    print(f"Loading {name} (HF, SDPA, mode={mode})...", flush=True)
     source = _resolve_model_source(name, local_files_only)
     tok = AutoTokenizer.from_pretrained(source, local_files_only=local_files_only)
 
@@ -141,24 +195,36 @@ def load_model(name: str = "meta-llama/Llama-3.1-8B-Instruct", local_files_only:
         "local_files_only": local_files_only,
     }
 
-    if mode == "auto":
-        try:
-            print("  Auto load: trying full GPU first.", flush=True)
-            model = _load_full_model(source, common_kwargs)
-            mode = "full"
-        except RuntimeError as exc:
-            if not _is_cuda_oom(exc):
-                raise
-            print("  Auto load: full GPU OOM, falling back to slow-safe offload.", flush=True)
-            gc.collect()
-            torch.cuda.empty_cache()
-            model = _load_slow_model(source, common_kwargs)
-            mode = "slow"
-    elif mode in ("full", "fast", "cuda"):
-        model = _load_full_model(source, common_kwargs)
+    if mode in ("full", "fast", "cuda"):
+        if not torch.cuda.is_available():
+            print("  'full' requested but no CUDA GPU; loading on CPU instead.", flush=True)
+            model = _load_cpu_model(source, common_kwargs)
+            mode = "cpu"
+        else:
+            try:
+                model = _load_full_model(source, common_kwargs)
+            except RuntimeError as exc:
+                if not _is_cuda_oom(exc):
+                    raise
+                print("  Full GPU OOM; falling back to slow CPU-offload.", flush=True)
+                gc.collect()
+                torch.cuda.empty_cache()
+                model = _load_slow_model(source, common_kwargs)
+                mode = "slow"
     elif mode in ("slow", "offload", "safe"):
-        model = _load_slow_model(source, common_kwargs)
+        if not torch.cuda.is_available():
+            print("  'slow' requested but no CUDA GPU; loading on CPU instead.", flush=True)
+            model = _load_cpu_model(source, common_kwargs)
+            mode = "cpu"
+        else:
+            model = _load_slow_model(source, common_kwargs)
     elif mode in ("4bit", "quantized"):
+        if not _bitsandbytes_available():
+            raise RuntimeError(
+                "4bit load needs a CUDA GPU with bitsandbytes installed. "
+                "Install bitsandbytes, or use --load-mode slow (GPU/CPU offload) "
+                "or --load-mode cpu."
+            )
         qconf = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=torch.float16,
@@ -171,12 +237,15 @@ def load_model(name: str = "meta-llama/Llama-3.1-8B-Instruct", local_files_only:
             device_map="cuda",
             **common_kwargs,
         )
+    elif mode == "cpu":
+        model = _load_cpu_model(source, common_kwargs)
     else:
-        raise ValueError("Unknown load mode. Use auto, full, slow, or 4bit.")
+        raise ValueError("Unknown load mode. Use auto, full, slow, 4bit, or cpu.")
 
     model.eval()
     gc.collect()
-    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     try:
         ctypes.windll.kernel32.SetProcessWorkingSetSize(-1, ctypes.c_size_t(-1), ctypes.c_size_t(-1))
     except Exception:
@@ -186,7 +255,10 @@ def load_model(name: str = "meta-llama/Llama-3.1-8B-Instruct", local_files_only:
         for dev in model.hf_device_map.values():
             mapped[str(dev)] = mapped.get(str(dev), 0) + 1
         print(f"  Device map: {mapped}", flush=True)
-    print(f"  Loaded. VRAM {torch.cuda.memory_allocated()/1e9:.1f}GB\n", flush=True)
+    if torch.cuda.is_available():
+        print(f"  Loaded. VRAM {torch.cuda.memory_allocated()/1e9:.1f}GB\n", flush=True)
+    else:
+        print("  Loaded on CPU.\n", flush=True)
     return HF(model, tok)
 
 
