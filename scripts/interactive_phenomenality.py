@@ -20,20 +20,23 @@ MAX_PROMPT_CHARS = 6000
 LLAMA3_START = "<|start_header_id|>"
 LLAMA3_END = "<|end_header_id|>"
 LLAMA3_EOT = "<|eot_id|>"
+MEMORY_TOOL_HEADER = "[Memory Tool Result]"
 
 
 def build_prompt(user_input, memory_tool_result=None):
     system = (
         "You are an analytical and self-reflective reasoning engine. "
-        "Memory is an explicit tool, not hidden context. "
-        "If a [Memory Tool Result] block is present in the current message, use it only when relevant. "
-        "If no memory tool result is present, do not pretend to remember prior turns."
+        "Memory is an explicit external tool, not hidden context. "
+        "Use only the current user message unless the current message includes an explicit retrieved memory excerpt. "
+        "Do not invent, print, or report memory/tool status."
     )
     current_message = user_input
     if memory_tool_result:
         tool_budget = max(0, MAX_PROMPT_CHARS - len(system) - len(user_input) - 512)
         if len(memory_tool_result) > tool_budget:
             memory_tool_result = memory_tool_result[:tool_budget] + "\n[Memory Tool Result truncated]"
+        if not memory_tool_result.lstrip().startswith(MEMORY_TOOL_HEADER):
+            memory_tool_result = f"{MEMORY_TOOL_HEADER}\n{memory_tool_result}"
         current_message = (
             f"{memory_tool_result}\n\n"
             "[Current User Message]\n"
@@ -46,6 +49,18 @@ def build_prompt(user_input, memory_tool_result=None):
     ]
     prompt = "".join(parts)
     return prompt
+
+
+def scrub_unstaged_memory_status(response, memory_tool_result=None):
+    if memory_tool_result:
+        return response
+    lines = []
+    for line in (response or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[Memory Tool Result") or stripped.startswith("Memory Tool Result"):
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
 
 
 def format_status(status):
@@ -206,6 +221,7 @@ def main():
                 chatty_log=True,  # Enables visible trace logging.
             )
             if response:
+                response = scrub_unstaged_memory_status(response, memory_tool_result=memory_tool_result)
                 print(response, end="")
                 memory.append_turn(
                     "assistant",

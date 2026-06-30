@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from invariants.memory_engine import MemoryEngine, sanitize_methodology_payload
-from scripts.interactive_phenomenality import build_prompt
+from scripts.interactive_phenomenality import build_prompt, scrub_unstaged_memory_status
 
 
 def make_memory():
@@ -82,6 +82,7 @@ def test_session_boundary_does_not_delete_persistent_memory():
 def test_prompt_only_contains_memory_when_tool_result_is_staged():
     base = build_prompt("Elaborate, please.")
     assert "The first topic was next-token prediction." not in base
+    assert "[Memory Tool Result]" not in base
 
     tool_result = (
         "[Memory Tool Result]\n"
@@ -90,6 +91,20 @@ def test_prompt_only_contains_memory_when_tool_result_is_staged():
     with_tool = build_prompt("Elaborate, please.", memory_tool_result=tool_result)
     assert "The first topic was next-token prediction." in with_tool
     assert "[Current User Message]" in with_tool
+    assert with_tool.count("[Memory Tool Result]") == 1
+
+
+def test_fake_memory_status_is_scrubbed_when_unstaged():
+    response = (
+        "I can answer the current question.\n\n"
+        "[Memory Tool Result: No prior conversation or context is available.]"
+    )
+    scrubbed = scrub_unstaged_memory_status(response, memory_tool_result=None)
+    assert "Memory Tool Result" not in scrubbed
+    assert "I can answer the current question." in scrubbed
+
+    staged = scrub_unstaged_memory_status(response, memory_tool_result="[Memory Tool Result]\n- real")
+    assert "Memory Tool Result" in staged
 
 
 def test_activation_trace_records_artifact_reference_not_tensor_blob():
@@ -163,6 +178,7 @@ TESTS = [
     test_search_returns_explicit_tool_result,
     test_session_boundary_does_not_delete_persistent_memory,
     test_prompt_only_contains_memory_when_tool_result_is_staged,
+    test_fake_memory_status_is_scrubbed_when_unstaged,
     test_activation_trace_records_artifact_reference_not_tensor_blob,
     test_methodology_import_keeps_sanitized_maps_only,
     test_methodology_import_rejects_raw_clause_payloads,
