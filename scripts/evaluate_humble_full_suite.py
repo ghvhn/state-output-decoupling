@@ -344,13 +344,13 @@ def parse_args():
     p.add_argument(
         "--no-launch-interactive-on-success",
         action="store_true",
-        help="Disable the interactive phenomenality shell that auto-launches after a strong synthesis run.",
+        help=argparse.SUPPRESS,
     )
     p.add_argument(
         "--egg-min-n",
         type=int,
         default=5,
-        help="Minimum attempted benchmark rows required before the Easter egg can launch.",
+        help=argparse.SUPPRESS,
     )
     p.add_argument(
         "--boring",
