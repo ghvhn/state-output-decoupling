@@ -14,6 +14,7 @@ class AgenticConfig:
     cache_enabled: bool = True
     cache_write_enabled: bool = False
     cache_verified_only: bool = True
+    cache_write_scope: str = "default"
     ignore_oracle_cache: bool = False
     exclude_same_question_cache: bool = False
     exclude_same_question_oracle_cache: bool = False

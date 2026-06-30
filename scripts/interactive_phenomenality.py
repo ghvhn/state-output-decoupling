@@ -38,6 +38,7 @@ def main():
     # Enable cache read/write as requested
     config.cache_enabled = True
     config.cache_write_enabled = True
+    config.cache_write_scope = "interactive_phenomenality"
     
     # Enable interactive disambiguation as requested
     config.interactive_disambiguation = True

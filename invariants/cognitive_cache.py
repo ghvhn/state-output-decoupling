@@ -90,7 +90,14 @@ class CognitiveCache:
         if len(self.memory) > self.max_memories:
             self.memory = self.memory[-self.max_memories:]
         self.save()
-        print(f"    [Cognitive Cache] Epiphany stored! Total memories: {len(self.memory)}")
+        scope = (metadata or {}).get("cache_write_scope") if isinstance(metadata, dict) else None
+        if scope and scope != "default":
+            label = f"{scope} memory"
+        elif isinstance(metadata, dict) and metadata.get("promoted_by") == "humble_verifier":
+            label = "Verified lesson"
+        else:
+            label = "Epiphany"
+        print(f"    [Cognitive Cache] {label} stored! Total memories: {len(self.memory)}")
         
     def retrieve(
         self,
