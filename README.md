@@ -62,6 +62,49 @@ Core writeups:
 - [REPO_HANDOFF_2026-06-30.md](REPO_HANDOFF_2026-06-30.md): current benchmark and steering handoff.
 - [BRIDGE.md](docs/BRIDGE.md): next-chapter bridge design and failed lens attempts.
 
+## Fastest Way to Run on Another PC
+
+If you just want someone else to reproduce a benchmark on their own machine, use
+the one-shot bootstrap instead of the full setup below.
+
+Prerequisites the script cannot do for you:
+
+- A CUDA-capable GPU plus a recent NVIDIA driver.
+- Accept the Llama-3.1 license once at
+  <https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct>.
+- A Hugging Face token: either run
+  `python -m huggingface_hub.commands.huggingface_cli login` once, or
+  `set HF_TOKEN=hf_xxxx` before launching.
+
+Then, from the repo root:
+
+```powershell
+.\run_benchmark.cmd            :: 3-row smoke run, auto load mode
+.\run_benchmark.cmd 25         :: 25 rows
+.\run_benchmark.cmd 25 4bit    :: 25 rows, low-VRAM 4-bit load
+```
+
+[run_benchmark.cmd](run_benchmark.cmd) creates `.venv`, installs the trimmed
+[requirements-bench.txt](requirements-bench.txt), verifies Hugging Face auth,
+pre-downloads the ~16 GB model into the local cache (the runner loads
+local-files-only, so this step is required), and runs a clean `bench-standard`
+pass to `invariants\out\bench_bootstrap.json`. The success Easter egg stays on:
+the interactive shell launches after the final summary is written. Pass
+`--boring` to the script's underlying run to suppress it for unattended use.
+
+`requirements-bench.txt` is the minimal set to *run* the benchmark. It drops the
+TDA / interpretability stack (`gudhi`, `transformer_lens`, `scikit-learn`,
+`scipy`, `h5py`, `pysr`). Install the full `requirements.txt` only if you also
+need the white-box probe and vector-cartography scripts.
+
+Notes:
+
+- The `cognitive_cache.pt` that makes this *your* model (not stock Llama) ships
+  in the repo at `invariants\data\cognitive_cache.pt`; a `git clone` carries it.
+- If `check_env.py` reports `cuda_available: False`, plain pip pulled the CPU
+  torch wheel. Reinstall torch from the correct CUDA `--index-url` per
+  <https://pytorch.org/get-started/locally/>.
+
 ## Running Benchmarks
 
 Use a Python environment with PyTorch CUDA and the Hugging Face stack. On this

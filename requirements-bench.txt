@@ -1,0 +1,20 @@
+# Minimal dependencies to RUN the humble benchmark suite.
+# This is the trimmed set -- it drops the TDA / interpretability / symbolic-regression
+# stack (gudhi, transformer_lens, scikit-learn, scipy, h5py, pysr/Julia) that the
+# benchmark runner does not import. Use requirements.txt instead if you also want to
+# run the white-box probe / vector-cartography scripts.
+#
+# NOTE: install a CUDA build of torch for your GPU first if pip grabs the CPU wheel.
+# See https://pytorch.org/get-started/locally/ for the right --index-url.
+
+torch
+transformers
+accelerate
+huggingface_hub
+safetensors
+tokenizers
+numpy
+
+# Only needed for --load-mode 4bit (low-VRAM path). Can be fragile on Windows;
+# remove this line if you have >=16 GB VRAM and run --load-mode full.
+bitsandbytes
