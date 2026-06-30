@@ -65,11 +65,13 @@ Core writeups:
 ## Fastest Way to Run on Another PC
 
 If you just want someone else to reproduce a benchmark on their own machine, use
-the one-shot bootstrap instead of the full setup below.
+the one-shot bootstrap instead of the full setup below. The runner adapts to the
+host hardware automatically.
 
-Prerequisites the script cannot do for you:
+Prerequisites for the default (Llama-3.1-8B) path — none of these apply in SMALL
+mode below:
 
-- A CUDA-capable GPU plus a recent NVIDIA driver.
+- A CUDA-capable GPU (or use `cpu` load mode / SMALL mode).
 - Accept the Llama-3.1 license once at
   <https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct>.
 - A Hugging Face token: either run
@@ -79,10 +81,46 @@ Prerequisites the script cannot do for you:
 Then, from the repo root:
 
 ```powershell
-.\run_benchmark.cmd            :: 3-row smoke run, auto load mode
+.\run_benchmark.cmd            :: 3-row smoke run, hardware-auto load
 .\run_benchmark.cmd 25         :: 25 rows
-.\run_benchmark.cmd 25 4bit    :: 25 rows, low-VRAM 4-bit load
+.\run_benchmark.cmd 25 4bit    :: 25 rows, force low-VRAM 4-bit load
+.\run_benchmark.cmd 25 cpu     :: 25 rows, force CPU (no GPU needed)
+.\run_benchmark.cmd 5 auto small :: open Qwen-1.5B, no license, runs anywhere
 ```
+
+### Hardware adaptation
+
+`--load-mode auto` (the default) detects the GPU and picks a mode:
+
+| Detected | Mode | Notes |
+|---|---|---|
+| ≥ 18 GB VRAM | `full` | fp16 entirely on GPU |
+| 10–18 GB VRAM | `4bit` | nf4 on GPU (needs `bitsandbytes`); falls back to `slow` if missing |
+| < 10 GB VRAM | `slow` | GPU/CPU split with disk offload |
+| No CUDA | `cpu` | float32 on CPU; only practical for small models |
+
+Override any time with the 2nd argument (`full` / `4bit` / `slow` / `cpu`).
+
+### Can't run the 8B model?
+
+SMALL mode swaps in the open, ungated **Qwen2.5-1.5B-Instruct** (~3 GB, no HF
+license, runs on CPU or a tiny GPU):
+
+```powershell
+.\run_benchmark.cmd 5 auto small        :: via the bootstrap
+.venv\Scripts\python.exe scripts\evaluate_humble_full_suite.py --small --n 5
+```
+
+Important: the cognitive cache is calibrated for Llama-3.1-8B's geometry and goes
+**inert** on a different architecture (it self-skips dimension-mismatched
+entries, so nothing crashes). Steering vectors recompute per model, but the
+cache-dependent lanes (`humble_dynamic`, `humble_synthesis`) get no hits. On a
+swapped model you are benchmarking the *reasoning scaffold on a stock model*, not
+the cached/steered model — compare the `compact`/`compact_long` baselines and
+`humble_verifier` for a fair read. The runner prints this notice on startup.
+
+You can point `--model` at any Hugging Face id or local path; `--small` is just a
+preset for the Qwen fallback with downloads enabled.
 
 [run_benchmark.cmd](run_benchmark.cmd) creates `.venv`, installs the trimmed
 [requirements-bench.txt](requirements-bench.txt), verifies Hugging Face auth,
