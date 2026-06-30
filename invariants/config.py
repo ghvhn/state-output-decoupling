@@ -15,6 +15,7 @@ class AgenticConfig:
     cache_write_enabled: bool = False
     cache_verified_only: bool = True
     ignore_oracle_cache: bool = False
+    exclude_same_question_cache: bool = False
     exclude_same_question_oracle_cache: bool = False
     benchmark_question_key: Optional[str] = None
     interactive_disambiguation: bool = False
@@ -26,11 +27,18 @@ class AgenticConfig:
     clarifying_questions: list[Dict[str, Any]] = field(default_factory=list)
     chatty_log: bool = False
     force_synthesis: bool = False
-    provide_time_context: bool = True
+    provide_time_context: bool = False
     time_awareness_gated_urgency: bool = True
     time_awareness_threshold: float = 0.45
     urgency_max_coefficient: float = 0.8
     continuous_urgency_injection: bool = False
+    deterministic_scaffolds_enabled: bool = True
+    model_scaffold_tool_enabled: bool = True
+    clause_map_enabled: bool = False
+    learned_concept_context: Optional[str] = None
+    capture_stage_states: bool = False
+    use_tuned_lens: bool = False
+    tuned_lens_path: Optional[str] = None
     
     # Hyperparameters
     max_loops: int = 3
@@ -38,18 +46,24 @@ class AgenticConfig:
     alpha: float = 15.0  # Steer strength
     epsilon: float = 0.05
     max_synthesis_events: int = 1
+    max_synthesis_steps: int = 60
     max_routing_events: int = 4
+    max_tool_calls: int = 8
     
     # High-Level Solver Logic
     max_rounds: int = 5
     required_agreement: int = 3
     max_elapsed_sec: Optional[float] = None
+    oracle_max_elapsed_sec: Optional[float] = 60.0
+    oracle_curriculum: str = "off"
     stop_on_critical_urgency: bool = True
+    relax_agreement_under_urgency: bool = False
     
     # Attempt Budgets
     max_new_tokens: int = 220
     repair_token_multiplier: float = 2.0
     max_attempt_tokens: Optional[int] = None
+    verifier_time_reserve_sec: float = 20.0
     
     @classmethod
     def from_preset(cls, preset_name: str) -> "AgenticConfig":
@@ -67,6 +81,7 @@ class AgenticConfig:
                 cache_enabled=True,
                 max_routing_events=5,
                 max_synthesis_events=3,
+                max_synthesis_steps=60,
                 entropy_threshold=1.5,
             )
         elif preset_name == "default":

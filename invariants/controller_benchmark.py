@@ -112,6 +112,15 @@ def normalize_number(text):
     return value.normalize()
 
 
+def numbers_match(left, right, tolerance=Decimal("1e-9")):
+    if left is None or right is None:
+        return False
+    if left == right:
+        return True
+    scale = max(Decimal(1), abs(left), abs(right))
+    return abs(left - right) <= tolerance * scale
+
+
 def gold_answer(answer):
     if "####" in answer:
         answer = answer.split("####", 1)[1]
@@ -135,7 +144,7 @@ def predicted_answer(generation):
 def is_correct(generation, answer):
     gold = gold_answer(answer)
     pred = predicted_answer(generation)
-    return bool(gold is not None and pred is not None and pred == gold), pred, gold
+    return bool(numbers_match(pred, gold)), pred, gold
 
 
 # --- content gates: distinguish "lost reasoning" from "fluent waffle corruption" ---
@@ -190,6 +199,9 @@ def parse_conditions(raw):
 def prompt_for(question):
     return (
         "Solve this grade-school math problem step by step. "
+        "Numeric checking treats only microscopic roundoff as equivalent "
+        "(for example, 17.999999999999996 and 18); still give the exact intended value "
+        "and do not round away meaningful fractional answers. "
         "End with exactly one line of the form 'Final answer: <number>'.\n\n"
         f"Question: {question}"
     )

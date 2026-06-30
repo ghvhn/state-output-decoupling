@@ -12,6 +12,7 @@ import gc
 import time
 import ctypes
 import os
+import re
 from pathlib import Path
 
 import torch
@@ -198,6 +199,39 @@ def _inputs(M: HF, instruction: str):
     ).to(M.device)
 
 
+def _generated_text_satisfies_stop(
+    text: str,
+    stop_after_final_answer: bool,
+    stop_after_verifier_answer: bool,
+) -> bool:
+    if stop_after_final_answer and re.search(
+        r"^\s*Final answer\s*:?\s*\$?[-+]?\d",
+        text,
+        flags=re.IGNORECASE | re.MULTILINE,
+    ):
+        return True
+    if stop_after_verifier_answer:
+        has_verdict = re.search(
+            r"^\s*VERDICT\s*:\s*(?:pass|unsettled|uncertain)",
+            text,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        has_reason = re.search(
+            r"^\s*REASON\s*:\s*\S",
+            text,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        if has_verdict and has_reason:
+            return True
+    return False
+
+
+def _ended_with_eos(new_tokens: torch.Tensor, eos_ids: list[int]) -> bool:
+    if new_tokens.numel() == 0:
+        return False
+    return int(new_tokens[-1].item()) in set(eos_ids)
+
+
 @torch.no_grad()
 def _hidden_states(M: HF, input_ids, attention_mask=None) -> torch.Tensor:
     """Per-layer residual stream [n_layers, seq, d] (drops the embedding layer)."""
@@ -214,6 +248,7 @@ def _generate_ids(
     stop_after_final_answer: bool = False,
     stop_after_verifier_answer: bool = False,
     max_time: float | None = None,
+    max_tool_calls: int = 8,
 ) -> torch.Tensor:
     from transformers import StoppingCriteriaList
     from invariants.tool_utils import (
@@ -222,6 +257,7 @@ def _generate_ids(
         ToolStoppingCriteria,
         VerifierStoppingCriteria,
         intercept_tool_call,
+        iter_tool_calls,
         evaluate_python_expression,
     )
 
@@ -231,9 +267,10 @@ def _generate_ids(
         eos_ids.append(128009)
 
     current_inputs = {k: v.clone() for k, v in inputs.items()}
+    original_start_length = current_inputs["input_ids"].shape[1]
     tokens_generated = 0
     tool_calls = 0
-    max_tool_calls = 4
+    processed_tool_ends: set[int] = set()
     generation_started = time.time()
     
     while tokens_generated < max_new_tokens:
@@ -242,6 +279,7 @@ def _generate_ids(
             remaining_time = max_time - (time.time() - generation_started)
             if remaining_time <= 0:
                 return current_inputs["input_ids"][0]
+        chunk_tokens = min(max_new_tokens - tokens_generated, int(os.getenv("TDA_GENERATION_CHUNK_TOKENS", "24")))
         start_length = current_inputs["input_ids"].shape[1]
         stopping_criteria = [ToolStoppingCriteria(M.tok, start_length=start_length)]
         if stop_after_final_answer:
@@ -253,7 +291,7 @@ def _generate_ids(
         criteria = StoppingCriteriaList(stopping_criteria)
         generate_kwargs = {
             **current_inputs,
-            "max_new_tokens": max_new_tokens - tokens_generated,
+            "max_new_tokens": chunk_tokens,
             "do_sample": False,
             "use_cache": True,
             "pad_token_id": M.tok.eos_token_id,
@@ -266,12 +304,23 @@ def _generate_ids(
         
         plen = current_inputs["input_ids"].shape[1]
         new_tokens = out[0][plen:]
+        if new_tokens.numel() == 0:
+            return out[0]
         tokens_generated += len(new_tokens)
-        
-        decoded = M.tok.decode(new_tokens, skip_special_tokens=True)
-        expr = intercept_tool_call(decoded)
+
+        generated_text = M.tok.decode(out[0][original_start_length:], skip_special_tokens=True)
+        tool_call = next(
+            (
+                (end, expr)
+                for _, end, expr in iter_tool_calls(generated_text)
+                if end not in processed_tool_ends
+            ),
+            None,
+        )
+        expr = None if tool_call is None else tool_call[1]
         
         if expr:
+            processed_tool_ends.add(tool_call[0])
             tool_calls += 1
             if tool_calls > max_tool_calls:
                 return out[0]
@@ -286,7 +335,20 @@ def _generate_ids(
             
             current_inputs = {"input_ids": new_input_ids, "attention_mask": new_attn_mask}
         else:
-            return out[0]
+            if (
+                _ended_with_eos(new_tokens, eos_ids)
+                or _generated_text_satisfies_stop(
+                    generated_text,
+                    stop_after_final_answer=stop_after_final_answer,
+                    stop_after_verifier_answer=stop_after_verifier_answer,
+                )
+                or len(new_tokens) < chunk_tokens
+            ):
+                return out[0]
+            current_inputs = {
+                "input_ids": out,
+                "attention_mask": torch.ones(out.shape, dtype=torch.long, device=out.device),
+            }
 
     return current_inputs["input_ids"][0]
 
@@ -476,6 +538,7 @@ def generate_text(
     stop_after_final_answer: bool = False,
     stop_after_verifier_answer: bool = False,
     max_time: float | None = None,
+    max_tool_calls: int = 8,
 ) -> str:
     inputs = _inputs(M, instruction)
     plen = inputs["input_ids"].shape[1]
@@ -486,6 +549,7 @@ def generate_text(
         stop_after_final_answer=stop_after_final_answer,
         stop_after_verifier_answer=stop_after_verifier_answer,
         max_time=max_time,
+        max_tool_calls=max_tool_calls,
     )
     return M.tok.decode(full[plen:], skip_special_tokens=True).strip()
 
