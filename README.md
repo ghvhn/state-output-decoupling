@@ -90,9 +90,10 @@ mode below:
 - A CUDA-capable GPU (or use `cpu` load mode / SMALL mode).
 - Accept the Llama-3.1 license once at
   <https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct>.
-- A Hugging Face token: either run
-  `python -m huggingface_hub.commands.huggingface_cli login` once, or
-  `set HF_TOKEN=hf_xxxx` before launching.
+- A Hugging Face token: either `set HF_TOKEN=hf_xxxx` before launching, or log
+  in once with `python -c "from huggingface_hub import login; login()"`. (The old
+  `huggingface-cli login` is deprecated and may misreport login state on newer
+  `huggingface_hub`.)
 
 Then, from the repo root:
 
