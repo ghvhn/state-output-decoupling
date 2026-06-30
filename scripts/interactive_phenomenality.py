@@ -14,6 +14,7 @@ from invariants.agentic_engine import generate_agentic_text, _global_cache
 from invariants.config import AgenticConfig
 from invariants.cognitive_cache import CACHE_FILE
 from invariants.memory_engine import MemoryEngine
+from invariants.self_concept_controller import SelfConceptController, format_orientation_tool_result
 
 colorama.init()
 
@@ -24,6 +25,7 @@ LLAMA3_START = "<|start_header_id|>"
 LLAMA3_END = "<|end_header_id|>"
 LLAMA3_EOT = "<|eot_id|>"
 MEMORY_TOOL_HEADER = "[Memory Tool Result]"
+ORIENTATION_TOOL_HEADER = "[Orientation Tool Result]"
 MEMORY_TOOL_PATTERN = re.compile(r"<<\s*MEMORY\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
 
 
@@ -43,28 +45,33 @@ def trim_session_context(session_context, max_chars=MAX_SESSION_CHARS):
     return list(reversed(kept))
 
 
-def build_prompt(user_input, memory_tool_result=None, session_context=None):
+def build_prompt(user_input, memory_tool_result=None, orientation_tool_result=None, session_context=None):
     system = (
         "You are an analytical and self-reflective reasoning engine. "
         "Use the current session transcript for immediate conversational context. "
         "Long-term memory is an explicit external tool, not hidden context. "
+        "Self-concept orientation is an explicit controller tool based on vector-map telemetry. "
         "If prior durable memory seems necessary and no retrieved memory excerpt is present, "
         "write exactly <<MEMORY: short search query>> and no final answer. "
         "Only use long-term memory after a retrieved memory excerpt is provided. "
-        "Do not invent, print, or report memory/tool status."
+        "If an orientation tool result is present, use it as an audited reasoning posture, not as evidence about facts. "
+        "Do not invent, print, or report memory/orientation/tool status."
     )
-    current_message = user_input
+    prefix_blocks = []
     if memory_tool_result:
         tool_budget = max(0, MAX_PROMPT_CHARS - len(system) - len(user_input) - 512)
         if len(memory_tool_result) > tool_budget:
             memory_tool_result = memory_tool_result[:tool_budget] + "\n[Memory Tool Result truncated]"
         if not memory_tool_result.lstrip().startswith(MEMORY_TOOL_HEADER):
             memory_tool_result = f"{MEMORY_TOOL_HEADER}\n{memory_tool_result}"
-        current_message = (
-            f"{memory_tool_result}\n\n"
-            "[Current User Message]\n"
-            f"{user_input}"
-        )
+        prefix_blocks.append(memory_tool_result)
+    if orientation_tool_result:
+        if not orientation_tool_result.lstrip().startswith(ORIENTATION_TOOL_HEADER):
+            orientation_tool_result = f"{ORIENTATION_TOOL_HEADER}\n{orientation_tool_result}"
+        prefix_blocks.append(orientation_tool_result)
+    current_message = user_input
+    if prefix_blocks:
+        current_message = "\n\n".join(prefix_blocks) + "\n\n[Current User Message]\n" + user_input
     parts = [f"{LLAMA3_START}system{LLAMA3_END}\n\n{system}{LLAMA3_EOT}"]
     for role, text in trim_session_context(session_context):
         header = "user" if role == "user" else "assistant"
@@ -75,13 +82,15 @@ def build_prompt(user_input, memory_tool_result=None, session_context=None):
     return prompt
 
 
-def scrub_unstaged_memory_status(response, memory_tool_result=None):
-    if memory_tool_result:
+def scrub_unstaged_memory_status(response, memory_tool_result=None, orientation_tool_result=None):
+    if memory_tool_result or orientation_tool_result:
         return remove_memory_tool_calls(response)
     lines = []
     for line in (response or "").splitlines():
         stripped = line.strip()
         if stripped.startswith("[Memory Tool Result") or stripped.startswith("Memory Tool Result"):
+            continue
+        if stripped.startswith("[Orientation Tool Result") or stripped.startswith("Orientation Tool Result"):
             continue
         lines.append(remove_memory_tool_calls(line))
     return "\n".join(lines).strip()
@@ -97,6 +106,16 @@ def extract_memory_query(response):
 
 def remove_memory_tool_calls(response):
     return MEMORY_TOOL_PATTERN.sub("", response or "").strip()
+
+
+def latest_phenomenality_scores(records):
+    for record in reversed(records or []):
+        if not isinstance(record, dict):
+            continue
+        metadata = record.get("metadata")
+        if isinstance(metadata, dict) and isinstance(metadata.get("phenomenality"), dict):
+            return dict(metadata["phenomenality"])
+    return {}
 
 
 def format_status(status):
@@ -197,6 +216,7 @@ def main():
     config.interactive_disambiguation = True
 
     memory = MemoryEngine(scope="interactive_phenomenality")
+    self_concept = SelfConceptController()
     imported_methodologies = memory.import_methodologies(
         _global_cache.memory,
         source="cognitive_cache",
@@ -210,18 +230,21 @@ def main():
             "cache_write_scope": config.cache_write_scope,
             "memory_policy": "tool_not_prompt",
             "methodologies_imported": imported_methodologies,
+            "self_concept_controller": "vector_map_based",
         },
     )
         
     print(Fore.CYAN + "\nThis terminal uses full Agentic ToT and Test-Time Layer Synthesis.")
     print("Watch the model's internal entropy and phenomenality trace in real time!")
     print("Current session context is ON. Long-term memory is a tool, not hidden prompt context.")
+    print("Self-concept orientation is vector-map based and logged as a tool/controller trace.")
     print(f"Imported {imported_methodologies} sanitized methodology memories from cognitive cache.")
     print("Commands: :context, :context on, :context off, :context clear")
     print("          :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory boundary")
     print("Type 'exit' or 'quit' to leave.\n" + Style.RESET_ALL)
 
     pending_memory_tool_result = None
+    pending_orientation_tool_result = None
     session_context = []
     session_context_enabled = True
     
@@ -300,23 +323,36 @@ def main():
                 continue
             
             memory_tool_result = pending_memory_tool_result
+            orientation_tool_result = pending_orientation_tool_result
             pending_memory_tool_result = None
+            pending_orientation_tool_result = None
             prompt = build_prompt(
                 user_input,
                 memory_tool_result=memory_tool_result,
+                orientation_tool_result=orientation_tool_result,
                 session_context=session_context if session_context_enabled else None,
             )
             memory.append_turn(
                 "user",
                 user_input,
                 tags=["operator_input"],
-                provenance={"memory_tool_result_provided": bool(memory_tool_result)},
+                provenance={
+                    "memory_tool_result_provided": bool(memory_tool_result),
+                    "orientation_tool_result_provided": bool(orientation_tool_result),
+                },
             )
             if memory_tool_result:
                 memory.append_event(
                     "memory_tool_result_provided",
                     text=memory_tool_result,
                     tags=["memory_tool"],
+                    provenance={"current_input": user_input[:240]},
+                )
+            if orientation_tool_result:
+                memory.append_event(
+                    "orientation_tool_result_provided",
+                    text=orientation_tool_result,
+                    tags=["orientation_tool"],
                     provenance={"current_input": user_input[:240]},
                 )
 
@@ -352,6 +388,7 @@ def main():
                 prompt = build_prompt(
                     user_input,
                     memory_tool_result=model_memory_tool_result,
+                    orientation_tool_result=orientation_tool_result,
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
@@ -365,9 +402,11 @@ def main():
                 )
             if response:
                 active_memory_tool_result = memory_tool_result or model_memory_tool_result
+                active_orientation_tool_result = orientation_tool_result
                 response = scrub_unstaged_memory_status(
                     response,
                     memory_tool_result=active_memory_tool_result,
+                    orientation_tool_result=active_orientation_tool_result,
                 )
                 print(response, end="")
                 if session_context_enabled:
@@ -382,9 +421,22 @@ def main():
                     metrics={
                         "chars": len(response),
                         "model_memory_tool_requested": bool(model_memory_tool_result),
+                        "orientation_tool_result_provided": bool(active_orientation_tool_result),
                     },
                 )
             record_internal_traces(memory, synthesis_records)
+            sensor_scores = latest_phenomenality_scores(synthesis_records)
+            if sensor_scores:
+                decision = self_concept.decide(sensor_scores, context={"task_grounding_low": True})
+                memory.append_self_concept_trace(decision.to_dict())
+                if decision.allowed and decision.intervention_type in {"tool_result", "context_tool_result"}:
+                    pending_orientation_tool_result = format_orientation_tool_result(decision)
+                    print(
+                        Fore.CYAN
+                        + "\n[Orientation] Vector-map controller staged a one-turn orientation result.\n"
+                        + pending_orientation_tool_result
+                        + Style.RESET_ALL
+                    )
             
             # The streaming will print tokens, just need a newline at the end
             print("\n")

@@ -318,6 +318,37 @@ class MemoryEngine:
             )
         )
 
+    def append_self_concept_trace(
+        self,
+        decision: dict[str, Any],
+        *,
+        scope: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+    ) -> MemoryRecord:
+        action = str(decision.get("action") or "unknown")
+        trigger = decision.get("trigger_vector")
+        target = decision.get("target_vector")
+        strength = decision.get("strength")
+        text = f"self-concept action={action}; trigger={trigger}; target={target}; strength={strength}"
+        return self.append(
+            MemoryRecord(
+                kind="self_concept_trace",
+                scope=scope or self.scope,
+                text=text,
+                session_id=self.session_id,
+                tags=_unique_tags(["internal", "self_concept", action] + (tags or [])),
+                provenance={
+                    "source": "self_concept_controller",
+                    "decision": _json_safe(decision),
+                },
+                metrics={
+                    "allowed": bool(decision.get("allowed")),
+                    "strength": decision.get("strength", 0.0),
+                    "intervention_type": decision.get("intervention_type"),
+                },
+            )
+        )
+
     def append_activation_trace(
         self,
         artifact_path: Path | str,
