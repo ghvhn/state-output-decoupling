@@ -1,7 +1,10 @@
 import torch
 from pathlib import Path
 import os
+import re
 import torch.nn.functional as F
+
+DEFAULT_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 
 CACHE_FILE = Path(
     os.environ.get(
@@ -10,12 +13,38 @@ CACHE_FILE = Path(
     )
 )
 
+
+def model_cache_file(model_name, d_model=None):
+    """Per-model cache path.
+
+    The shipped cache is calibrated for DEFAULT_MODEL. A swapped-in model has a
+    different residual geometry, so it must build and read its OWN cache rather
+    than be handed the (dimensionally inert) default file. The default model
+    keeps the original path for backward compatibility.
+    """
+    base = CACHE_FILE
+    if not model_name or model_name == DEFAULT_MODEL:
+        return base
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "_", str(model_name)).strip("_")
+    suffix = f"__{slug}"
+    if d_model:
+        suffix += f"_d{d_model}"
+    return base.with_name(base.stem + suffix + base.suffix)
+
+
 class CognitiveCache:
     def __init__(self, threshold=0.995, max_memories=512):
         self.threshold = threshold
         self.max_memories = max_memories
         self.memory = [] # List of dicts: {trigger, delta, metadata}
+        self.file = CACHE_FILE
         self.load()
+
+    def use_file(self, path):
+        """Re-point this cache at a model-specific file and reload its memories."""
+        self.file = Path(path)
+        self.load()
+        return self.file
 
     @staticmethod
     def _last_token_vector(tensor):
@@ -50,9 +79,9 @@ class CognitiveCache:
             return None
         
     def load(self):
-        if CACHE_FILE.exists():
+        if self.file.exists():
             try:
-                raw = torch.load(CACHE_FILE, map_location="cpu")
+                raw = torch.load(self.file, map_location="cpu")
                 if not isinstance(raw, list):
                     raw = []
                 self.memory = []
@@ -60,16 +89,17 @@ class CognitiveCache:
                     entry = self._coerce_entry(item)
                     if entry is not None:
                         self.memory.append(entry)
-                print(f"[Cognitive Cache] Loaded {len(self.memory)} episodic memories.")
+                print(f"[Cognitive Cache] Loaded {len(self.memory)} episodic memories from {self.file.name}.")
             except Exception as e:
                 print(f"[Cognitive Cache] Error loading cache: {e}")
                 self.memory = []
         else:
-            # Ensure data dir exists
-            os.makedirs(CACHE_FILE.parent, exist_ok=True)
-            
+            # New (e.g. model-specific) cache; ensure data dir exists.
+            self.memory = []
+            os.makedirs(self.file.parent, exist_ok=True)
+
     def save(self):
-        torch.save(self.memory, CACHE_FILE)
+        torch.save(self.memory, self.file)
         
     def store(self, trigger_state, learned_vector, metadata=None):
         """

@@ -430,28 +430,34 @@ def adaptive_budget(base_tokens: int, multiplier: float, cap: int | None) -> int
 
 
 def print_model_compat_notice(M, args, methods):
-    """Warn when running on a model other than the cache-calibrated default.
+    """Give a non-default model full feature parity, and say so.
 
-    Steering vectors recompute per-model, and the cognitive cache self-skips
-    dimension-mismatched entries (so nothing crashes), but cache lanes go inert
-    on a different architecture. Make that explicit so scores aren't misread.
+    The egg/quality gate is model-agnostic and applies identically to every
+    model. The only model-specific asset is the cognitive cache: instead of
+    handing a swapped model the (dimensionally inert) default Llama cache, we
+    point it at its OWN cache namespace, so the cache/synthesis lane works
+    natively for it and accumulates per-model when writing is enabled.
     """
     if args.model == MODEL_NAME:
         return
-    print(f"\n[model compat] Running on {args.model}, not the calibrated {MODEL_NAME}.", flush=True)
+    from invariants.agentic_engine import _global_cache
+    from invariants.cognitive_cache import model_cache_file
+
+    cache_path = model_cache_file(args.model, M.d_model)
+    _global_cache.use_file(cache_path)
+    print(f"\n[model compat] Running on {args.model}, not the default {MODEL_NAME}.", flush=True)
     print(f"  hidden_size={M.d_model}, layers={M.n_layers}, device={M.device}.", flush=True)
     print(
-        "  Steering vectors recompute for this model, but cognitive_cache.pt is "
-        "calibrated at the default model's geometry and will be INERT here.",
+        f"  Cache namespace: {cache_path.name} -- this model builds/reads its OWN "
+        f"cache ({len(_global_cache.memory)} memories loaded). Steering vectors "
+        "recompute per model.",
         flush=True,
     )
-    cache_lanes = [m for m in methods if m in ("humble_dynamic", "humble_synthesis")]
-    if cache_lanes:
-        print(
-            f"  Cache lanes {cache_lanes} will still run but get no cache hits; "
-            "compare compact/compact_long and humble_verifier for a fair read.",
-            flush=True,
-        )
+    print(
+        "  Same egg/quality gate applies: the egg fires only if THIS model earns "
+        "it (selective >=90%, coverage >=40%, clean lane) -- not handed over.",
+        flush=True,
+    )
 
 
 def build_domain_vecs(M):
@@ -1573,6 +1579,9 @@ def main():
         except UnboundLocalError:
             pass
         release_benchmark_runtime()
+        # Carry the model through so the egg shell loads what actually earned it.
+        if args.model != MODEL_NAME:
+            os.environ["EGG_MODEL"] = args.model
         launch_interactive_after_parent_exits()
 
     write_checkpoint(output, results, methods, started_at, status="completed", message="benchmark completed")
