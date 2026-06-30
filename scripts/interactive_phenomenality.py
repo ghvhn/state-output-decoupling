@@ -11,34 +11,59 @@ if ROOT not in sys.path:
 from invariants.engine import load_model
 from invariants.agentic_engine import generate_agentic_text, _global_cache
 from invariants.config import AgenticConfig
+from invariants.memory_engine import MemoryEngine
 
 colorama.init()
 
-MAX_HISTORY_TURNS = 8
-MAX_HISTORY_CHARS = 6000
+MAX_PROMPT_CHARS = 6000
+LLAMA3_START = "<|start_header_id|>"
+LLAMA3_END = "<|end_header_id|>"
+LLAMA3_EOT = "<|eot_id|>"
 
 
-def build_prompt(history, user_input):
+def build_prompt(user_input, memory_tool_result=None):
     system = (
         "You are an analytical and self-reflective reasoning engine. "
-        "Use the visible conversation history when the user's message depends on prior context. "
-        "Do not treat cognitive cache as a substitute for textual context; if history is missing, say so."
+        "Memory is an explicit tool, not hidden context. "
+        "If a [Memory Tool Result] block is present in the current message, use it only when relevant. "
+        "If no memory tool result is present, do not pretend to remember prior turns."
     )
-    parts = [f"<|start_header_id|>system<|end_header_id|>\n\n{system}<|eot_id|>"]
-    for role, text in history[-MAX_HISTORY_TURNS * 2:]:
-        header = "user" if role == "user" else "assistant"
-        parts.append(f"<|start_header_id|>{header}<|end_header_id|>\n\n{text}<|eot_id|>")
-    parts.append(f"<|start_header_id|>user<|end_header_id|>\n\n{user_input}<|eot_id|>")
-    parts.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
-    prompt = "".join(parts)
-    if len(prompt) > MAX_HISTORY_CHARS:
-        prompt = prompt[-MAX_HISTORY_CHARS:]
-        prompt = (
-            f"<|start_header_id|>system<|end_header_id|>\n\n{system}\n\n"
-            "[Earlier visible history was truncated to fit the local context window.]<|eot_id|>"
-            + prompt
+    current_message = user_input
+    if memory_tool_result:
+        tool_budget = max(0, MAX_PROMPT_CHARS - len(system) - len(user_input) - 512)
+        if len(memory_tool_result) > tool_budget:
+            memory_tool_result = memory_tool_result[:tool_budget] + "\n[Memory Tool Result truncated]"
+        current_message = (
+            f"{memory_tool_result}\n\n"
+            "[Current User Message]\n"
+            f"{user_input}"
         )
+    parts = [
+        f"{LLAMA3_START}system{LLAMA3_END}\n\n{system}{LLAMA3_EOT}",
+        f"{LLAMA3_START}user{LLAMA3_END}\n\n{current_message}{LLAMA3_EOT}",
+        f"{LLAMA3_START}assistant{LLAMA3_END}\n\n",
+    ]
+    prompt = "".join(parts)
     return prompt
+
+
+def format_status(status):
+    return (
+        f"[Memory] path={status['path']}\n"
+        f"         scope={status['scope']}\n"
+        f"         session_records={status['session_records']} "
+        f"session_turns={status['session_turns']} total_records={status['total_records']}"
+    )
+
+
+def parse_count(text, default):
+    parts = text.split()
+    if len(parts) < 2:
+        return default
+    try:
+        return max(1, int(parts[1]))
+    except ValueError:
+        return default
 
 
 def main():
@@ -69,15 +94,25 @@ def main():
     
     # Enable interactive disambiguation as requested
     config.interactive_disambiguation = True
+
+    memory = MemoryEngine(scope="interactive_phenomenality")
+    memory.append_event(
+        "shell_start",
+        tags=["session"],
+        provenance={
+            "script": os.path.abspath(__file__),
+            "cache_write_scope": config.cache_write_scope,
+            "memory_policy": "tool_not_prompt",
+        },
+    )
         
     print(Fore.CYAN + "\nThis terminal uses full Agentic ToT and Test-Time Layer Synthesis.")
     print("Watch the model's internal entropy and phenomenality trace in real time!")
-    print("Visible text history is ON for this shell; cache writes remain flagged as interactive_phenomenality.")
-    print("Commands: :history, :history on, :history off, :history clear")
+    print("Memory is a tool, not hidden prompt context; cache writes remain flagged as interactive_phenomenality.")
+    print("Commands: :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory boundary")
     print("Type 'exit' or 'quit' to leave.\n" + Style.RESET_ALL)
 
-    history = []
-    history_enabled = True
+    pending_memory_tool_result = None
     
     while True:
         try:
@@ -89,29 +124,68 @@ def main():
                 user_input = input(Fore.MAGENTA + Style.BRIGHT + "\nYou: " + Style.RESET_ALL)
                 
             if user_input.lower() in ['exit', 'quit']:
+                memory.append_event("shell_closed", tags=["session"], provenance={"reason": "operator_exit"})
                 break
             if user_input.startswith(":history"):
-                cmd = user_input.strip().lower()
-                if cmd == ":history off":
-                    history_enabled = False
-                    print(Fore.YELLOW + "[History] Visible text history OFF. Cache remains enabled and flagged." + Style.RESET_ALL)
-                elif cmd == ":history on":
-                    history_enabled = True
-                    print(Fore.GREEN + "[History] Visible text history ON." + Style.RESET_ALL)
-                elif cmd == ":history clear":
-                    history.clear()
-                    print(Fore.YELLOW + "[History] Cleared visible text history. Cache was not changed." + Style.RESET_ALL)
+                print(
+                    Fore.YELLOW
+                    + "[History] Automatic prompt history is disabled. Use :memory search or :memory use as an explicit tool."
+                    + Style.RESET_ALL
+                )
+                continue
+            if user_input.startswith(":memory"):
+                cmd = user_input.strip()
+                tail = cmd[len(":memory"):].strip()
+                if tail in ("", "status"):
+                    print(Fore.CYAN + format_status(memory.status()) + Style.RESET_ALL)
+                elif tail.startswith("recent"):
+                    n = parse_count(tail, 4)
+                    print(Fore.CYAN + memory.format_recent(max_turns=n) + Style.RESET_ALL)
+                elif tail.startswith("search "):
+                    query = tail[len("search "):].strip()
+                    records = memory.search(query, max_records=6, scope=memory.scope)
+                    print(Fore.CYAN + memory.format_tool_result(records) + Style.RESET_ALL)
+                elif tail.startswith("use "):
+                    query = tail[len("use "):].strip()
+                    records = memory.search(query, max_records=6, scope=memory.scope)
+                    pending_memory_tool_result = memory.format_tool_result(records)
+                    memory.append_event(
+                        "memory_tool_staged",
+                        tags=["memory_tool"],
+                        provenance={"query": query, "records": len(records)},
+                    )
+                    print(Fore.CYAN + pending_memory_tool_result + Style.RESET_ALL)
+                    print(Fore.YELLOW + "[Memory] This tool result will be provided to the next model turn only." + Style.RESET_ALL)
+                elif tail in ("boundary", "clear"):
+                    memory.mark_session_boundary("operator_request")
+                    pending_memory_tool_result = None
+                    print(Fore.YELLOW + "[Memory] Session boundary marked. Persistent memory file was not deleted." + Style.RESET_ALL)
                 else:
                     print(
-                        Fore.CYAN
-                        + f"[History] enabled={history_enabled}, stored_turns={len(history)}, max_turns={MAX_HISTORY_TURNS}"
+                        Fore.YELLOW
+                        + "[Memory] Commands: :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory boundary"
                         + Style.RESET_ALL
                     )
                 continue
             if not user_input.strip():
                 continue
             
-            prompt = build_prompt(history if history_enabled else [], user_input)
+            memory_tool_result = pending_memory_tool_result
+            pending_memory_tool_result = None
+            prompt = build_prompt(user_input, memory_tool_result=memory_tool_result)
+            memory.append_turn(
+                "user",
+                user_input,
+                tags=["operator_input"],
+                provenance={"memory_tool_result_provided": bool(memory_tool_result)},
+            )
+            if memory_tool_result:
+                memory.append_event(
+                    "memory_tool_result_provided",
+                    text=memory_tool_result,
+                    tags=["memory_tool"],
+                    provenance={"current_input": user_input[:240]},
+                )
 
             print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
             
@@ -125,16 +199,18 @@ def main():
             )
             if response:
                 print(response, end="")
-                if history_enabled:
-                    history.append(("user", user_input))
-                    history.append(("assistant", response))
-                    if len(history) > MAX_HISTORY_TURNS * 2:
-                        history = history[-MAX_HISTORY_TURNS * 2:]
+                memory.append_turn(
+                    "assistant",
+                    response,
+                    tags=["model_output"],
+                    metrics={"chars": len(response)},
+                )
             
             # The streaming will print tokens, just need a newline at the end
             print("\n")
             
         except (KeyboardInterrupt, EOFError):
+            memory.append_event("shell_closed", tags=["session"])
             print("\nInteractive shell closed.")
             break
 
