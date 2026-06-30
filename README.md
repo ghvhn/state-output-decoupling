@@ -67,6 +67,23 @@ Core writeups:
 To reproduce a benchmark on your own machine, use the one-shot bootstrap instead
 of the full setup below. The runner adapts to your hardware automatically.
 
+### Never used Python, Git, or a terminal? (Windows)
+
+You can run a benchmark without touching a command line:
+
+1. **Install Python** (one time): open <https://www.python.org/downloads/>,
+   download Python 3.11+, run the installer, and on the first screen tick
+   **"Add python.exe to PATH"**.
+2. **Get the code:** on this repo's GitHub page click the green **Code** button →
+   **Download ZIP**, then extract the ZIP somewhere (e.g. your Desktop). No Git
+   required.
+3. **Double-click `START_HERE.cmd`** in the extracted folder.
+
+That runs the small open model on your CPU — no GPU, no Hugging Face account, no
+license. The first run downloads ~3 GB, then scores a few rows and shows the
+result. Once you're comfortable, `run_benchmark.cmd` gives you the full options
+below.
+
 Prerequisites for the default (Llama-3.1-8B) path — none of these apply in SMALL
 mode below:
 
