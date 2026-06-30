@@ -268,7 +268,7 @@ class MemoryEngine:
                 text=text,
                 session_id=self.session_id,
                 turn_id=f"{self.session_id}:{self._turn_counter:04d}",
-                tags=_unique_tags(["conversation_trace"] + (tags or [])),
+                tags=_unique_tags(["external_io", "conversation_trace"] + (tags or [])),
                 provenance=provenance or {},
                 metrics=metrics or {},
             )
@@ -291,6 +291,28 @@ class MemoryEngine:
                 text=text or name,
                 session_id=self.session_id,
                 tags=_unique_tags([name] + (tags or [])),
+                provenance=provenance or {},
+                metrics=metrics or {},
+            )
+        )
+
+    def append_internal_trace(
+        self,
+        name: str,
+        *,
+        text: str = "",
+        scope: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        provenance: Optional[dict[str, Any]] = None,
+        metrics: Optional[dict[str, Any]] = None,
+    ) -> MemoryRecord:
+        return self.append(
+            MemoryRecord(
+                kind="internal_trace",
+                scope=scope or self.scope,
+                text=text or name,
+                session_id=self.session_id,
+                tags=_unique_tags(["internal", "trace", name] + (tags or [])),
                 provenance=provenance or {},
                 metrics=metrics or {},
             )

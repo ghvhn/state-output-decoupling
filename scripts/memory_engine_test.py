@@ -12,7 +12,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from invariants.memory_engine import MemoryEngine, sanitize_methodology_payload
-from scripts.interactive_phenomenality import build_prompt, scrub_unstaged_memory_status
+from scripts.interactive_phenomenality import (
+    build_prompt,
+    extract_memory_query,
+    scrub_unstaged_memory_status,
+)
 
 
 def make_memory():
@@ -41,9 +45,33 @@ def test_turns_are_logged_with_provenance_and_reloaded():
         assert raw[0]["role"] == "user"
         assert raw[0]["provenance"]["source"] == "operator"
         assert "conversation_trace" in raw[0]["tags"]
+        assert "external_io" in raw[0]["tags"]
 
         reloaded = MemoryEngine(path=memory.path, scope="test_scope", include_existing_in_session_view=True)
         assert len(reloaded.recent_turns(max_turns=1, scope="test_scope")) == 2
+    finally:
+        tmp.cleanup()
+
+
+def test_internal_trace_memory_is_separate_from_external_io():
+    tmp, memory = make_memory()
+    try:
+        memory.append_turn("user", "What happened internally?")
+        memory.append_internal_trace(
+            "synthesis_trace",
+            text="synthesis reason=optimizer; expert=Analytical; layers=12->18; steps=21",
+            tags=["synthesis", "phenomenality"],
+            provenance={"phenomenality": {"ambiguity": 0.2}},
+            metrics={"steps": 21},
+        )
+        external = memory.search("internally", kinds=["turn"])
+        internal = memory.search("optimizer analytical ambiguity", kinds=["internal_trace"])
+        assert len(external) == 1
+        assert "external_io" in external[0].tags
+        assert len(internal) == 1
+        assert internal[0].kind == "internal_trace"
+        assert "internal" in internal[0].tags
+        assert internal[0].metrics["steps"] == 21
     finally:
         tmp.cleanup()
 
@@ -92,6 +120,25 @@ def test_prompt_only_contains_memory_when_tool_result_is_staged():
     assert "The first topic was next-token prediction." in with_tool
     assert "[Current User Message]" in with_tool
     assert with_tool.count("[Memory Tool Result]") == 1
+
+
+def test_current_session_context_is_not_long_term_memory():
+    prompt = build_prompt(
+        "right. so where's the difference",
+        session_context=[
+            ("user", "Are you conscious?"),
+            ("assistant", "I do not have subjective experience, but I can discuss the distinction."),
+        ],
+    )
+    assert "Are you conscious?" in prompt
+    assert "subjective experience" in prompt
+    assert "[Memory Tool Result]" not in prompt
+
+
+def test_model_memory_tool_call_is_parseable_and_removed():
+    response = "<<MEMORY: periodic discount methodology>>"
+    assert extract_memory_query(response) == "periodic discount methodology"
+    assert scrub_unstaged_memory_status(response, memory_tool_result="[Memory Tool Result]\n- real") == ""
 
 
 def test_fake_memory_status_is_scrubbed_when_unstaged():
@@ -175,9 +222,12 @@ def test_methodology_import_rejects_raw_clause_payloads():
 TESTS = [
     test_memory_engine_is_tool_not_prompt_builder,
     test_turns_are_logged_with_provenance_and_reloaded,
+    test_internal_trace_memory_is_separate_from_external_io,
     test_search_returns_explicit_tool_result,
     test_session_boundary_does_not_delete_persistent_memory,
     test_prompt_only_contains_memory_when_tool_result_is_staged,
+    test_current_session_context_is_not_long_term_memory,
+    test_model_memory_tool_call_is_parseable_and_removed,
     test_fake_memory_status_is_scrubbed_when_unstaged,
     test_activation_trace_records_artifact_reference_not_tensor_blob,
     test_methodology_import_keeps_sanitized_maps_only,
