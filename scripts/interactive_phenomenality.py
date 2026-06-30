@@ -12,7 +12,7 @@ if ROOT not in sys.path:
 from invariants.engine import load_model
 from invariants.agentic_engine import generate_agentic_text, _global_cache
 from invariants.config import AgenticConfig
-from invariants.cognitive_cache import CACHE_FILE
+from invariants.cognitive_cache import CACHE_FILE, model_cache_file, DEFAULT_MODEL
 from invariants.memory_engine import MemoryEngine
 from invariants.self_concept_controller import SelfConceptController, format_orientation_tool_result
 from invariants.steer_map_store import SteerMapStore
@@ -199,19 +199,29 @@ def main():
     print("      HUMBLE SYNTHESIS - INTERACTIVE SHELL      ")
     print("================================================" + Style.RESET_ALL)
     
-    print(Fore.YELLOW + "[System] Loading Llama-3.1-8B-Instruct and Organic Correction Vector..." + Style.RESET_ALL)
-    model = load_model("meta-llama/Llama-3.1-8B-Instruct", local_files_only=True)
-    
+    # Model is configurable so the egg shell honors whatever model earned the egg
+    # (env EGG_MODEL set by the benchmark, or argv[1] for a manual launch).
+    model_name = os.environ.get("EGG_MODEL") or (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL)
+    is_default = (model_name == DEFAULT_MODEL)
+
+    print(Fore.YELLOW + f"[System] Loading {model_name}..." + Style.RESET_ALL)
+    model = load_model(model_name, local_files_only=is_default)
+
     config = AgenticConfig()
-    try:
-        config.organic_correction_vector = torch.load("invariants/organic_correction_vector.pt", map_location=model.device)
-        print(Fore.GREEN + "[System] Successfully loaded organic_correction_vector.pt!" + Style.RESET_ALL)
-    except Exception as e:
-        print(Fore.RED + f"[System] Warning: Could not load organic vector: {e}" + Style.RESET_ALL)
+    # The organic correction vector is calibrated for the default model's geometry;
+    # skip it on a swapped model rather than inject a dimension-mismatched steer.
+    if is_default:
+        try:
+            config.organic_correction_vector = torch.load("invariants/organic_correction_vector.pt", map_location=model.device)
+            print(Fore.GREEN + "[System] Successfully loaded organic_correction_vector.pt!" + Style.RESET_ALL)
+        except Exception as e:
+            print(Fore.RED + f"[System] Warning: Could not load organic vector: {e}" + Style.RESET_ALL)
+    else:
+        print(Fore.YELLOW + "[System] Skipping organic vector (calibrated for the default model)." + Style.RESET_ALL)
 
     try:
-        _global_cache.load()
-        print(Fore.GREEN + "[System] Successfully loaded cognitive_cache.pt!" + Style.RESET_ALL)
+        cache_file = _global_cache.use_file(model_cache_file(model_name, model.d_model))
+        print(Fore.GREEN + f"[System] Loaded cache {cache_file.name} ({len(_global_cache.memory)} memories)." + Style.RESET_ALL)
     except Exception as e:
         print(Fore.RED + f"[System] Warning: Could not load cognitive cache: {e}" + Style.RESET_ALL)
 
