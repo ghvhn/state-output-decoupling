@@ -11,6 +11,21 @@ from typing import Any, Optional
 
 DEFAULT_MEMORY_FILE = Path(__file__).parent / "out" / "interactive_memory.jsonl"
 
+METHODOLOGY_KEYS = {
+    "kind",
+    "methodology",
+    "structural_features",
+    "clause_map_status",
+    "roles_declared",
+    "privacy",
+}
+
+RAW_PRIVACY_KEYS = {
+    "raw_clauses_saved",
+    "source_numbers_saved",
+    "entity_names_saved",
+}
+
 
 def utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -48,6 +63,80 @@ def _unique_tags(tags: Optional[list[str]]) -> list[str]:
             seen.add(t)
             out.append(t)
     return out
+
+
+def sanitize_methodology_payload(payload: Any) -> Optional[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    if "kind" not in payload or "methodology" not in payload:
+        return None
+
+    sanitized = {key: _json_safe(payload[key]) for key in METHODOLOGY_KEYS if key in payload}
+    privacy = sanitized.get("privacy")
+    if not isinstance(privacy, dict):
+        privacy = {}
+    for key in RAW_PRIVACY_KEYS:
+        if privacy.get(key) is True:
+            return None
+        privacy.setdefault(key, False)
+    privacy.setdefault("tier", "reusable_sanitized")
+    sanitized["privacy"] = privacy
+    return sanitized
+
+
+def methodology_key(methodology: dict[str, Any]) -> str:
+    safe = sanitize_methodology_payload(methodology) or {}
+    return json.dumps(
+        {
+            "kind": safe.get("kind"),
+            "methodology": safe.get("methodology"),
+            "structural_features": safe.get("structural_features", []),
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+    )
+
+
+def methodology_text(methodology: dict[str, Any]) -> str:
+    kind = str(methodology.get("kind") or "methodology")
+    body = str(methodology.get("methodology") or "").strip()
+    lines = [f"{kind}: {body}"]
+    features = methodology.get("structural_features") or []
+    if features:
+        lines.append("features: " + ", ".join(str(f) for f in features))
+    status = methodology.get("clause_map_status")
+    if status:
+        lines.append(f"clause_map_status: {status}")
+    roles = methodology.get("roles_declared") or []
+    if roles:
+        lines.append("roles_declared: " + ", ".join(str(r) for r in roles))
+    return "\n".join(lines)
+
+
+def iter_sanitized_methodologies(payload: Any, path: str = "root"):
+    if isinstance(payload, dict):
+        for key in (
+            "clause_methodology",
+            "solver_clause_methodology",
+            "verifier_clause_methodology",
+        ):
+            methodology = sanitize_methodology_payload(payload.get(key))
+            if methodology is not None:
+                yield methodology, f"{path}.{key}"
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict):
+            for methodology, methodology_path in iter_sanitized_methodologies(metadata, f"{path}.metadata"):
+                yield methodology, methodology_path
+        for key, value in payload.items():
+            if key == "metadata" or key.endswith("methodology") or key == "question":
+                continue
+            if isinstance(value, (dict, list)):
+                for methodology, methodology_path in iter_sanitized_methodologies(value, f"{path}.{key}"):
+                    yield methodology, methodology_path
+    elif isinstance(payload, list):
+        for idx, item in enumerate(payload):
+            for methodology, methodology_path in iter_sanitized_methodologies(item, f"{path}[{idx}]"):
+                yield methodology, methodology_path
 
 
 @dataclass
@@ -234,6 +323,81 @@ class MemoryEngine:
                 artifact_path=artifact,
             )
         )
+
+    def append_methodology(
+        self,
+        methodology: dict[str, Any],
+        *,
+        source: str = "unknown",
+        source_path: Optional[str] = None,
+        scope: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        provenance: Optional[dict[str, Any]] = None,
+        metrics: Optional[dict[str, Any]] = None,
+    ) -> Optional[MemoryRecord]:
+        sanitized = sanitize_methodology_payload(methodology)
+        if sanitized is None:
+            return None
+
+        key = methodology_key(sanitized)
+        existing = {
+            r.provenance.get("methodology_key")
+            for r in self.records
+            if r.kind == "methodology"
+        }
+        if key in existing:
+            return None
+
+        prov = {
+            "source": source,
+            "source_path": source_path,
+            "methodology_key": key,
+            "privacy": sanitized.get("privacy", {}),
+        }
+        if provenance:
+            for k, v in provenance.items():
+                if k not in {"question", "answer", "raw_clauses", "source_numbers"}:
+                    prov[k] = _json_safe(v)
+
+        return self.append(
+            MemoryRecord(
+                kind="methodology",
+                scope=scope or self.scope,
+                text=methodology_text(sanitized),
+                session_id=self.session_id,
+                tags=_unique_tags(
+                    [
+                        "methodology",
+                        "sanitized",
+                        "clause_map",
+                        str(sanitized.get("kind") or "unknown_kind"),
+                    ]
+                    + (tags or [])
+                ),
+                provenance=prov,
+                metrics=metrics or {},
+            )
+        )
+
+    def import_methodologies(
+        self,
+        payloads: list[Any],
+        *,
+        source: str,
+        source_path: Optional[str] = None,
+    ) -> int:
+        imported = 0
+        for idx, payload in enumerate(payloads):
+            for methodology, methodology_path in iter_sanitized_methodologies(payload, f"payload[{idx}]"):
+                record = self.append_methodology(
+                    methodology,
+                    source=source,
+                    source_path=source_path,
+                    provenance={"methodology_path": methodology_path},
+                )
+                if record is not None:
+                    imported += 1
+        return imported
 
     def mark_session_boundary(self, reason: str = "operator_request") -> None:
         self.session_start_index = len(self.records)

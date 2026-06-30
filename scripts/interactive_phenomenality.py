@@ -11,6 +11,7 @@ if ROOT not in sys.path:
 from invariants.engine import load_model
 from invariants.agentic_engine import generate_agentic_text, _global_cache
 from invariants.config import AgenticConfig
+from invariants.cognitive_cache import CACHE_FILE
 from invariants.memory_engine import MemoryEngine
 
 colorama.init()
@@ -96,6 +97,11 @@ def main():
     config.interactive_disambiguation = True
 
     memory = MemoryEngine(scope="interactive_phenomenality")
+    imported_methodologies = memory.import_methodologies(
+        _global_cache.memory,
+        source="cognitive_cache",
+        source_path=str(CACHE_FILE),
+    )
     memory.append_event(
         "shell_start",
         tags=["session"],
@@ -103,12 +109,14 @@ def main():
             "script": os.path.abspath(__file__),
             "cache_write_scope": config.cache_write_scope,
             "memory_policy": "tool_not_prompt",
+            "methodologies_imported": imported_methodologies,
         },
     )
         
     print(Fore.CYAN + "\nThis terminal uses full Agentic ToT and Test-Time Layer Synthesis.")
     print("Watch the model's internal entropy and phenomenality trace in real time!")
     print("Memory is a tool, not hidden prompt context; cache writes remain flagged as interactive_phenomenality.")
+    print(f"Imported {imported_methodologies} sanitized methodology memories from cognitive cache.")
     print("Commands: :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory boundary")
     print("Type 'exit' or 'quit' to leave.\n" + Style.RESET_ALL)
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from invariants.memory_engine import MemoryEngine
+from invariants.memory_engine import MemoryEngine, sanitize_methodology_payload
 from scripts.interactive_phenomenality import build_prompt
 
 
@@ -110,6 +110,53 @@ def test_activation_trace_records_artifact_reference_not_tensor_blob():
         tmp.cleanup()
 
 
+def test_methodology_import_keeps_sanitized_maps_only():
+    tmp, memory = make_memory()
+    try:
+        payload = {
+            "question": "A private word problem with 19 exact things.",
+            "answer": "secret-answer",
+            "metadata": {
+                "clause_methodology": {
+                    "kind": "periodic_discount_partition",
+                    "methodology": "Partition every-nth discounts before summing.",
+                    "structural_features": ["every_nth_item_rule", "discounted_group"],
+                    "clause_map_status": "complete",
+                    "roles_declared": ["asked", "givens", "rules"],
+                    "privacy": {
+                        "tier": "reusable_sanitized",
+                        "raw_clauses_saved": False,
+                        "source_numbers_saved": False,
+                        "entity_names_saved": False,
+                    },
+                }
+            },
+        }
+        assert memory.import_methodologies([payload], source="test_json", source_path="fake.json") == 1
+        result = memory.search("periodic discount partition", kinds=["methodology"])
+        assert len(result) == 1
+        record = result[0]
+        assert record.kind == "methodology"
+        assert "methodology" in record.tags
+        assert "sanitized" in record.tags
+        assert "clause_map" in record.tags
+        blob = json.dumps(record.to_dict(), sort_keys=True)
+        assert "secret-answer" not in blob
+        assert "private word problem" not in blob.lower()
+        assert "19 exact" not in blob
+    finally:
+        tmp.cleanup()
+
+
+def test_methodology_import_rejects_raw_clause_payloads():
+    unsafe = {
+        "kind": "general_clause_role_binding",
+        "methodology": "Bind roles.",
+        "privacy": {"raw_clauses_saved": True},
+    }
+    assert sanitize_methodology_payload(unsafe) is None
+
+
 TESTS = [
     test_memory_engine_is_tool_not_prompt_builder,
     test_turns_are_logged_with_provenance_and_reloaded,
@@ -117,6 +164,8 @@ TESTS = [
     test_session_boundary_does_not_delete_persistent_memory,
     test_prompt_only_contains_memory_when_tool_result_is_staged,
     test_activation_trace_records_artifact_reference_not_tensor_blob,
+    test_methodology_import_keeps_sanitized_maps_only,
+    test_methodology_import_rejects_raw_clause_payloads,
 ]
 
 
