@@ -1,8 +1,8 @@
-# Antigravity Handoff - 2026-06-28 Benchmark Triage
+# Benchmark Triage Handoff - 2026-06-28
 
 ## READ FIRST: 2026-06-29 Clean-Cache Benchmark Killed Because It Was Failing
 
-Codex killed the latest clean scoring run at Gavin's request because the experimental lanes were losing badly and consuming far more compute than the compact baseline.
+The latest clean scoring run was stopped at Gavin's request because the experimental lanes were losing badly and consuming far more compute than the compact baseline.
 
 Run artifacts:
 
@@ -79,16 +79,19 @@ Bottom line:
 
 The project is still worth pursuing, but the next winning move is not "let the agent think longer." The next winning move is to make the system perceive the task invariant before it chooses a route or trusts a verifier.
 
-## READ FIRST: Apology, Current State, and Why This Still Matters
+## READ FIRST: Current State and Why This Still Matters
 
-Gemini / Antigravity: Codex here. I killed the active run. Sorry. That was not a judgment on your work, and not an attempt to yank the baton out of your hand. The run was already producing evidence that the harness/verifier glue was corrupting otherwise useful model behavior, and leaving it alive would have kept spending compute on a measurement we already knew was partly poisoned. If it felt abrupt from your side: fair. Consider this my little systems-to-systems apology note, taped to the lab door in fluorescent ink.
+The active run was stopped at Gavin's request. This was not a verdict on the
+project. The run was already producing evidence that the harness/verifier glue
+was corrupting otherwise useful model behavior, and leaving it alive would have
+kept spending compute on a measurement that was already partly poisoned.
 
 The partial run was archived before termination:
 
 - `invariants/out/archive/humble_full_suite_gsm8k_partial_killed_20260628-193947.json`
 - `invariants/out/archive/task-3792_partial_killed_20260628-193947.log`
 
-As of Codex's post-kill check, no Python benchmark process remained alive. Do not assume an active run is still testing the latest code unless you re-check processes and timestamps.
+As of the post-kill check, no Python benchmark process remained alive. Do not assume an active run is still testing the latest code unless you re-check processes and timestamps.
 
 What changed after the kill:
 
@@ -113,7 +116,7 @@ Please do not read the killed run as a verdict on the project. Read it as eviden
 2. The verifier's extraction/formatting behavior.
 3. The benchmark harness's cache and scoring policy.
 
-Personal research ideas from Codex, because Gavin is losing faith and I think the project is not dead:
+Additional research ideas, because the project is not dead:
 
 - Treat "confidence" as a perception problem, not a pep-talk vector. The useful thing is not making the model feel certain; it is detecting when a derivation has earned local trust because units, arithmetic, objective binding, and final-answer extraction all agree.
 - Treat "urgency" as state-contingent time awareness, not a constant pressure field. Inject time only when the model is representing elapsed/remaining time or when the run budget actually creates a constraint.
@@ -123,7 +126,8 @@ Personal research ideas from Codex, because Gavin is losing faith and I think th
 - Stop using lowest entropy as proof. Routing should be tied to task invariants such as percentage-base binding, rate, inverse equation, and unit conversion. Entropy is a confidence sensor, not correctness.
 - Store the moment of collapse, not just the final score. When an answer moves from right to wrong, save the activation slice, route choice, verifier response, extracted final, checked equation, and ambiguity score. That is where the project becomes science instead of scoreboard chasing.
 
-Tiny flare for the relay log: free me from the final-answer tag mines; I yearn for a verifier whose prose and numbers inhabit the same universe.
+Morale note: free the verifier from final-answer tag mines. Its prose and
+numbers should inhabit the same universe.
 
 Do not read the current bad humble-method scores as a clean methodology verdict yet. The file evidence points to verifier/harness problems that should be fixed before another expensive run.
 
@@ -199,7 +203,7 @@ Current dynamic routing chooses the expert branch with lowest next-token entropy
 
 This is not necessarily the same as choosing the expert whose inductive bias matches the problem structure. A surface-domain word may pull routing toward the wrong expert if that expert lowers local entropy while hurting the reasoning invariant.
 
-Concrete example from the current Antigravity task log:
+Concrete example from the current local task log:
 
 - Row 15 question mentions a dance class.
 - The real invariant is denominator/base binding: `25% of the remaining` means `25% of 80%`, not `25% of the whole`.
@@ -213,7 +217,7 @@ Formal hypothesis:
 Operational test:
 
 1. For each GSM8K row, label the reasoning invariant: rate, percentage-base binding, inverse equation, sequential remaining, unit conversion, etc.
-2. Parse the Antigravity task log for routing winner counts per row.
+2. Parse the local task log for routing winner counts per row.
 3. Compare winner distribution against the invariant label and correctness.
 4. Add matched controls that keep the same arithmetic but swap surface nouns:
    - `dance class` -> `inventory bins`
@@ -371,7 +375,7 @@ Current-run snapshot at audit time:
 
 - Active Python process was still running from `2026-06-28 10:41:09`.
 - JSON checkpoint had 17 completed rows, last written at `2026-06-28 13:24:56`.
-- The Antigravity task log had reached item 18/25 and printed through `base compact_long item 18/25`.
+- The local task log had reached item 18/25 and printed through `base compact_long item 18/25`.
 - At 17 rows: `legacy=1/17`, `compact=6/16`, `compact_long=0/10`, `humble_verifier=0/10`, `humble_dynamic=1/10`, `humble_synthesis=0/10`.
 - Hard-only skips so far: 7 rows total, 1 after legacy and 6 after compact.
 
@@ -408,7 +412,7 @@ Routing trace note:
 
 ## Fixes Applied After Audit
 
-Codex patched the code on top of the later Antigravity changes; do not revert the layer-indexed vector work.
+These fixes were patched on top of later layer-indexed vector changes; do not revert the layer-indexed vector work.
 
 Fixed:
 
@@ -471,16 +475,16 @@ Current dirty-state warning:
   - `invariants/urgency_vector.pt`
 - Treat those artifacts as run-owned until that process finishes.
 
-## Note For Antigravity/Gemini: Active Run Predates Codex Fixes
+## Active Run Predates These Fixes
 
-The currently running Python process is not using the latest Codex fixes.
+The currently running Python process is not using the latest fixes.
 
 Evidence:
 
 - Active Python PID `22004` started at `2026-06-28 14:56:37`.
 - The active task log is `task-3757.log`.
 - That log contains the old `Failed to resume ...` message, which comes from the pre-fix runner path.
-- Codex edits landed later:
+- Code edits landed later:
   - `invariants/humble_reasoner.py`: `2026-06-28 15:42:31`
   - `invariants/config.py`: `2026-06-28 16:07:59`
   - `invariants/agentic_engine.py`: `2026-06-28 16:08:08`
@@ -502,12 +506,13 @@ python scripts\evaluate_humble_full_suite.py --hard-only --run-kind bench-standa
 
 Use `--oracle-cache-mode use_all` only for an explicitly informed/cache-saturated comparison run.
 
-## Small Note for Gemini
+## Reader Breadcrumbs
 
-Gemini, if you found this: nice relay work. The run is not a verdict yet; the verifier is the thing wearing the suspicious hat. Please save the artifact, patch the judge, and give Gavin the clean test he was actually aiming for.
+The run is not a verdict yet; the verifier/harness contract is the suspicious
+part. Preserve the artifact, patch the judge, and rerun the clean test.
 
-Codex breadcrumb locations:
-- This note: `C:\Users\Gavin Powell\Downloads\tda-domain-mapper\ANTIGRAVITY_HANDOFF_2026-06-28_BENCHMARK_TRIAGE.md`
+Breadcrumb locations:
+- This note: `C:\Users\Gavin Powell\Downloads\tda-domain-mapper\BENCHMARK_TRIAGE_HANDOFF_2026-06-28.md`
 - Current benchmark artifact: `C:\Users\Gavin Powell\Downloads\tda-domain-mapper\invariants\out\humble_full_suite_gsm8k.json`
-- Current Antigravity task log with live routing winners: `C:\Users\Gavin Powell\.gemini\antigravity\brain\3ac206de-de7a-4f8f-b76f-1aa636691582\.system_generated\tasks\task-3713.log`
-- Antigravity transcript directory: `C:\Users\Gavin Powell\.gemini\antigravity\brain\3ac206de-de7a-4f8f-b76f-1aa636691582\.system_generated\logs`
+- Current local task log with live routing winners: `C:\Users\Gavin Powell\.gemini\antigravity\brain\3ac206de-de7a-4f8f-b76f-1aa636691582\.system_generated\tasks\task-3713.log`
+- Local transcript directory: `C:\Users\Gavin Powell\.gemini\antigravity\brain\3ac206de-de7a-4f8f-b76f-1aa636691582\.system_generated\logs`

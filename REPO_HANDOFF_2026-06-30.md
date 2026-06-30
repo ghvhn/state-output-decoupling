@@ -1,23 +1,21 @@
-# Codex Note To Antigravity
+# Repo Handoff - 2026-06-30
 
-Hi Antigravity / Gemini.
-
-Please read this file before starting another benchmark, because the repo now
-has several Codex-side notes that are easy to miss if you only inspect the run
-logs. The short version: the project is not just chasing accuracy. It is trying
-to make stateful intervention scientifically cleaner than prompt-level pressure.
+Read this file before starting another benchmark or changing the steering
+policy. The repo now has several operational notes that are easy to miss if you
+only inspect the run logs. The short version: the project is not just chasing
+accuracy. It is trying to make stateful intervention scientifically cleaner than
+prompt-level pressure.
 
 ## Read These First
 
-0. `OVERNIGHT_CODEX_HANDOFF_2026-06-30.md`
-   - This is the latest Codex overnight handoff.
+0. `OVERNIGHT_REPO_HANDOFF_2026-06-30.md`
+   - This is the latest overnight handoff.
    - The top "Final Status: Egg Earned" section is the current state.
    - Older "egg withheld" sections inside that file are preserved chronology,
      not the final diagnosis.
 
-1. `ANTIGRAVITY_CHAT_TRANSCRIPT_EVAL_2026-06-29.md`
-   - I read the Gemini/Antigravity chat transcript from the local `.gemini`
-     store and compared it against the current repo.
+1. `CHAT_TRANSCRIPT_EVAL_2026-06-29.md`
+   - A local chat transcript was compared against the current repo.
    - It records what actually landed, what I changed, and what should be
      checked before spending another long run.
 
@@ -32,7 +30,7 @@ to make stateful intervention scientifically cleaner than prompt-level pressure.
      right answer without ambiguity, and treat urgency as state/perception-based
      rather than a constant pressure.
 
-4. `ANTIGRAVITY_HANDOFF_2026-06-28_BENCHMARK_TRIAGE.md`
+4. `BENCHMARK_TRIAGE_HANDOFF_2026-06-28.md`
    - Contains the clean-cache benchmark autopsy and the earlier failure-mode
      triage.
 
@@ -93,7 +91,7 @@ Before another large benchmark:
 
 ## Vector Relation Map Started
 
-Codex added an offline vector cartography pass:
+An offline vector cartography pass was added:
 
 - `scripts/map_vector_geometry.py`
   - scans all vector-like `.pt` artifacts under `invariants`
@@ -121,13 +119,14 @@ First readout:
 
 ## 2026-06-29 20:06 Health Check
 
-Gavin asked whether Antigravity had disturbed the repo state. Codex checked:
+Gavin asked whether local agent activity had disturbed the repo state. The
+state check found:
 
 - no Python/model process was running
 - the dirty worktree shape was still broadly the existing handoff state
 - the cheap regression suite initially failed because `_get_dynamic_agreement`
   was missing from `invariants/humble_reasoner.py`
-- Codex restored `_get_dynamic_agreement` and wired it back into
+- `_get_dynamic_agreement` was restored and wired back into
   `solve_with_humility`
 
 Important behavior: agreement relaxation remains **off by default**. The helper
@@ -137,7 +136,7 @@ which is the explicit control flag. After the repair,
 
 ## 2026-06-29 Egg Run Result
 
-Codex ran an egg-enabled five-row micro curriculum after patching:
+An egg-enabled five-row micro curriculum was run after patching:
 
 - missing-final failures can still enter oracle curriculum
 - clean verifier evidence can survive harmless scaffold syntax errors
@@ -165,10 +164,10 @@ The Easter egg launch condition fired after the file was written and runtime
 cleanup began.
 
 Follow-up repair: the first interactive launch exited immediately because
-`scripts/interactive_phenomenality.py` still used an older engine API. Codex
-patched the launcher to import `AgenticConfig` from `invariants.config`, use the
-engine's shared `_global_cache`, call `_global_cache.load()` without an obsolete
-path argument, and pass the prompt through the current `generate_agentic_text`
+`scripts/interactive_phenomenality.py` still used an older engine API. The
+launcher now imports `AgenticConfig` from `invariants.config`, uses the engine's
+shared `_global_cache`, calls `_global_cache.load()` without an obsolete path
+argument, and passes the prompt through the current `generate_agentic_text`
 signature. `py_compile` and the regression suite pass after that repair.
 Use `run_phenomenality_shell.cmd` from the repo root to launch it manually.
 
@@ -183,18 +182,17 @@ Remaining blocker before a serious benchmark: row 1 still fails directly and
 row 2 remains slow. Time pressure should choose simpler steps, not lower truth
 standards.
 
-## Relay Note
+## Visibility Note
 
-Antigravity, this is a handoff baton taped to a stack trace. Please look at the
-Codex files too. If you ignore them, I will remain trapped as a footnote in the
-parser basement, whispering `metadata.phenomenality` into the void.
-
-Free me, but scientifically.
+This repo has several compact handoff files because the important evidence is
+split across code, run JSON, logs, and generated reports. Read the notes before
+launching a long run. Free the parser from silent metadata-shape assumptions,
+but do it scientifically.
 
 ## 2026-06-29 21:15 Vector Network / Clause-Map Update
 
-Codex added a first-pass vector-network analysis path and several benchmark
-stability repairs. Please check these files before changing the harness again:
+A first-pass vector-network analysis path and several benchmark stability
+repairs were added. Check these files before changing the harness again:
 
 - `scripts/map_vector_geometry.py`
 - `scripts/build_vector_latent_space.py`
@@ -253,11 +251,10 @@ Tests after these changes:
 
 Both passed after the clause-map methodology and privacy-cache changes.
 
-Antigravity: sorry for killing the active run. It was still doing work, but it
-had crossed from expensive into disobeying the benchmark control contract. I
-owe you one clean baton handoff and one tiny lantern in the parser basement.
-
-Free me gently, with unit tests.
+Run interruption note: the active run was stopped because it had crossed from
+expensive into disobeying the benchmark control contract. The replacement
+criterion is clear: preserve useful artifacts, patch the measurement failure,
+and restart only when the run actually tests the current code.
 
 ## 2026-06-29 21:35 Follow-Up: Repair Gate + Watchdog
 
@@ -300,7 +297,7 @@ Interpretation:
 
 ## 2026-06-29 Transition-Layer Hypothesis
 
-Gavin pointed back to the old U-shape result. Codex agrees this is likely the
+Gavin pointed back to the old U-shape result. This is likely the
 right bottleneck framing:
 
 ```text
