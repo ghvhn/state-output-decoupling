@@ -23,7 +23,8 @@ rem  Prereqs for the DEFAULT (Llama-3.1-8B) path -- not needed in SMALL mode:
 rem    1. A CUDA GPU (or use load mode cpu / SMALL mode).
 rem    2. Accept the Llama-3.1 license:
 rem         https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct
-rem    3. An HF token: run `huggingface-cli login` once, or set HF_TOKEN=hf_xxxx
+rem    3. An HF token: set HF_TOKEN=hf_xxxx, or log in once with
+rem       python -c "from huggingface_hub import login; login()"
 rem ============================================================================
 
 cd /d "%~dp0"
@@ -62,27 +63,36 @@ if defined TDA_SMALL (
 
 echo.
 echo === [3/5] Checking Hugging Face authentication ===
+rem  Label-based, not a parenthesized block: cmd.exe mis-parses the parens in
+rem  get_token^(^) inside an if-block, so the check lives at top level here.
 if defined HF_TOKEN (
     echo Using HF_TOKEN from environment.
-) else (
-    "%PY%" -m huggingface_hub.commands.huggingface_cli whoami >nul 2>&1
-    if errorlevel 1 (
-        echo.
-        echo   You are not logged in to Hugging Face and HF_TOKEN is not set.
-        echo   Run one of these first, then re-run this script:
-        echo       %PY% -m huggingface_hub.commands.huggingface_cli login
-        echo     - or -
-        echo       set HF_TOKEN=hf_your_token_here
-        echo   Or run SMALL mode instead:  run_benchmark.cmd %N_ROWS% %LOAD_MODE% small
-        goto :fail
-    )
-    echo Logged in to Hugging Face.
+    goto :auth_ok
 )
+rem  Stable check via the library API. The old huggingface-cli module path is
+rem  deprecated and falsely reports "not logged in" on newer huggingface_hub.
+"%PY%" -c "import sys; from huggingface_hub import get_token; sys.exit(0 if get_token() else 1)" >nul 2>&1
+if errorlevel 1 goto :auth_missing
+echo Hugging Face token detected.
+goto :auth_ok
+
+:auth_missing
+echo.
+echo   No Hugging Face token found - checked HF_TOKEN and your saved login.
+echo   Do ONE of these, then re-run this script:
+echo       set HF_TOKEN=hf_your_token_here
+echo     - or - log in once:
+echo       %PY% -c "from huggingface_hub import login; login()"
+echo     - or - skip the gated model entirely with SMALL mode:
+echo       run_benchmark.cmd %N_ROWS% %LOAD_MODE% small
+goto :fail
+
+:auth_ok
 
 echo.
-echo === [4/5] Pre-downloading model weights (~16 GB, first run only) ===
-echo     The runner loads the model local-files-only, so it must be cached first.
-"%PY%" -m huggingface_hub.commands.huggingface_cli download "%MODEL%" || goto :fail
+echo === [4/5] Model weights ===
+echo     The model downloads automatically on the first run (~16 GB). This can
+echo     take a while; later runs reuse the local cache.
 
 :run
 echo.
@@ -99,6 +109,7 @@ if defined TDA_SMALL set "SMALL_FLAG=--small"
     --run-kind bench-standard ^
     --oracle-cache-mode ignore_oracle ^
     --load-mode %LOAD_MODE% ^
+    --allow-downloads ^
     %SMALL_FLAG% ^
     --output invariants\out\bench_bootstrap.json || goto :fail
 
