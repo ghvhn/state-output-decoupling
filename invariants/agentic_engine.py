@@ -3,12 +3,23 @@ import torch
 import torch.nn.functional as F
 from pathlib import Path
 
-from invariants.engine import _inputs
+from invariants.engine import _ended_with_eos, _generated_text_satisfies_stop, _inputs
 from invariants.social_hunt import get_steer_vector
 from invariants.cognitive_cache import CognitiveCache
 
 class NeedsDisambiguationError(Exception):
     pass
+
+
+class GenerationBudgetExceeded(Exception):
+    pass
+
+
+def _raise_if_generation_deadline_expired(config):
+    deadline = getattr(config, "_generation_deadline", None)
+    if deadline is not None and time.time() >= deadline:
+        raise GenerationBudgetExceeded("generation_budget_exceeded")
+
 
 # Global cache instance
 _global_cache = CognitiveCache()
@@ -128,6 +139,7 @@ def _maybe_apply_time_gated_urgency(h_syn, layer_index, config, state):
     return _add_last_token_delta(h_syn, coef * urgency_vec.float() / norm)
 
 
+
 def get_agentic_handles(
     M,
     vecs=None,
@@ -160,6 +172,11 @@ def get_agentic_handles(
     cache_write_enabled = config.cache_write_enabled
     cache_verified_only = config.cache_verified_only
     ignore_oracle_cache = config.ignore_oracle_cache
+    excluded_question_key = (
+        config.benchmark_question_key
+        if getattr(config, "exclude_same_question_cache", False)
+        else None
+    )
     excluded_oracle_question_key = (
         config.benchmark_question_key
         if config.exclude_same_question_oracle_cache
@@ -167,9 +184,31 @@ def get_agentic_handles(
     )
     synthesis_enabled = config.synthesis_enabled
     max_synthesis_events = config.max_synthesis_events
+    max_synthesis_steps = max(0, int(getattr(config, "max_synthesis_steps", 60)))
+    use_tuned_lens = bool(getattr(config, "use_tuned_lens", False))
+    if not hasattr(config, "_synthesis_events_used"):
+        config._synthesis_events_used = 0
     max_routing_events = config.max_routing_events
     interactive_disambiguation = config.interactive_disambiguation
     
+    if use_tuned_lens and not hasattr(M, "_tuned_lens"):
+        from pathlib import Path
+        out_dir = Path(__file__).parent / "out"
+        configured_lens = getattr(config, "tuned_lens_path", None)
+        lens_pt = Path(configured_lens) if configured_lens else out_dir / "lens_native.pt"
+        if lens_pt.exists():
+            print(f"    [Agentic Engine] Loading Tuned Lens from {lens_pt}...", flush=True)
+            import torch.nn as nn
+            d = M.d_model
+            nL = M.n_layers
+            tr = nn.ModuleList([nn.Linear(d, d, bias=True) for _ in range(nL - 1)]).to(M.device)
+            state_dict = torch.load(lens_pt, map_location=M.device)
+            tr.load_state_dict(state_dict["state"])
+            M._tuned_lens = tr
+        else:
+            print("    [Agentic Engine] WARNING: lens_native.pt not found. Falling back to exact synthesis.", flush=True)
+            M._tuned_lens = None
+
     handles = []
     
     state = {
@@ -183,10 +222,12 @@ def get_agentic_handles(
         "humility_vec": humility_vec,
         "synthesis_events": 0,
         "routing_events": 0,
+        "synthesis_recorder": synthesis_recorder,
     }
     
     def make_hook(l_idx):
         def hook(module, args, kwargs, out):
+            _raise_if_generation_deadline_expired(config)
             if isinstance(out, tuple):
                 h = out[0]
             else:
@@ -273,10 +314,24 @@ def get_agentic_handles(
                     # 5. Selection
                     best_idx = torch.argmin(entropies).item()
                     best_entropy = entropies[best_idx].item()
+                    winner_name = state["branch_names"][best_idx]
+                    
+                    if "synthesis_recorder" in state and state["synthesis_recorder"] is not None:
+                        state["synthesis_recorder"].append({
+                            "type": "routing_trace",
+                            "loop": state["total_loops_this_token"],
+                            "entropies": {
+                                state["branch_names"][0]: entropies[0].item(),
+                                state["branch_names"][1]: entropies[1].item(),
+                                state["branch_names"][2]: entropies[2].item(),
+                            },
+                            "winner": winner_name,
+                            "best_entropy": best_entropy
+                        })
                     
                     print(f"    [Agentic ToT] Token Loop {state['total_loops_this_token']} | "
                           f"Soc: {entropies[0]:.2f}, Cre: {entropies[1]:.2f}, Ana: {entropies[2]:.2f} "
-                          f"-> WINNER: {state['branch_names'][best_idx]} (Entropy: {best_entropy:.2f})")
+                          f"-> WINNER: {winner_name} (Entropy: {best_entropy:.2f})")
                     
                     # Collapse back to batch=1 with the winning state
                     routed_h = h_parallel[best_idx].unsqueeze(0)
@@ -288,10 +343,13 @@ def get_agentic_handles(
                         synthesis_enabled
                         and best_entropy > entropy_threshold
                         and state["synthesis_events"] < max_synthesis_events
+                        and config._synthesis_events_used < max_synthesis_events
+                        and max_synthesis_steps > 0
                     )
 
                     if should_synthesize:
                         state["synthesis_events"] += 1
+                        config._synthesis_events_used += 1
                         print("    [Agentic ToT] Still unsatisfied! Initiating Test-Time Layer Synthesis...")
                         
                         # Check Cognitive Cache first. Cached entries are last-token deltas,
@@ -301,6 +359,7 @@ def get_agentic_handles(
                                 routed_h,
                                 verified_only=cache_verified_only,
                                 ignore_oracle_cache=ignore_oracle_cache,
+                                excluded_question_key=excluded_question_key,
                                 excluded_oracle_question_key=excluded_oracle_question_key,
                             )
                             if cache_enabled
@@ -322,37 +381,43 @@ def get_agentic_handles(
                                 belief_vec_t = belief_vec.to(routed_h.device).to(torch.float32) if belief_vec is not None else None
                                 
                                 # Test-Time Layer Synthesis (TTT) with Dynamic Compute
-                                max_ttt_steps = 500
+                                max_ttt_steps = max_synthesis_steps
                                 min_loss_threshold = -1.0 # Depends on Truth Vector magnitude, but low is good
                                 
                                 for step in range(max_ttt_steps):
+                                    _raise_if_generation_deadline_expired(config)
                                     opt.zero_grad()
                                     
                                     h_syn = _add_last_token_delta(routed_h, v)
                                     
                                     h_syn = _maybe_apply_time_gated_urgency(h_syn, l_idx, config, state)
                                     
-                                    # Forward through remaining layers to get final state
-                                    h_curr = h_syn
-                                    for j in range(l_idx + 1, len(M.model.model.layers)):
-                                        layer_kwargs = dict(kwargs)
-                                        layer_kwargs["use_cache"] = False
-                                        for cache_key in ("past_key_value", "past_key_values"):
-                                            if cache_key in layer_kwargs:
-                                                del layer_kwargs[cache_key]
-                                        
-                                        # Fix CUDA Illegal Memory Access in SDPA:
-                                        # If seq_len == 1 (generation phase), we removed past_key_value, 
-                                        # so we only have 1 query and 1 key. But attention_mask is sized for the full past sequence.
-                                        # This mismatch crashes SDPA. Removing attention_mask defaults to unmasked (correct for 1x1).
-                                        if h_curr.shape[1] == 1:
-                                            if "attention_mask" in layer_kwargs:
-                                                del layer_kwargs["attention_mask"]
-                                            if "position_ids" in layer_kwargs and layer_kwargs["position_ids"].shape[1] > 1:
-                                                layer_kwargs["position_ids"] = layer_kwargs["position_ids"][:, -1:]
+                                    # Use Tuned Lens if available to bypass the rest of the stack
+                                    if (
+                                        use_tuned_lens
+                                        and hasattr(M, "_tuned_lens")
+                                        and M._tuned_lens is not None
+                                        and l_idx < len(M._tuned_lens)
+                                    ):
+                                        h_curr = h_syn + M._tuned_lens[l_idx](h_syn.float()).to(h_syn.dtype)
+                                    else:
+                                        # Fallback to the slow, exact computation
+                                        h_curr = h_syn
+                                        for j in range(l_idx + 1, len(M.model.model.layers)):
+                                            layer_kwargs = dict(kwargs)
+                                            layer_kwargs["use_cache"] = False
+                                            for cache_key in ("past_key_value", "past_key_values"):
+                                                if cache_key in layer_kwargs:
+                                                    del layer_kwargs[cache_key]
                                             
-                                        layer_out = M.model.model.layers[j](h_curr, *args[1:], **layer_kwargs)
-                                        h_curr = layer_out[0] if isinstance(layer_out, tuple) else layer_out
+                                            if h_curr.shape[1] == 1:
+                                                if "attention_mask" in layer_kwargs:
+                                                    del layer_kwargs["attention_mask"]
+                                                if "position_ids" in layer_kwargs and layer_kwargs["position_ids"].shape[1] > 1:
+                                                    layer_kwargs["position_ids"] = layer_kwargs["position_ids"][:, -1:]
+                                                
+                                            layer_out = M.model.model.layers[j](h_curr, *args[1:], **layer_kwargs)
+                                            h_curr = layer_out[0] if isinstance(layer_out, tuple) else layer_out
                                     
                                     h_31_last = h_curr[:, -1:, :]
                                     
@@ -394,7 +459,7 @@ def get_agentic_handles(
                                         loss_diff = recent_losses[0] - recent_losses[-1] # positive if decreasing
                                         
                                         if loss_diff < 0.05: # Loss has plateaued (d(loss)/dt == 0)
-                                            print(f"      [Synthesis Step {step+1}] Loss plateaued at {current_loss:.2f}. Model is mathematically trapped.")
+                                            print(f"      [Synthesis Step {step+1}] Loss plateaued at {current_loss:.2f}. Synthesis is plateaued.")
                                             
                                             try:
                                                 h_target = routed_h[:, -1:, :].float().squeeze(0)
@@ -403,46 +468,72 @@ def get_agentic_handles(
                                                 
                                                 v_target = v.detach().float().squeeze(0)
                                                 
-                                                amb_vec = _get_vector("ambiguity_vector", v_target.device)
-                                                if amb_vec is not None:
-                                                    if isinstance(amb_vec, dict): amb_vec = amb_vec.get(l_idx)
-                                                    if amb_vec is not None:
-                                                        sim = F.cosine_similarity(v_target, amb_vec.float().squeeze(0), dim=-1).item()
-                                                        phenomenality["ambiguity"] = sim
-                                                        if abs(sim) > 0.1:
-                                                            raise NeedsDisambiguationError("Ambiguity detected.")
-                                                        
-                                                rep_vec = _get_vector("repetition_vector", v_target.device)
-                                                if rep_vec is not None:
-                                                    if isinstance(rep_vec, dict): rep_vec = rep_vec.get(l_idx)
-                                                    if rep_vec is not None:
-                                                        sim = F.cosine_similarity(v_target, rep_vec.float().squeeze(0), dim=-1).item()
-                                                        phenomenality["repetition"] = sim
-                                                        if abs(sim) > 0.1:
-                                                            raise NeedsDisambiguationError("Repetition detected.")
-                                                        
-                                                dis_vec = _get_vector("disagreement_vector", v_target.device)
-                                                if dis_vec is not None:
-                                                    if isinstance(dis_vec, dict): dis_vec = dis_vec.get(l_idx)
-                                                    if dis_vec is not None:
-                                                        sim = F.cosine_similarity(v_target, dis_vec.float().squeeze(0), dim=-1).item()
-                                                        phenomenality["disagreement"] = sim
-                                                        if abs(sim) > 0.1:
-                                                            raise NeedsDisambiguationError("Disagreement detected.")
+                                                def vector_similarity(vector_name: str):
+                                                    vec = _get_vector(vector_name, v_target.device)
+                                                    if isinstance(vec, dict):
+                                                        vec = vec.get(l_idx)
+                                                    if vec is None:
+                                                        return None
+                                                    return F.cosine_similarity(
+                                                        v_target,
+                                                        vec.float().squeeze(0),
+                                                        dim=-1,
+                                                    ).item()
+
+                                                monitored_vectors = {
+                                                    "ambiguity": ("ambiguity_vector", True, "Ambiguity detected."),
+                                                    "repetition": ("repetition_vector", True, "Repetition detected."),
+                                                    "disagreement": ("disagreement_vector", True, "Disagreement detected."),
+                                                    "time_awareness": ("time_awareness_vector", False, None),
+                                                    "validated_flow": ("validated_flow_vector", False, None),
+                                                    "needless_interrupt": ("needless_interrupt_vector", False, None),
+                                                    "narrowing_in": ("narrowing_in_vector", False, None),
+                                                    "self_referential_momentum": ("self_referential_momentum_vector", False, None),
+                                                    "warranted_confidence_legacy": ("warranted_confidence_vector", False, None),
+                                                    "unwarranted_confidence_legacy": ("unwarranted_confidence_vector", False, None),
+                                                }
+                                                for metric, (vector_name, can_interrupt, message) in monitored_vectors.items():
+                                                    sim = vector_similarity(vector_name)
+                                                    if sim is None:
+                                                        continue
+                                                    phenomenality[metric] = sim
+                                                    if can_interrupt and abs(sim) > 0.1:
+                                                        raise NeedsDisambiguationError(message)
                                                 
                                                 state["last_phenomenality"] = phenomenality
-                                                print(f"      [Phenomenality Log] Ambiguity: {phenomenality.get('ambiguity', 0):.2f} | Repetition: {phenomenality.get('repetition', 0):.2f} | Disagreement: {phenomenality.get('disagreement', 0):.2f}")
+                                                print(
+                                                    "      [Phenomenality Log] "
+                                                    f"Ambiguity: {phenomenality.get('ambiguity', 0):.2f} | "
+                                                    f"Repetition: {phenomenality.get('repetition', 0):.2f} | "
+                                                    f"Disagreement: {phenomenality.get('disagreement', 0):.2f} | "
+                                                    f"Flow: {phenomenality.get('validated_flow', 0):.2f} | "
+                                                    f"Interrupt: {phenomenality.get('needless_interrupt', 0):.2f}"
+                                                )
                                             except NeedsDisambiguationError:
                                                 raise
                                             except Exception as e:
                                                 pass
 
-                                            # If we reach here, it's NOT ambiguity. It's just a hard math problem.
-                                            print("    [Agentic ToT] Model is mathematically trapped, but no ambiguity detected. Conceding defeat.")
-                                            synthesis_successful = False
-                                            break
-                                if synthesis_successful:
+                                            print("    [Agentic ToT] Synthesis plateau detected. Injecting organic self-correction vector!")
+                                            try:
+                                                if not hasattr(config, "organic_correction_vector"):
+                                                    config.organic_correction_vector = torch.load("invariants/organic_correction_vector.pt", map_location=routed_h.device)
+                                                
+                                                # The extracted organic vector is the mean shift of successful corrections
+                                                organic_delta = config.organic_correction_vector.unsqueeze(0).unsqueeze(0).to(routed_h.dtype)
+                                                
+                                                # Scale factor to amplify the correction (empirically tuned, 1.5x)
+                                                delta_to_apply = organic_delta * 1.5
+                                                
+                                                synthesis_successful = True
+                                                break
+                                            except Exception as e:
+                                                print(f"    [Agentic ToT] Failed to inject organic vector: {e}")
+                                                synthesis_successful = False
+                                                break
+                                if synthesis_successful and delta_to_apply is None:
                                     delta_to_apply = v.detach()
+
                                 
                             # Clean up VRAM after gradient operations. Cache hits skip this
                             # so retrieval does not pay optimizer cleanup latency.
@@ -459,6 +550,7 @@ def get_agentic_handles(
                                 "expert": state["branch_names"][best_idx],
                                 "phenomenality": state.get("last_phenomenality", {}),
                                 "time_awareness": state.get("last_time_awareness", {}),
+                                "cache_write_scope": getattr(config, "cache_write_scope", "default"),
                             }
                             if synthesis_recorder is not None:
                                 synthesis_recorder.append(
@@ -474,7 +566,9 @@ def get_agentic_handles(
                         # Apply the fully synthesized vector to the hidden state permanently
                         if delta_to_apply is not None:
                             routed_h = _add_last_token_delta(routed_h, delta_to_apply.detach())
+                        
                     
+
                     if isinstance(out, tuple):
                         out = (routed_h,) + tuple(out[1:])
                     else:
@@ -505,10 +599,11 @@ def generate_agentic_text(
     max_new_tokens=None,
     synthesis_recorder=None,
     chatty_log=False,
-    max_tool_calls=4,
+    max_tool_calls=None,
     stop_after_final_answer=False,
     stop_after_verifier_answer=False,
     max_time=None,
+    confidence_stabilization=False,
     **legacy_overrides,
 ):
     from invariants.config import AgenticConfig
@@ -546,6 +641,8 @@ def generate_agentic_text(
     # We still allow max_new_tokens override here because it's per-generation
     if max_new_tokens is None:
         max_new_tokens = config.max_new_tokens
+    if max_tool_calls is None:
+        max_tool_calls = getattr(config, "max_tool_calls", 8)
 
     previous_deadline = getattr(config, "_generation_deadline", None)
     previous_budget = getattr(config, "_generation_budget_sec", None)
@@ -564,6 +661,7 @@ def generate_agentic_text(
         config=config,
         synthesis_recorder=synthesis_recorder,
     )
+    state["confidence_stabilization"] = confidence_stabilization
     
     try:
         from transformers import StoppingCriteriaList, LogitsProcessorList, LogitsProcessor
@@ -572,7 +670,7 @@ def generate_agentic_text(
             TimeStoppingCriteria,
             ToolStoppingCriteria,
             VerifierStoppingCriteria,
-            intercept_tool_call,
+            iter_tool_calls,
             evaluate_python_expression,
         )
         
@@ -591,6 +689,7 @@ def generate_agentic_text(
         current_inputs = {k: v.clone() for k, v in inputs.items()}
         tokens_generated = 0
         tool_calls = 0
+        processed_tool_ends: set[int] = set()
         full = current_inputs["input_ids"]
         generation_started = time.time()
         
@@ -600,6 +699,7 @@ def generate_agentic_text(
                 remaining_time = max_time - (time.time() - generation_started)
                 if remaining_time <= 0:
                     break
+            chunk_tokens = min(max_new_tokens - tokens_generated, 24)
             start_length = current_inputs["input_ids"].shape[1]
             stopping_criteria = [ToolStoppingCriteria(M.tok, start_length=start_length)]
             if stop_after_final_answer:
@@ -614,7 +714,7 @@ def generate_agentic_text(
             try:
                 generate_kwargs = {
                     **current_inputs,
-                    "max_new_tokens": max_new_tokens - tokens_generated,
+                    "max_new_tokens": chunk_tokens,
                     "do_sample": False,
                     "use_cache": True,
                     "pad_token_id": M.tok.eos_token_id,
@@ -625,6 +725,10 @@ def generate_agentic_text(
                 if remaining_time is not None:
                     generate_kwargs["max_time"] = remaining_time
                 out = M.model.generate(**generate_kwargs)
+            except GenerationBudgetExceeded:
+                print("    [Agentic ToT] Generation budget reached; returning partial output.", flush=True)
+                full = current_inputs["input_ids"]
+                break
             except NeedsDisambiguationError as e:
                 err_msg = str(e)
                 print(f"\n    [Interlocutor] Cognitive Probe Matched: {err_msg} Formulating resolving question...")
@@ -689,6 +793,9 @@ def generate_agentic_text(
                 
             plen = current_inputs["input_ids"].shape[1]
             new_tokens = out[0][plen:]
+            if new_tokens.numel() == 0:
+                full = out
+                break
             tokens_generated += len(new_tokens)
             
             if config.chatty_log:
@@ -697,10 +804,19 @@ def generate_agentic_text(
                     print(f"    [Agentic ToT] Token Chunk generated: {repr(chunk)}")
             
             current_inputs = {"input_ids": out, "attention_mask": torch.ones(out.shape, dtype=torch.long, device=out.device)}
-            decoded = M.tok.decode(new_tokens, skip_special_tokens=True)
-            expr = intercept_tool_call(decoded)
+            generated_text = M.tok.decode(out[0, original_plen:], skip_special_tokens=True)
+            tool_call = next(
+                (
+                    (end, expr)
+                    for _, end, expr in iter_tool_calls(generated_text)
+                    if end not in processed_tool_ends
+                ),
+                None,
+            )
+            expr = None if tool_call is None else tool_call[1]
             
             if expr:
+                processed_tool_ends.add(tool_call[0])
                 tool_calls += 1
                 if tool_calls > max_tool_calls:
                     full = out
@@ -714,7 +830,16 @@ def generate_agentic_text(
                 full = new_input_ids
             else:
                 full = out
-                break
+                if (
+                    _ended_with_eos(new_tokens, eos_ids)
+                    or _generated_text_satisfies_stop(
+                        generated_text,
+                        stop_after_final_answer=stop_after_final_answer,
+                        stop_after_verifier_answer=stop_after_verifier_answer,
+                    )
+                    or len(new_tokens) < chunk_tokens
+                ):
+                    break
             
             # Note: We continue the loop and will run M.model.generate again with the new context!
             # The hooks in `handles` are still active and will intercept this new generation pass!

@@ -3,7 +3,12 @@ from pathlib import Path
 import os
 import torch.nn.functional as F
 
-CACHE_FILE = Path(__file__).parent / "data" / "cognitive_cache.pt"
+CACHE_FILE = Path(
+    os.environ.get(
+        "COGNITIVE_CACHE_FILE",
+        str(Path(__file__).parent / "data" / "cognitive_cache.pt"),
+    )
+)
 
 class CognitiveCache:
     def __init__(self, threshold=0.995, max_memories=512):
@@ -85,13 +90,21 @@ class CognitiveCache:
         if len(self.memory) > self.max_memories:
             self.memory = self.memory[-self.max_memories:]
         self.save()
-        print(f"    [Cognitive Cache] Epiphany stored! Total memories: {len(self.memory)}")
+        scope = (metadata or {}).get("cache_write_scope") if isinstance(metadata, dict) else None
+        if scope and scope != "default":
+            label = f"{scope} memory"
+        elif isinstance(metadata, dict) and metadata.get("promoted_by") == "humble_verifier":
+            label = "Verified lesson"
+        else:
+            label = "Epiphany"
+        print(f"    [Cognitive Cache] {label} stored! Total memories: {len(self.memory)}")
         
     def retrieve(
         self,
         current_state,
         verified_only=False,
         ignore_oracle_cache=False,
+        excluded_question_key=None,
         excluded_oracle_question_key=None,
     ):
         """
@@ -118,6 +131,12 @@ class CognitiveCache:
             ):
                 continue
             if ignore_oracle_cache and isinstance(metadata, dict) and metadata.get("tag") == "oracle_repair":
+                continue
+            if (
+                excluded_question_key is not None
+                and isinstance(metadata, dict)
+                and metadata.get("question_key") == excluded_question_key
+            ):
                 continue
             if (
                 excluded_oracle_question_key is not None

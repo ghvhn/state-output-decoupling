@@ -34,6 +34,10 @@ def parse_args():
     p.add_argument("--repair-token-multiplier", default="3")
     p.add_argument("--max-attempt-tokens", default="300")
     p.add_argument("--max-elapsed-sec", default="90")
+    p.add_argument("--max-synthesis-events", default="1")
+    p.add_argument("--max-synthesis-steps", default="24")
+    p.add_argument("--oracle-max-elapsed-sec", default="60")
+    p.add_argument("--oracle-curriculum", default="off", choices=["off", "synthesis"])
     p.add_argument("--load-mode", default="auto")
     return p.parse_args()
 
@@ -115,6 +119,14 @@ def main():
                 args.max_attempt_tokens,
                 "--max-elapsed-sec",
                 args.max_elapsed_sec,
+                "--max-synthesis-events",
+                args.max_synthesis_events,
+                "--max-synthesis-steps",
+                args.max_synthesis_steps,
+                "--oracle-max-elapsed-sec",
+                args.oracle_max_elapsed_sec,
+                "--oracle-curriculum",
+                args.oracle_curriculum,
                 "--load-mode",
                 args.load_mode,
                 "--output",
