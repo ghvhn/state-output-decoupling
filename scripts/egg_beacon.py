@@ -83,9 +83,9 @@ function Open-Shell-And-Close() {
     }
     Write-EggEvent "open_shell"
     if ($launcher -and (Test-Path $launcher)) {
-        Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", "`"$launcher`"") -WorkingDirectory $repo
+        Start-Process -FilePath "cmd.exe" -ArgumentList "/k call `"$launcher`"" -WorkingDirectory $repo
     } else {
-        Start-Process -FilePath "cmd.exe" -ArgumentList @("/k", "`"$python`" `"scripts\interactive_phenomenality.py`"") -WorkingDirectory $repo
+        Start-Process -FilePath "cmd.exe" -ArgumentList "/k call `"$python`" `"scripts\interactive_phenomenality.py`"" -WorkingDirectory $repo
     }
     $form.TopMost = $false
     $form.Close()
@@ -220,10 +220,10 @@ def launch_shell() -> None:
     if os.name == "nt":
         flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
         if os.path.exists(launcher):
-            subprocess.Popen(["cmd.exe", "/k", f'"{launcher}"'], cwd=ROOT, creationflags=flags)
+            subprocess.Popen(["cmd.exe", "/k", "call", launcher], cwd=ROOT, creationflags=flags)
         else:
             subprocess.Popen(
-                ["cmd.exe", "/k", f'"{python_exe}" "{script}"'],
+                ["cmd.exe", "/k", "call", python_exe, script],
                 cwd=ROOT,
                 creationflags=flags,
             )
