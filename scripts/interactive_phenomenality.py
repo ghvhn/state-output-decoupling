@@ -14,6 +14,33 @@ from invariants.config import AgenticConfig
 
 colorama.init()
 
+MAX_HISTORY_TURNS = 8
+MAX_HISTORY_CHARS = 6000
+
+
+def build_prompt(history, user_input):
+    system = (
+        "You are an analytical and self-reflective reasoning engine. "
+        "Use the visible conversation history when the user's message depends on prior context. "
+        "Do not treat cognitive cache as a substitute for textual context; if history is missing, say so."
+    )
+    parts = [f"<|start_header_id|>system<|end_header_id|>\n\n{system}<|eot_id|>"]
+    for role, text in history[-MAX_HISTORY_TURNS * 2:]:
+        header = "user" if role == "user" else "assistant"
+        parts.append(f"<|start_header_id|>{header}<|end_header_id|>\n\n{text}<|eot_id|>")
+    parts.append(f"<|start_header_id|>user<|end_header_id|>\n\n{user_input}<|eot_id|>")
+    parts.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+    prompt = "".join(parts)
+    if len(prompt) > MAX_HISTORY_CHARS:
+        prompt = prompt[-MAX_HISTORY_CHARS:]
+        prompt = (
+            f"<|start_header_id|>system<|end_header_id|>\n\n{system}\n\n"
+            "[Earlier visible history was truncated to fit the local context window.]<|eot_id|>"
+            + prompt
+        )
+    return prompt
+
+
 def main():
     print(Fore.CYAN + Style.BRIGHT + "================================================")
     print("      HUMBLE SYNTHESIS - INTERACTIVE SHELL      ")
@@ -45,7 +72,12 @@ def main():
         
     print(Fore.CYAN + "\nThis terminal uses full Agentic ToT and Test-Time Layer Synthesis.")
     print("Watch the model's internal entropy and phenomenality trace in real time!")
+    print("Visible text history is ON for this shell; cache writes remain flagged as interactive_phenomenality.")
+    print("Commands: :history, :history on, :history off, :history clear")
     print("Type 'exit' or 'quit' to leave.\n" + Style.RESET_ALL)
+
+    history = []
+    history_enabled = True
     
     while True:
         try:
@@ -58,10 +90,28 @@ def main():
                 
             if user_input.lower() in ['exit', 'quit']:
                 break
+            if user_input.startswith(":history"):
+                cmd = user_input.strip().lower()
+                if cmd == ":history off":
+                    history_enabled = False
+                    print(Fore.YELLOW + "[History] Visible text history OFF. Cache remains enabled and flagged." + Style.RESET_ALL)
+                elif cmd == ":history on":
+                    history_enabled = True
+                    print(Fore.GREEN + "[History] Visible text history ON." + Style.RESET_ALL)
+                elif cmd == ":history clear":
+                    history.clear()
+                    print(Fore.YELLOW + "[History] Cleared visible text history. Cache was not changed." + Style.RESET_ALL)
+                else:
+                    print(
+                        Fore.CYAN
+                        + f"[History] enabled={history_enabled}, stored_turns={len(history)}, max_turns={MAX_HISTORY_TURNS}"
+                        + Style.RESET_ALL
+                    )
+                continue
             if not user_input.strip():
                 continue
             
-            prompt = f"<|start_header_id|>system<|end_header_id|>\n\nYou are an analytical and self-reflective reasoning engine.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{user_input}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+            prompt = build_prompt(history if history_enabled else [], user_input)
 
             print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
             
@@ -75,6 +125,11 @@ def main():
             )
             if response:
                 print(response, end="")
+                if history_enabled:
+                    history.append(("user", user_input))
+                    history.append(("assistant", response))
+                    if len(history) > MAX_HISTORY_TURNS * 2:
+                        history = history[-MAX_HISTORY_TURNS * 2:]
             
             # The streaming will print tokens, just need a newline at the end
             print("\n")
