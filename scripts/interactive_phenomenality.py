@@ -15,6 +15,7 @@ from invariants.config import AgenticConfig
 from invariants.cognitive_cache import CACHE_FILE
 from invariants.memory_engine import MemoryEngine
 from invariants.self_concept_controller import SelfConceptController, format_orientation_tool_result
+from invariants.steer_map_store import SteerMapStore
 
 colorama.init()
 
@@ -137,10 +138,17 @@ def parse_count(text, default):
         return default
 
 
-def record_internal_traces(memory, records):
+def record_internal_traces(memory, records, steer_map=None):
     for record in records or []:
         if not isinstance(record, dict):
             continue
+        if steer_map is not None:
+            steer_map.record_synthesis_record(
+                record,
+                source="interactive",
+                method="interactive_phenomenality",
+                final_correct=None,
+            )
         if record.get("type") == "routing_trace":
             entropies = record.get("entropies") or {}
             winner = record.get("winner")
@@ -217,6 +225,7 @@ def main():
 
     memory = MemoryEngine(scope="interactive_phenomenality")
     self_concept = SelfConceptController()
+    steer_map = SteerMapStore()
     imported_methodologies = memory.import_methodologies(
         _global_cache.memory,
         source="cognitive_cache",
@@ -231,6 +240,7 @@ def main():
             "memory_policy": "tool_not_prompt",
             "methodologies_imported": imported_methodologies,
             "self_concept_controller": "vector_map_based",
+            "steer_map_store": str(steer_map.events_path),
         },
     )
         
@@ -238,9 +248,11 @@ def main():
     print("Watch the model's internal entropy and phenomenality trace in real time!")
     print("Current session context is ON. Long-term memory is a tool, not hidden prompt context.")
     print("Self-concept orientation is vector-map based and logged as a tool/controller trace.")
+    print(f"Steer-map traces are stored at {steer_map.events_path}.")
     print(f"Imported {imported_methodologies} sanitized methodology memories from cognitive cache.")
     print("Commands: :context, :context on, :context off, :context clear")
     print("          :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory boundary")
+    print("          :steermap")
     print("Type 'exit' or 'quit' to leave.\n" + Style.RESET_ALL)
 
     pending_memory_tool_result = None
@@ -316,6 +328,24 @@ def main():
                     print(
                         Fore.YELLOW
                         + "[Memory] Commands: :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory boundary"
+                        + Style.RESET_ALL
+                    )
+                continue
+            if user_input.startswith(":steermap"):
+                summary = steer_map.write_summary()
+                groups = summary.get("groups", [])
+                print(
+                    Fore.CYAN
+                    + f"[SteerMap] events={summary.get('event_count')} summary={steer_map.summary_path}"
+                    + Style.RESET_ALL
+                )
+                for group in groups[:5]:
+                    print(
+                        Fore.CYAN
+                        + (
+                            f"  {group['action']} layer={group['layer_key']} step={group['step_bucket']} "
+                            f"n={group['n']} labeled={group['labeled_n']} success_rate={group['success_rate']}"
+                        )
                         + Style.RESET_ALL
                     )
                 continue
@@ -424,11 +454,16 @@ def main():
                         "orientation_tool_result_provided": bool(active_orientation_tool_result),
                     },
                 )
-            record_internal_traces(memory, synthesis_records)
+            record_internal_traces(memory, synthesis_records, steer_map=steer_map)
             sensor_scores = latest_phenomenality_scores(synthesis_records)
             if sensor_scores:
                 decision = self_concept.decide(sensor_scores, context={"task_grounding_low": True})
                 memory.append_self_concept_trace(decision.to_dict())
+                steer_map.record_self_concept_decision(
+                    decision.to_dict(),
+                    source="interactive",
+                    final_correct=None,
+                )
                 if decision.allowed and decision.intervention_type in {"tool_result", "context_tool_result"}:
                     pending_orientation_tool_result = format_orientation_tool_result(decision)
                     print(

@@ -326,3 +326,45 @@ Next architecture experiment should compare:
 
 Measure whether correct intermediate states are lost at the communication layer,
 not just whether final answers are right.
+
+## 2026-06-30 Steer-Map Store: Success by Step/Layer
+
+New files:
+
+- `invariants/steer_map_store.py`
+- `scripts/import_steer_maps.py`
+- `scripts/steer_map_store_test.py`
+
+Interactive shell integration:
+
+- `scripts/interactive_phenomenality.py` now creates a `SteerMapStore`.
+- Internal routing/synthesis traces are written as unlabeled interactive events.
+- Benchmark JSON traces can be imported afterward and labeled by outcome.
+- `:steermap` prints the current aggregate summary.
+
+Important distinction:
+
+- `success_rate` is acceptance-aware: a step counts as a clean success only when
+  the final answer is correct and the attempt was not rejected.
+- `final_correct` is still tracked separately, because a rejected step can be
+  part of an eventual recovery.
+- Do not flatten `final_correct_attempt_unaccepted` into a win. Gavin wanted us
+  to reward proper math while still teaching against rejected/bad steps.
+
+Current local backfill wrote:
+
+- `invariants/out/steer_map_events.jsonl`
+- `invariants/out/steer_map_summary.json`
+
+These are runtime artifacts, not commit payload. Regenerate or import new runs
+with:
+
+```text
+.venv\Scripts\python.exe scripts\import_steer_maps.py --json-glob "invariants\out\humble_full_suite*.json" --json-glob "invariants\out\quantity_micro*.json" --json-glob "invariants\out\remainder_transfer*.json"
+```
+
+Early readout after acceptance-aware normalization: `22->27` helped eventual
+answers, but several of those attempts were rejected, so the system should treat
+that window as "potentially useful, not blindly trusted." This is the point of
+the map: movement in latent space earns trust by observed step/layer outcome,
+not by vibes.
