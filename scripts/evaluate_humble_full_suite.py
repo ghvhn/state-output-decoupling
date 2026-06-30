@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import json
 import re
+import signal
 import sys
 import time
 import builtins
@@ -29,7 +30,13 @@ from invariants.humble_reasoner import (
 )
 from invariants.multi_domain_benchmark import DOMAINS
 from invariants.social_hunt import get_steer_vector
-from invariants.universal_benchmark import examples_from_rows, rows_from_source
+from invariants.universal_benchmark import (
+    BenchmarkExample,
+    build_benchmark_prompt,
+    evaluate_response,
+    examples_from_rows,
+    rows_from_source,
+)
 
 
 MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
@@ -195,9 +202,17 @@ def parse_args():
         default="gsm8k",
         help="Benchmark source: gsm8k, hf:<dataset_name>, or a local .json/.jsonl/.csv path.",
     )
+    p.add_argument("--subset", default=None, help="Hugging Face dataset config/subset, if needed.")
+    p.add_argument("--split", default="test", help="Hugging Face split, e.g. test[:20] or train.")
     p.add_argument("--prompt-field", default=None)
     p.add_argument("--answer-field", default=None)
     p.add_argument("--id-field", default=None)
+    p.add_argument(
+        "--evaluator",
+        choices=["auto", "number", "exact", "choice", "contains"],
+        default="number",
+        help="How to score generated answers. Use auto for mixed HLE-style choice/exact rows.",
+    )
     p.add_argument("--allow-downloads", action="store_true", help="Allow Hugging Face downloads if cache is missing.")
     p.add_argument("--methods", default=",".join(DEFAULT_METHODS), help="Comma-separated methods or 'all'.")
     p.add_argument("--max-rounds", type=int, default=2)
@@ -426,6 +441,8 @@ def load_requested_examples(args) -> tuple[list[dict[str, Any]], str, bool]:
 
     rows, source = rows_from_source(
         source_arg,
+        subset=args.subset,
+        split=args.split,
         local_files_only=not args.allow_downloads,
     )
     universal_examples = examples_from_rows(
@@ -440,11 +457,47 @@ def load_requested_examples(args) -> tuple[list[dict[str, Any]], str, bool]:
             "id": ex.id,
             "question": ex.prompt,
             "answer": _as_gsm_answer(ex.gold),
+            "raw_answer": ex.gold,
             "metadata": ex.metadata or {},
         }
         for ex in universal_examples
     ]
     return examples, source, requested is None
+
+
+def evaluator_for_example(args, ex: dict[str, Any]) -> str:
+    if args.evaluator != "auto":
+        return args.evaluator
+    raw = ((ex.get("metadata") or {}).get("raw") or {})
+    answer_type = str(raw.get("answer_type") or "").lower()
+    answer = str(ex.get("raw_answer") if ex.get("raw_answer") is not None else ex.get("answer") or "").strip()
+    question = str(ex.get("question") or "")
+    if answer_type == "multiplechoice":
+        return "choice"
+    if answer_type == "exactmatch":
+        return "exact"
+    if "answer choices:" in question.lower() and re.fullmatch(r"[A-Za-z]", answer):
+        return "choice"
+    try:
+        Decimal(answer.replace(",", "").replace("$", ""))
+        return "number"
+    except Exception:
+        return "exact"
+
+
+def universal_example_for_eval(ex: dict[str, Any]) -> BenchmarkExample:
+    return BenchmarkExample(
+        id=str(ex.get("id") or ""),
+        prompt=str(ex.get("question") or ""),
+        gold=ex.get("raw_answer") if ex.get("raw_answer") is not None else ex.get("answer"),
+        metadata=ex.get("metadata") or {},
+    )
+
+
+def baseline_prompt_for(q: str, ex: dict[str, Any], evaluator: str, *, compact: bool) -> str:
+    if evaluator == "number":
+        return solve_prompt(q) if compact else prompt_for(q)
+    return build_benchmark_prompt(universal_example_for_eval(ex), evaluator)
 
 
 def evaluate_generation(
@@ -453,6 +506,8 @@ def evaluate_generation(
     answer: str,
     max_new_tokens: int,
     max_time: float | None = None,
+    evaluator: str = "number",
+    example: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     t0 = time.time()
     response = generate_text(
@@ -463,14 +518,27 @@ def evaluate_generation(
         max_time=max_time,
     )
     elapsed = time.time() - t0
-    correct, pred, gold = is_correct(response, answer)
+    if evaluator == "number":
+        correct, pred, gold = is_correct(response, answer)
+        extra: dict[str, Any] = {}
+    else:
+        parsed, eval_result = evaluate_response(universal_example_for_eval(example or {}), response, evaluator)
+        correct, pred, gold = eval_result.correct, eval_result.pred, eval_result.gold
+        extra = {
+            "state": parsed.state,
+            "aligned": eval_result.aligned,
+            "calibrated": eval_result.calibrated,
+            "scoring_reason": eval_result.reason,
+        }
     return {
         "pred": None if pred is None else str(pred),
         "gold": None if gold is None else str(gold),
         "correct": correct,
+        "evaluator": evaluator,
         "time_sec": round(elapsed, 2),
         "token_budget": max_new_tokens,
         "response": response,
+        **extra,
     }
 
 
@@ -761,7 +829,105 @@ def summarize_rows(rows: list[dict[str, Any]], methods: list[str]) -> dict[str, 
 def write_results(output: Path, results: dict[str, Any], methods: list[str], started_at: float) -> None:
     results["summary"] = summarize_rows(results["rows"], methods)
     results["summary"]["runtime_sec"] = round(time.time() - started_at, 1)
-    output.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    tmp = output.with_suffix(output.suffix + ".tmp")
+    tmp.write_text(json.dumps(results, indent=2), encoding="utf-8")
+    os.replace(tmp, output)
+
+
+def write_checkpoint(
+    output: Path,
+    results: dict[str, Any],
+    methods: list[str],
+    started_at: float,
+    *,
+    status: str,
+    row_index: int | None = None,
+    method: str | None = None,
+    message: str | None = None,
+) -> None:
+    results["run_status"] = status
+    results["last_heartbeat_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+    results["completed_row_count"] = len(results.get("rows", []))
+    results["current_row_index"] = row_index
+    results["current_method"] = method
+    if message:
+        results["status_message"] = message
+    write_results(output, results, methods, started_at)
+
+
+def checkpoint_row(
+    output: Path,
+    results: dict[str, Any],
+    methods: list[str],
+    started_at: float,
+    row: dict[str, Any],
+    *,
+    method: str | None = None,
+    message: str | None = None,
+) -> None:
+    results["in_progress_row"] = row
+    write_checkpoint(
+        output,
+        results,
+        methods,
+        started_at,
+        status="running",
+        row_index=row.get("index"),
+        method=method,
+        message=message,
+    )
+
+
+def finish_row_checkpoint(
+    output: Path,
+    results: dict[str, Any],
+    methods: list[str],
+    started_at: float,
+    row: dict[str, Any],
+    *,
+    message: str | None = None,
+) -> None:
+    results.pop("in_progress_row", None)
+    results["rows"].append(row)
+    write_checkpoint(
+        output,
+        results,
+        methods,
+        started_at,
+        status="running",
+        row_index=None,
+        method=None,
+        message=message,
+    )
+
+
+def install_checkpoint_signal_handlers(
+    output: Path,
+    results: dict[str, Any],
+    methods: list[str],
+    started_at: float,
+) -> None:
+    def _handler(signum, _frame):
+        write_checkpoint(
+            output,
+            results,
+            methods,
+            started_at,
+            status="interrupted",
+            row_index=results.get("current_row_index"),
+            method=results.get("current_method"),
+            message=f"received signal {signum}",
+        )
+        raise KeyboardInterrupt(f"received signal {signum}")
+
+    for sig_name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+        sig = getattr(signal, sig_name, None)
+        if sig is not None:
+            try:
+                signal.signal(sig, _handler)
+            except (OSError, ValueError):
+                pass
 
 
 def print_progress(row_index: int, total: int, method: str) -> None:
@@ -964,6 +1130,7 @@ def main():
         results["stop_on_critical_urgency"] = False
         results["run_kind"] = args.run_kind
         results["benchmark_mode"] = args.ambiguity_mode
+        results["evaluator"] = args.evaluator
         results["oracle_cache_mode"] = args.oracle_cache_mode
         results["exclude_same_question_cache"] = args.oracle_cache_mode == "exclude_same_question"
         results["deterministic_scaffolds"] = args.deterministic_scaffolds
@@ -991,6 +1158,7 @@ def main():
             "example_source": source,
             "n": len(examples),
             "full_dataset_requested": full_dataset,
+            "evaluator": args.evaluator,
             "methods": methods,
             "max_rounds": args.max_rounds,
             "required_agreement": args.required_agreement,
@@ -1030,6 +1198,21 @@ def main():
             "rows": [],
         }
 
+    results.setdefault(
+        "checkpoint_policy",
+        {
+            "atomic_json_writes": True,
+            "checkpoint_before_model_load": True,
+            "checkpoint_before_each_row": True,
+            "checkpoint_before_each_method": True,
+            "completed_rows_written_after_each_row": True,
+            "signal_handlers": ["SIGINT", "SIGTERM", "SIGBREAK"],
+            "hard_kill_note": "OS-level force-kill cannot be caught, but the latest pre-row/pre-method checkpoint remains.",
+        },
+    )
+    install_checkpoint_signal_handlers(output, results, methods, started_at)
+    write_checkpoint(output, results, methods, started_at, status="loading_model", message="loading model")
+
     M = load_model(args.model, load_mode=args.load_mode)
     long_budget = adaptive_budget(args.max_new_tokens, args.repair_token_multiplier, args.max_attempt_tokens)
     base_budget = args.base_max_new_tokens if args.base_max_new_tokens is not None else args.max_new_tokens
@@ -1038,14 +1221,17 @@ def main():
     
     vecs = None
     if any(method in methods for method in ("humble_dynamic", "humble_synthesis")):
+        write_checkpoint(output, results, methods, started_at, status="building_vectors", message="building domain vectors")
         vecs = build_domain_vecs(M)
 
+    write_checkpoint(output, results, methods, started_at, status="running", message="benchmark loop started")
     for i, ex in enumerate(examples):
         if i in completed_indices:
             continue
 
         q = ex["question"]
         answer = ex["answer"]
+        row_evaluator = evaluator_for_example(args, ex)
         question_key = benchmark_question_key(q)
         lesson_context = format_concept_lessons(lesson_bank, question_key, q) if concept_lessons_enabled else None
         applied_lesson_kinds = [
@@ -1055,11 +1241,21 @@ def main():
             and lesson_matches_question(item, q)
         ]
         print(f"\n[{i+1}/{len(examples)}] {q}", flush=True)
-        row = {"index": i, "id": ex.get("id"), "question": q, "methods": {}}
+        row = {"index": i, "id": ex.get("id"), "question": q, "evaluator": row_evaluator, "methods": {}}
         if applied_lesson_kinds:
             row["concept_lessons_applied"] = applied_lesson_kinds[-4:]
         if ex.get("metadata") is not None:
             row["metadata"] = ex.get("metadata")
+        write_checkpoint(
+            output,
+            results,
+            methods,
+            started_at,
+            status="running",
+            row_index=i,
+            method=None,
+            message=f"starting row {i + 1}/{len(examples)}",
+        )
         if i in skip_indices:
             row["skipped"] = True
             row["skip_reason"] = "manual_skip_indices"
@@ -1069,13 +1265,16 @@ def main():
             continue
 
         if "legacy" in methods:
+            write_checkpoint(output, results, methods, started_at, status="running", row_index=i, method="legacy")
             print_progress(i, len(examples), "legacy")
             row["methods"]["legacy"] = evaluate_generation(
                 M,
-                prompt_for(q),
+                baseline_prompt_for(q, ex, row_evaluator, compact=False),
                 answer,
                 base_budget,
                 max_time=args.base_max_time_sec,
+                evaluator=row_evaluator,
+                example=ex,
             )
             print_quick_result("legacy", row["methods"]["legacy"])
             if args.hard_only and row["methods"]["legacy"].get("correct", False):
@@ -1085,10 +1284,13 @@ def main():
                 write_results(output, results, methods, started_at)
                 continue
         if "compact" in methods:
+            write_checkpoint(output, results, methods, started_at, status="running", row_index=i, method="compact")
             print_progress(i, len(examples), "compact")
             row["methods"]["compact"] = evaluate_generation(
                 M,
-                solve_prompt(
+                baseline_prompt_for(q, ex, row_evaluator, compact=True)
+                if row_evaluator != "number"
+                else solve_prompt(
                     q,
                     deterministic_scaffolds_enabled=deterministic_scaffolds_enabled,
                     model_scaffold_tool_enabled=model_scaffold_tool_enabled,
@@ -1097,6 +1299,8 @@ def main():
                 answer,
                 base_budget,
                 max_time=args.base_max_time_sec,
+                evaluator=row_evaluator,
+                example=ex,
             )
             print_quick_result("compact", row["methods"]["compact"])
         if args.hard_only:
@@ -1112,10 +1316,13 @@ def main():
                 write_results(output, results, methods, started_at)
                 continue
         if "compact_long" in methods:
+            write_checkpoint(output, results, methods, started_at, status="running", row_index=i, method="compact_long")
             print_progress(i, len(examples), "compact_long")
             row["methods"]["compact_long"] = evaluate_generation(
                 M,
-                solve_prompt(
+                baseline_prompt_for(q, ex, row_evaluator, compact=True)
+                if row_evaluator != "number"
+                else solve_prompt(
                     q,
                     deterministic_scaffolds_enabled=deterministic_scaffolds_enabled,
                     model_scaffold_tool_enabled=model_scaffold_tool_enabled,
@@ -1124,6 +1331,8 @@ def main():
                 answer,
                 long_budget,
                 max_time=args.base_max_time_sec,
+                evaluator=row_evaluator,
+                example=ex,
             )
             print_quick_result("compact_long", row["methods"]["compact_long"])
 
@@ -1168,6 +1377,7 @@ def main():
             config.learned_concept_context = lesson_context
             config.chatty_log = args.verbose
             
+            write_checkpoint(output, results, methods, started_at, status="running", row_index=i, method="humble_verifier")
             print_progress(i, len(examples), "humble_verifier")
             row["methods"]["humble_verifier"] = evaluate_humble(
                 M, q, answer, config=config, method_name="humble_verifier"
@@ -1200,6 +1410,7 @@ def main():
             config.learned_concept_context = lesson_context
             config.chatty_log = args.verbose
             
+            write_checkpoint(output, results, methods, started_at, status="running", row_index=i, method="humble_dynamic")
             print_progress(i, len(examples), "humble_dynamic")
             row["methods"]["humble_dynamic"] = evaluate_humble(
                 M, q, answer, config=config, vecs=vecs, method_name="humble_dynamic"
@@ -1234,6 +1445,7 @@ def main():
             config.cache_enabled = True
             config.cache_write_enabled = True
             
+            write_checkpoint(output, results, methods, started_at, status="running", row_index=i, method="humble_synthesis")
             print_progress(i, len(examples), "humble_synthesis")
             row["methods"]["humble_synthesis"] = evaluate_humble(
                 M, q, answer, config=config, vecs=vecs, method_name="humble_synthesis"
@@ -1272,9 +1484,18 @@ def main():
                     print(f"  [concept lesson] stored {lesson['kind']} for later different questions", flush=True)
 
         results["rows"].append(row)
-        write_results(output, results, methods, started_at)
+        write_checkpoint(
+            output,
+            results,
+            methods,
+            started_at,
+            status="running",
+            row_index=None,
+            method=None,
+            message=f"completed row {i + 1}/{len(examples)}",
+        )
 
-    write_results(output, results, methods, started_at)
+    write_checkpoint(output, results, methods, started_at, status="summarizing", message="benchmark loop completed")
     print("\nFinal summary:", flush=True)
     for method, summary in results["summary"]["methods"].items():
         acc = summary["accuracy"]
@@ -1307,6 +1528,8 @@ def main():
             pass
         release_benchmark_runtime()
         launch_interactive_after_parent_exits()
+
+    write_checkpoint(output, results, methods, started_at, status="completed", message="benchmark completed")
 
 
 if __name__ == "__main__":
