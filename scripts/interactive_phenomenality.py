@@ -239,6 +239,34 @@ def latest_phenomenality_scores(records):
     return {}
 
 
+def sense_score(records):
+    """The 'sense' half of the productivity signal: did the deliberation cohere?
+
+    Read from the latest synthesis trace as settled forward motion minus
+    self-interruption and internal disagreement (validated_flow - needless_interrupt
+    - disagreement), bumped when synthesis genuinely CONVERGED (reason
+    'loss_threshold') rather than fell back to cache/organic. Higher = more
+    coherent resolution. Deliberately NOT bare entropy, which rewards confident
+    nonsense. Returns None when there is no deliberation trace to read.
+
+    Returns a raw scalar (higher is better); the tuner's lift is a difference of
+    means, so no arbitrary [0,1] squashing is needed or wanted here.
+    """
+    phen = latest_phenomenality_scores(records)
+    if not phen:
+        return None
+    flow = float(phen.get("validated_flow", 0.0))
+    interrupt = float(phen.get("needless_interrupt", 0.0))
+    disagreement = float(phen.get("disagreement", 0.0))
+    score = flow - interrupt - disagreement
+    for record in reversed(records or []):
+        if isinstance(record, dict) and isinstance(record.get("metadata"), dict):
+            if record["metadata"].get("reason") == "loss_threshold":
+                score += 0.05  # genuine convergence, not a fallback resolution
+            break
+    return score
+
+
 def format_status(status):
     return (
         f"[Memory] path={status['path']}\n"
@@ -425,6 +453,7 @@ def main():
     pending_orientation_tool_result = None
     pending_claimmap_tool_result = None
     pending_claimmap_steer_delta = None
+    pending_claimmap_credit = None  # last turn's tension, credited by this turn's sense
     pending_methodmap_tool_result = None
     session_context = []
     session_context_enabled = True
@@ -928,6 +957,16 @@ def main():
             # the model's own surfaced state. If the answer holds two opposed
             # framings, sense the comparison (felt) and stage it -- with steering --
             # for the next turn. Disable with CLAIMMAP_AUTO_TRIGGER=0.
+            # Deferred credit: attribute THIS turn's sense (did the deliberation
+            # cohere) to LAST turn's trigger decision -- last turn's fire staged the
+            # felt+steer that shaped this turn. The tuner buckets by whether that
+            # tension cleared the threshold, so :tune lift = did firing the ClaimMap
+            # actually lead to more coherent deliberation. Real outcome, not synthetic.
+            turn_sense = sense_score(synthesis_records)
+            if pending_claimmap_credit is not None and turn_sense is not None:
+                tuner.credit("claimmap_tension", pending_claimmap_credit, turn_sense)
+                pending_claimmap_credit = None
+
             if (
                 os.environ.get("CLAIMMAP_AUTO_TRIGGER", "1").strip() not in {"0", "false", "no"}
                 and pending_claimmap_tool_result is None
@@ -936,6 +975,7 @@ def main():
                 # Log the tension signal EVERY turn (even 0) so :tune can read the
                 # distribution; fire on the live-tuned threshold, not a fixed cutoff.
                 fired = tuner.observe("claimmap_tension", tension_score)
+                pending_claimmap_credit = tension_score  # credited by next turn's sense
                 if fired and a is not None:
                     try:
                         cm = analyze_claim_pair(f"{a} || {b}", model=model)
