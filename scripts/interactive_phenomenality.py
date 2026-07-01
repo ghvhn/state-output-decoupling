@@ -21,7 +21,9 @@ from invariants.claimmap import (
     analyze_claim_pair,
     claimmap_steer_handles,
     detect_framing_tension,
+    framing_tension_score,
 )
+from invariants.trigger_tuner import TriggerTuner
 from invariants.memory_engine import MemoryEngine
 from invariants.self_concept_controller import SelfConceptController, format_orientation_tool_result
 from invariants.steer_map_store import SteerMapStore
@@ -383,6 +385,10 @@ def main():
     memory = MemoryEngine(scope="interactive_phenomenality")
     self_concept = SelfConceptController()
     steer_map = SteerMapStore()
+    tuner = TriggerTuner()
+    # Every trigger is born tunable. Persisted values win over these defaults.
+    tuner.register("claimmap_tension", 0.18, kind="threshold", comparator=">=")
+    tuner.register("claimmap_alpha", 0.5, kind="coefficient")
     imported_methodologies = memory.import_methodologies(
         _global_cache.memory,
         source="cognitive_cache",
@@ -412,6 +418,7 @@ def main():
     print("          :methodmap <query>")
     print("          :claimmap <first text> || <second text>")
     print("          :steermap")
+    print("          :tune, :tune <name> <value>, :tune <name> auto [percentile]")
     print("Type 'exit' or 'quit' to leave.\n" + Style.RESET_ALL)
 
     pending_memory_tool_result = None
@@ -606,6 +613,39 @@ def main():
                         + Style.RESET_ALL
                     )
                 continue
+            if user_input.startswith(":tune"):
+                targs = user_input[len(":tune"):].split()
+                if not targs:
+                    rows = tuner.summary()
+                    if not rows:
+                        print(Fore.YELLOW + "[Tune] No triggers registered yet." + Style.RESET_ALL)
+                    for s in rows:
+                        print(
+                            Fore.CYAN
+                            + (
+                                f"  {s['name']}: {s['kind']} value={s['value']} [{s['comparator']}] "
+                                f"fire_rate={s['fire_rate']} "
+                                f"signal(min/med/max)={s['signal_min']}/{s['signal_med']}/{s['signal_max']} "
+                                f"n={s['n_signals']}"
+                            )
+                            + Style.RESET_ALL
+                        )
+                elif len(targs) >= 2 and targs[1].lower() == "auto":
+                    pct = float(targs[2]) if len(targs) >= 3 else 80.0
+                    v = tuner.calibrate(targs[0], pct)
+                    if v is None:
+                        print(Fore.RED + f"[Tune] Unknown trigger '{targs[0]}'." + Style.RESET_ALL)
+                    else:
+                        print(Fore.GREEN + f"[Tune] {targs[0]} calibrated to p{pct:g} = {round(v, 4)}" + Style.RESET_ALL)
+                elif len(targs) >= 2:
+                    try:
+                        v = tuner.set(targs[0], float(targs[1]))
+                        print(Fore.GREEN + f"[Tune] {targs[0]} = {round(v, 4)}" + Style.RESET_ALL)
+                    except ValueError:
+                        print(Fore.RED + "[Tune] Value must be a number." + Style.RESET_ALL)
+                else:
+                    print(Fore.YELLOW + "[Tune] Usage: :tune | :tune <name> <value> | :tune <name> auto [percentile]" + Style.RESET_ALL)
+                continue
             if not user_input.strip():
                 continue
             
@@ -670,7 +710,10 @@ def main():
             print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
             synthesis_records = []
 
-            steer_handles = claimmap_steer_handles(model, claimmap_steer_delta) if claimmap_steer_delta else []
+            steer_handles = (
+                claimmap_steer_handles(model, claimmap_steer_delta, alpha=tuner.get("claimmap_alpha", 0.5))
+                if claimmap_steer_delta else []
+            )
             try:
                 response = generate_agentic_text(
                     model,
@@ -758,7 +801,10 @@ def main():
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
-                steer_handles = claimmap_steer_handles(model, model_claimmap_steer) if model_claimmap_steer else []
+                steer_handles = (
+                    claimmap_steer_handles(model, model_claimmap_steer, alpha=tuner.get("claimmap_alpha", 0.5))
+                    if model_claimmap_steer else []
+                )
                 try:
                     response = generate_agentic_text(
                         model,
@@ -882,21 +928,24 @@ def main():
                 os.environ.get("CLAIMMAP_AUTO_TRIGGER", "1").strip() not in {"0", "false", "no"}
                 and pending_claimmap_tool_result is None
             ):
-                tension = detect_framing_tension(response or "")
-                if tension:
+                a, b, tension_score = framing_tension_score(response or "")
+                # Log the tension signal EVERY turn (even 0) so :tune can read the
+                # distribution; fire on the live-tuned threshold, not a fixed cutoff.
+                fired = tuner.observe("claimmap_tension", tension_score)
+                if fired and a is not None:
                     try:
-                        cm = analyze_claim_pair(f"{tension[0]} || {tension[1]}", model=model)
+                        cm = analyze_claim_pair(f"{a} || {b}", model=model)
                         pending_claimmap_tool_result = cm.felt
                         pending_claimmap_steer_delta = cm.steer_delta
                         memory.append_event(
                             "claimmap_auto_triggered",
                             text=cm.telemetry,
                             tags=["claimmap_tool", "activation_trigger"],
-                            provenance={"trigger": "framing_tension", "mean_sim": cm.mean_sim},
+                            provenance={"trigger": "framing_tension", "tension_score": tension_score, "mean_sim": cm.mean_sim},
                         )
                         print(
                             Fore.MAGENTA
-                            + "\n[ClaimMap] Sensed a tension in that answer -- it will shape the next turn."
+                            + f"\n[ClaimMap] Sensed a tension (score {tension_score:.2f}) in that answer -- it will shape the next turn."
                             + Style.RESET_ALL
                         )
                     except Exception as exc:

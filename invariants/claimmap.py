@@ -556,31 +556,42 @@ def _format_lexical_fallback(left: str, right: str) -> str:
     return _truncate("\n".join(lines))
 
 
-def detect_framing_tension(text: str, min_overlap: float = 0.18) -> tuple[str, str] | None:
-    """Detect whether the model's own output holds two opposed framings.
+def framing_tension_score(text: str) -> tuple[str | None, str | None, float]:
+    """Return (a, b, score) for the model's most-opposed self-claim pair.
 
-    Returns the (a, b) pair with the most overlapping wording but OPPOSITE
-    negation polarity -- a self-contradiction surfacing in the text -- or None.
-
-    This is a lightweight, activation-adjacent trigger: when the layers are torn
-    between two framings, the tear tends to surface as opposed self-claims. It
-    lets the model "reach for" ClaimMap from its own tension, with no prompt
-    telling it the tag syntax. (A future version can trigger on the residual
-    disagreement axis directly rather than on the surfaced text.)
+    score is the lexical overlap of the two claims that share wording but carry
+    OPPOSITE negation polarity -- a self-contradiction surfacing in the text.
+    Returns (None, None, 0.0) when no opposed pair exists. Always cheap; call it
+    every turn so the tension signal is visible to the tuner even when low.
     """
     claims = split_claims(text)
-    best: tuple[str, str] | None = None
-    best_score = min_overlap
+    best_a: str | None = None
+    best_b: str | None = None
+    best_score = 0.0
     for i in range(len(claims)):
         for j in range(i + 1, len(claims)):
             a, b = claims[i], claims[j]
             if has_negation(a) == has_negation(b):
                 continue
             score = similarity(a, b)
-            if score >= best_score:
-                best = (a, b)
-                best_score = score
-    return best
+            if score > best_score:
+                best_a, best_b, best_score = a, b, score
+    return best_a, best_b, best_score
+
+
+def detect_framing_tension(text: str, min_overlap: float = 0.18) -> tuple[str, str] | None:
+    """Boolean-style wrapper: the opposed pair if it clears min_overlap, else None.
+
+    A lightweight, activation-adjacent trigger -- when the layers are torn between
+    two framings, the tear tends to surface as opposed self-claims, letting the
+    model "reach for" ClaimMap from its own tension with no taught tag syntax.
+    Prefer framing_tension_score + a live-tuned threshold over this fixed cutoff.
+    (A future version can trigger on the residual disagreement axis directly.)
+    """
+    a, b, score = framing_tension_score(text)
+    if a is not None and score >= min_overlap:
+        return (a, b)
+    return None
 
 
 def _truncate(text: str, max_chars: int = MAX_OUTPUT_CHARS) -> str:
