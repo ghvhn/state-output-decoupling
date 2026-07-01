@@ -15,7 +15,13 @@ from invariants.engine import load_model
 from invariants.agentic_engine import generate_agentic_text, _global_cache
 from invariants.config import AgenticConfig
 from invariants.cognitive_cache import CACHE_FILE, model_cache_file, DEFAULT_MODEL
-from invariants.claimmap import CLAIMMAP_HEADER, run_claimmap, analyze_claim_pair, claimmap_steer_handles
+from invariants.claimmap import (
+    CLAIMMAP_HEADER,
+    run_claimmap,
+    analyze_claim_pair,
+    claimmap_steer_handles,
+    detect_framing_tension,
+)
 from invariants.memory_engine import MemoryEngine
 from invariants.self_concept_controller import SelfConceptController, format_orientation_tool_result
 from invariants.steer_map_store import SteerMapStore
@@ -81,61 +87,41 @@ def build_prompt(
     methodmap_tool_result=None,
     session_context=None,
 ):
-    system = (
-        "You are an analytical and self-reflective reasoning engine. "
-        "Use the current session transcript for immediate conversational context. "
-        "Long-term memory is an explicit local-record retrieval tool, not hidden context. "
-        "Self-concept orientation is an explicit controller tool based on vector-map telemetry. "
-        "ClaimMap is a way of SENSING two framings against each other in your own activation space -- a reasoning step, not a readout to quote. "
-        "To sense two framings, claims, or assumptions against each other, write exactly <<CLAIMMAP: first text || second text>> and no final answer. "
-        "When a ClaimMap result is present, do not restate or report it; let the felt difference move how you answer. "
-        "MethodMap is an explicit retrieval tool for sanitized reusable methodology maps learned from prior problem-solving. "
-        "To retrieve reusable methods, write exactly <<METHODMAP: short method query>> and no final answer. "
-        "If prior durable memory seems necessary and no retrieved memory excerpt is present, "
-        "write exactly <<MEMORY: short search query>> and no final answer. "
-        "After any tool result is provided, do not emit another tool-call tag for the same need; answer using the provided result. "
-        "If an orientation tool result is present, use it as an audited reasoning posture, not as evidence about facts. "
-        "Do not invent memory/orientation/claimmap/methodmap/tool status."
-    )
-    prefix_blocks = []
+    # Bare mode (default): the model sees NO system message, no persona, no tool
+    # instructions, not even Llama's "Cutting Knowledge Date" preamble -- only
+    # prior turns and the current message, in the native chat format. Everything
+    # that makes this more than stock Llama lives in the activations (ToT,
+    # synthesis, cache, organic correction, ClaimMap steering), not in text.
+    #
+    # Tool RESULTS are still folded in when the activations reach for a tool, but
+    # as plain context, never as tool syntax the model was taught. The returned
+    # string is fully formatted -- generate with pre_formatted=True so it is
+    # tokenized raw (no second chat-template wrap).
     if memory_tool_result:
-        tool_budget = max(0, MAX_PROMPT_CHARS - len(system) - len(user_input) - 512)
-        if len(memory_tool_result) > tool_budget:
-            memory_tool_result = memory_tool_result[:tool_budget] + "\n[Memory Tool Result truncated]"
-        if not memory_tool_result.lstrip().startswith(MEMORY_TOOL_HEADER):
-            memory_tool_result = f"{MEMORY_TOOL_HEADER}\n{memory_tool_result}"
-        prefix_blocks.append(memory_tool_result)
-    if orientation_tool_result:
-        if not orientation_tool_result.lstrip().startswith(ORIENTATION_TOOL_HEADER):
-            orientation_tool_result = f"{ORIENTATION_TOOL_HEADER}\n{orientation_tool_result}"
-        prefix_blocks.append(orientation_tool_result)
-    if claimmap_tool_result:
-        if not claimmap_tool_result.lstrip().startswith(CLAIMMAP_HEADER):
-            claimmap_tool_result = f"{CLAIMMAP_HEADER}\n{claimmap_tool_result}"
-        prefix_blocks.append(claimmap_tool_result)
-    if methodmap_tool_result:
-        if not methodmap_tool_result.lstrip().startswith(METHODMAP_TOOL_HEADER):
-            methodmap_tool_result = f"{METHODMAP_TOOL_HEADER}\n{methodmap_tool_result}"
-        prefix_blocks.append(methodmap_tool_result)
-    current_message = user_input
-    if prefix_blocks:
-        current_message = (
-            "\n\n".join(prefix_blocks)
-            + "\n\n[Tool Protocol]\n"
-            + "A tool result is already present. Do not emit <<MEMORY:...>>, <<CLAIMMAP:...>>, "
-            + "or <<METHODMAP:...>> again unless a different missing tool result is needed. "
-            + "Use the provided result to answer the current user message.\n\n"
-            + "[Current User Message]\n"
-            + user_input
+        budget = max(0, MAX_PROMPT_CHARS - len(user_input) - 512)
+        if len(memory_tool_result) > budget:
+            memory_tool_result = memory_tool_result[:budget] + "\n[memory truncated]"
+    tool_blocks = [
+        block
+        for block in (
+            claimmap_tool_result,   # already pure second-person felt language
+            memory_tool_result,
+            orientation_tool_result,
+            methodmap_tool_result,
         )
-    parts = [f"{LLAMA3_START}system{LLAMA3_END}\n\n{system}{LLAMA3_EOT}"]
+        if block
+    ]
+    current_message = user_input
+    if tool_blocks:
+        current_message = "\n\n".join(tool_blocks) + "\n\n" + user_input
+
+    parts = ["<|begin_of_text|>"]
     for role, text in trim_session_context(session_context):
         header = "user" if role == "user" else "assistant"
         parts.append(f"{LLAMA3_START}{header}{LLAMA3_END}\n\n{text}{LLAMA3_EOT}")
     parts.append(f"{LLAMA3_START}user{LLAMA3_END}\n\n{current_message}{LLAMA3_EOT}")
     parts.append(f"{LLAMA3_START}assistant{LLAMA3_END}\n\n")
-    prompt = "".join(parts)
-    return prompt
+    return "".join(parts)
 
 
 def scrub_unstaged_memory_status(
@@ -693,6 +679,7 @@ def main():
                     max_new_tokens=512,
                     synthesis_recorder=synthesis_records,
                     chatty_log=True,  # Enables visible trace logging.
+                    pre_formatted=True,
                 )
             finally:
                 for h in steer_handles:
@@ -735,6 +722,7 @@ def main():
                     max_new_tokens=512,
                     synthesis_recorder=synthesis_records,
                     chatty_log=True,
+                    pre_formatted=True,
                 )
                 model_claimmap_payload = extract_claimmap_payload(response)
                 model_methodmap_query = extract_methodmap_query(response)
@@ -779,6 +767,7 @@ def main():
                         max_new_tokens=512,
                         synthesis_recorder=synthesis_records,
                         chatty_log=True,
+                        pre_formatted=True,
                     )
                 finally:
                     for h in steer_handles:
@@ -815,6 +804,7 @@ def main():
                     max_new_tokens=512,
                     synthesis_recorder=synthesis_records,
                     chatty_log=True,
+                    pre_formatted=True,
                 )
             if response:
                 active_memory_tool_result = memory_tool_result or model_memory_tool_result
@@ -853,6 +843,7 @@ def main():
                         max_new_tokens=512,
                         synthesis_recorder=synthesis_records,
                         chatty_log=True,
+                        pre_formatted=True,
                     )
                 response = scrub_unstaged_memory_status(
                     response,
@@ -882,6 +873,34 @@ def main():
                     },
                 )
             record_internal_traces(memory, synthesis_records, steer_map=steer_map)
+
+            # Activation-reach: no tag was taught in bare mode, so tools fire from
+            # the model's own surfaced state. If the answer holds two opposed
+            # framings, sense the comparison (felt) and stage it -- with steering --
+            # for the next turn. Disable with CLAIMMAP_AUTO_TRIGGER=0.
+            if (
+                os.environ.get("CLAIMMAP_AUTO_TRIGGER", "1").strip() not in {"0", "false", "no"}
+                and pending_claimmap_tool_result is None
+            ):
+                tension = detect_framing_tension(response or "")
+                if tension:
+                    try:
+                        cm = analyze_claim_pair(f"{tension[0]} || {tension[1]}", model=model)
+                        pending_claimmap_tool_result = cm.felt
+                        pending_claimmap_steer_delta = cm.steer_delta
+                        memory.append_event(
+                            "claimmap_auto_triggered",
+                            text=cm.telemetry,
+                            tags=["claimmap_tool", "activation_trigger"],
+                            provenance={"trigger": "framing_tension", "mean_sim": cm.mean_sim},
+                        )
+                        print(
+                            Fore.MAGENTA
+                            + "\n[ClaimMap] Sensed a tension in that answer -- it will shape the next turn."
+                            + Style.RESET_ALL
+                        )
+                    except Exception as exc:
+                        print(Fore.RED + f"[ClaimMap auto] {exc}" + Style.RESET_ALL)
             sensor_scores = latest_phenomenality_scores(synthesis_records)
             if sensor_scores:
                 decision = self_concept.decide(

@@ -514,13 +514,28 @@ def get_agentic_handles(
                                             except Exception as e:
                                                 pass
 
-                                            print("    [Agentic ToT] Synthesis plateau detected. Injecting organic self-correction vector!")
                                             try:
-                                                if not hasattr(config, "organic_correction_vector"):
-                                                    config.organic_correction_vector = torch.load("invariants/organic_correction_vector.pt", map_location=routed_h.device)
+                                                organic_vec = getattr(config, "organic_correction_vector", None)
+                                                if organic_vec is None:
+                                                    organic_vec = _get_vector("organic_correction_vector", routed_h.device)
+                                                    if organic_vec is not None:
+                                                        config.organic_correction_vector = organic_vec
+                                                if organic_vec is None:
+                                                    print("    [Agentic ToT] Synthesis plateau detected, but organic correction vector is unavailable.")
+                                                    synthesis_successful = False
+                                                    break
+                                                organic_vec = organic_vec.to(device=routed_h.device, dtype=routed_h.dtype)
+                                                if organic_vec.numel() != routed_h.shape[-1]:
+                                                    print(
+                                                        "    [Agentic ToT] Organic correction vector has wrong size "
+                                                        f"({organic_vec.numel()} != {routed_h.shape[-1]})."
+                                                    )
+                                                    synthesis_successful = False
+                                                    break
+                                                print("    [Agentic ToT] Synthesis plateau detected. Injecting organic self-correction vector!")
                                                 
                                                 # The extracted organic vector is the mean shift of successful corrections
-                                                organic_delta = config.organic_correction_vector.unsqueeze(0).unsqueeze(0).to(routed_h.dtype)
+                                                organic_delta = organic_vec.reshape(1, 1, -1)
                                                 
                                                 # Scale factor to amplify the correction (empirically tuned, 1.5x)
                                                 delta_to_apply = organic_delta * 1.5
@@ -604,6 +619,7 @@ def generate_agentic_text(
     stop_after_verifier_answer=False,
     max_time=None,
     confidence_stabilization=False,
+    pre_formatted=False,
     **legacy_overrides,
 ):
     from invariants.config import AgenticConfig
@@ -635,7 +651,7 @@ def generate_agentic_text(
     if chatty_log:
         config.chatty_log = True
 
-    inputs = _inputs(M, instruction)
+    inputs = _inputs(M, instruction, pre_formatted=pre_formatted)
     original_plen = inputs["input_ids"].shape[1]
     
     # We still allow max_new_tokens override here because it's per-generation
