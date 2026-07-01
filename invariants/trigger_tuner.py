@@ -37,6 +37,10 @@ class Trigger:
         self.signals = deque(maxlen=history)
         self.observed = 0
         self.fired = 0
+        # (signal, outcome) pairs, outcome in [0,1] = productivity that FOLLOWED
+        # a fire. Lets the tuner see whether firing correlated with good outcomes
+        # before any threshold is drifted toward them.
+        self.outcomes = deque(maxlen=history)
 
     def _fires(self, signal):
         if self.comparator == "<=":
@@ -61,10 +65,33 @@ class Trigger:
         self.value = data[idx]
         return self.value
 
+    def credit(self, signal, outcome):
+        """Record the productivity (outcome in [0,1]) that followed a fire at
+        this signal level. Observe-only -- it never moves the threshold on its
+        own; you read the correlation first, then choose to drift."""
+        self.outcomes.append((float(signal), float(outcome)))
+
+    def outcome_stats(self):
+        if not self.outcomes:
+            return {"n_credited": 0, "fired_outcome": None, "unfired_outcome": None, "lift": None}
+        fired = [o for s, o in self.outcomes if self._fires(s)]
+        unfired = [o for s, o in self.outcomes if not self._fires(s)]
+        mean = lambda xs: (sum(xs) / len(xs)) if xs else None
+        fo, uo = mean(fired), mean(unfired)
+        # lift = did firing (interacting) actually beat not-firing? The honest
+        # readout of "is interaction productive" -- positive means yes.
+        lift = round(fo - uo, 3) if (fo is not None and uo is not None) else None
+        return {
+            "n_credited": len(self.outcomes),
+            "fired_outcome": round(fo, 3) if fo is not None else None,
+            "unfired_outcome": round(uo, 3) if uo is not None else None,
+            "lift": lift,
+        }
+
     def stats(self):
         data = sorted(self.signals)
         n = len(data)
-        return {
+        out = {
             "name": self.name,
             "kind": self.kind,
             "value": round(self.value, 4),
@@ -77,6 +104,8 @@ class Trigger:
             "signal_max": round(data[-1], 4) if n else None,
             "n_signals": n,
         }
+        out.update(self.outcome_stats())
+        return out
 
     def to_dict(self):
         return {
@@ -86,6 +115,7 @@ class Trigger:
             "observed": self.observed,
             "fired": self.fired,
             "signals": list(self.signals),
+            "outcomes": list(self.outcomes),
         }
 
     @classmethod
@@ -95,6 +125,11 @@ class Trigger:
         t.fired = int(d.get("fired", 0))
         for s in d.get("signals", []):
             t.signals.append(float(s))
+        for pair in d.get("outcomes", []):
+            try:
+                t.outcomes.append((float(pair[0]), float(pair[1])))
+            except (TypeError, ValueError, IndexError):
+                continue
         return t
 
 
@@ -120,6 +155,16 @@ class TriggerTuner:
         fired = t.observe(signal)
         self.save()
         return fired
+
+    def credit(self, name, signal, outcome):
+        """Tag a trigger's fire with the productivity that followed it. Records
+        only -- the correlation is inspectable via summary()['lift']; nothing
+        drifts until you calibrate on it deliberately."""
+        t = self.triggers.get(name)
+        if t is None:
+            return
+        t.credit(signal, outcome)
+        self.save()
 
     def get(self, name, default=0.0):
         t = self.triggers.get(name)

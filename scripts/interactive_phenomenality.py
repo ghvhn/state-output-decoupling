@@ -620,16 +620,20 @@ def main():
                     if not rows:
                         print(Fore.YELLOW + "[Tune] No triggers registered yet." + Style.RESET_ALL)
                     for s in rows:
-                        print(
-                            Fore.CYAN
-                            + (
-                                f"  {s['name']}: {s['kind']} value={s['value']} [{s['comparator']}] "
-                                f"fire_rate={s['fire_rate']} "
-                                f"signal(min/med/max)={s['signal_min']}/{s['signal_med']}/{s['signal_max']} "
-                                f"n={s['n_signals']}"
-                            )
-                            + Style.RESET_ALL
+                        line = (
+                            f"  {s['name']}: {s['kind']} value={s['value']} [{s['comparator']}] "
+                            f"fire_rate={s['fire_rate']} "
+                            f"signal(min/med/max)={s['signal_min']}/{s['signal_med']}/{s['signal_max']} "
+                            f"n={s['n_signals']}"
                         )
+                        if s.get("n_credited"):
+                            # lift>0 means firing beat not-firing on the outcome:
+                            # the honest "is interaction productive" readout.
+                            line += (
+                                f" | outcome fired={s['fired_outcome']} unfired={s['unfired_outcome']} "
+                                f"lift={s['lift']} (n={s['n_credited']})"
+                            )
+                        print(Fore.CYAN + line + Style.RESET_ALL)
                 elif len(targs) >= 2 and targs[1].lower() == "auto":
                     pct = float(targs[2]) if len(targs) >= 3 else 80.0
                     v = tuner.calibrate(targs[0], pct)
