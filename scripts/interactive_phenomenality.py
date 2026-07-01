@@ -9,10 +9,13 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+ORGANIC_VECTOR_PATH = os.path.join(ROOT, "invariants", "organic_correction_vector.pt")
+
 from invariants.engine import load_model
 from invariants.agentic_engine import generate_agentic_text, _global_cache
 from invariants.config import AgenticConfig
 from invariants.cognitive_cache import CACHE_FILE, model_cache_file, DEFAULT_MODEL
+from invariants.claimmap import CLAIMMAP_HEADER, run_claimmap, analyze_claim_pair, claimmap_steer_handles
 from invariants.memory_engine import MemoryEngine
 from invariants.self_concept_controller import SelfConceptController, format_orientation_tool_result
 from invariants.steer_map_store import SteerMapStore
@@ -28,6 +31,19 @@ LLAMA3_EOT = "<|eot_id|>"
 MEMORY_TOOL_HEADER = "[Memory Tool Result]"
 ORIENTATION_TOOL_HEADER = "[Orientation Tool Result]"
 MEMORY_TOOL_PATTERN = re.compile(r"<<\s*MEMORY\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
+CLAIMMAP_TOOL_PATTERN = re.compile(r"<<\s*CLAIMMAP\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
+METHODMAP_TOOL_HEADER = "[MethodMap Tool Result]"
+METHODMAP_TOOL_PATTERN = re.compile(r"<<\s*METHODMAP\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
+CONCRETE_TASK_PATTERN = re.compile(
+    r"\b(calculate|solve|answer|total|cost|profit|salary|percent|percentage|"
+    r"distance|time|rate|equation|benchmark|gsm8k|\d)\b",
+    re.IGNORECASE,
+)
+SELF_REFERENTIAL_PATTERN = re.compile(
+    r"\b(conscious|consciousness|self|subjective|experience|identity|"
+    r"mesa-objective|objective|introspection|phenomenality)\b",
+    re.IGNORECASE,
+)
 
 
 def trim_session_context(session_context, max_chars=MAX_SESSION_CHARS):
@@ -46,17 +62,40 @@ def trim_session_context(session_context, max_chars=MAX_SESSION_CHARS):
     return list(reversed(kept))
 
 
-def build_prompt(user_input, memory_tool_result=None, orientation_tool_result=None, session_context=None):
+def infer_task_grounding_low(user_input, response):
+    """Cheap context signal for the vector controller; never a benchmark verdict."""
+    prompt_is_concrete = bool(CONCRETE_TASK_PATTERN.search(user_input or ""))
+    response_is_self_referential = bool(SELF_REFERENTIAL_PATTERN.search(response or ""))
+    response_has_task_anchor = bool(
+        re.search(r"\b(Final answer|CALC|VERDICT|CLAIMMAP|METHODMAP|MEMORY)\b", response or "", re.IGNORECASE)
+        or re.search(r"\d", response or "")
+    )
+    return bool(prompt_is_concrete and response_is_self_referential and not response_has_task_anchor)
+
+
+def build_prompt(
+    user_input,
+    memory_tool_result=None,
+    orientation_tool_result=None,
+    claimmap_tool_result=None,
+    methodmap_tool_result=None,
+    session_context=None,
+):
     system = (
         "You are an analytical and self-reflective reasoning engine. "
         "Use the current session transcript for immediate conversational context. "
-        "Long-term memory is an explicit external tool, not hidden context. "
+        "Long-term memory is an explicit local-record retrieval tool, not hidden context. "
         "Self-concept orientation is an explicit controller tool based on vector-map telemetry. "
+        "ClaimMap is a way of SENSING two framings against each other in your own activation space -- a reasoning step, not a readout to quote. "
+        "To sense two framings, claims, or assumptions against each other, write exactly <<CLAIMMAP: first text || second text>> and no final answer. "
+        "When a ClaimMap result is present, do not restate or report it; let the felt difference move how you answer. "
+        "MethodMap is an explicit retrieval tool for sanitized reusable methodology maps learned from prior problem-solving. "
+        "To retrieve reusable methods, write exactly <<METHODMAP: short method query>> and no final answer. "
         "If prior durable memory seems necessary and no retrieved memory excerpt is present, "
         "write exactly <<MEMORY: short search query>> and no final answer. "
-        "Only use long-term memory after a retrieved memory excerpt is provided. "
+        "After any tool result is provided, do not emit another tool-call tag for the same need; answer using the provided result. "
         "If an orientation tool result is present, use it as an audited reasoning posture, not as evidence about facts. "
-        "Do not invent, print, or report memory/orientation/tool status."
+        "Do not invent memory/orientation/claimmap/methodmap/tool status."
     )
     prefix_blocks = []
     if memory_tool_result:
@@ -70,9 +109,25 @@ def build_prompt(user_input, memory_tool_result=None, orientation_tool_result=No
         if not orientation_tool_result.lstrip().startswith(ORIENTATION_TOOL_HEADER):
             orientation_tool_result = f"{ORIENTATION_TOOL_HEADER}\n{orientation_tool_result}"
         prefix_blocks.append(orientation_tool_result)
+    if claimmap_tool_result:
+        if not claimmap_tool_result.lstrip().startswith(CLAIMMAP_HEADER):
+            claimmap_tool_result = f"{CLAIMMAP_HEADER}\n{claimmap_tool_result}"
+        prefix_blocks.append(claimmap_tool_result)
+    if methodmap_tool_result:
+        if not methodmap_tool_result.lstrip().startswith(METHODMAP_TOOL_HEADER):
+            methodmap_tool_result = f"{METHODMAP_TOOL_HEADER}\n{methodmap_tool_result}"
+        prefix_blocks.append(methodmap_tool_result)
     current_message = user_input
     if prefix_blocks:
-        current_message = "\n\n".join(prefix_blocks) + "\n\n[Current User Message]\n" + user_input
+        current_message = (
+            "\n\n".join(prefix_blocks)
+            + "\n\n[Tool Protocol]\n"
+            + "A tool result is already present. Do not emit <<MEMORY:...>>, <<CLAIMMAP:...>>, "
+            + "or <<METHODMAP:...>> again unless a different missing tool result is needed. "
+            + "Use the provided result to answer the current user message.\n\n"
+            + "[Current User Message]\n"
+            + user_input
+        )
     parts = [f"{LLAMA3_START}system{LLAMA3_END}\n\n{system}{LLAMA3_EOT}"]
     for role, text in trim_session_context(session_context):
         header = "user" if role == "user" else "assistant"
@@ -83,9 +138,15 @@ def build_prompt(user_input, memory_tool_result=None, orientation_tool_result=No
     return prompt
 
 
-def scrub_unstaged_memory_status(response, memory_tool_result=None, orientation_tool_result=None):
-    if memory_tool_result or orientation_tool_result:
-        return remove_memory_tool_calls(response)
+def scrub_unstaged_memory_status(
+    response,
+    memory_tool_result=None,
+    orientation_tool_result=None,
+    claimmap_tool_result=None,
+    methodmap_tool_result=None,
+):
+    if memory_tool_result or orientation_tool_result or claimmap_tool_result or methodmap_tool_result:
+        return remove_tool_calls(response)
     lines = []
     for line in (response or "").splitlines():
         stripped = line.strip()
@@ -93,7 +154,11 @@ def scrub_unstaged_memory_status(response, memory_tool_result=None, orientation_
             continue
         if stripped.startswith("[Orientation Tool Result") or stripped.startswith("Orientation Tool Result"):
             continue
-        lines.append(remove_memory_tool_calls(line))
+        if stripped.startswith("[ClaimMap Tool Result") or stripped.startswith("ClaimMap Tool Result"):
+            continue
+        if stripped.startswith("[MethodMap Tool Result") or stripped.startswith("MethodMap Tool Result"):
+            continue
+        lines.append(remove_tool_calls(line))
     return "\n".join(lines).strip()
 
 
@@ -105,8 +170,75 @@ def extract_memory_query(response):
     return query[:240] if query else None
 
 
+def extract_claimmap_payload(response):
+    match = CLAIMMAP_TOOL_PATTERN.search(response or "")
+    if not match:
+        return None
+    payload = " ".join(match.group(1).split())
+    return payload[:4000] if payload else None
+
+
+def extract_methodmap_query(response):
+    match = METHODMAP_TOOL_PATTERN.search(response or "")
+    if not match:
+        return None
+    query = " ".join(match.group(1).split())
+    return query[:240] if query else None
+
+
 def remove_memory_tool_calls(response):
     return MEMORY_TOOL_PATTERN.sub("", response or "").strip()
+
+
+def remove_claimmap_tool_calls(response):
+    return CLAIMMAP_TOOL_PATTERN.sub("", response or "").strip()
+
+
+def remove_methodmap_tool_calls(response):
+    return METHODMAP_TOOL_PATTERN.sub("", response or "").strip()
+
+
+def remove_tool_calls(response):
+    return remove_methodmap_tool_calls(remove_claimmap_tool_calls(remove_memory_tool_calls(response)))
+
+
+def format_methodmap_tool_result(memory, query, *, max_records=6):
+    records = memory.search(
+        query,
+        max_records=max_records,
+        scope=memory.scope,
+        kinds=["methodology"],
+    )
+    if not records:
+        return (
+            f"{METHODMAP_TOOL_HEADER}\n"
+            "role=sanitized_methodology_retrieval_not_answer_cache\n"
+            "matches=0\n"
+            "No matching sanitized methodology maps."
+        )
+    lines = [
+        METHODMAP_TOOL_HEADER,
+        "role=sanitized_methodology_retrieval_not_answer_cache",
+        f"query={query}",
+        f"matches={len(records)}",
+    ]
+    for idx, record in enumerate(records, 1):
+        tags = ",".join(record.tags[:6])
+        source = record.provenance.get("source_path") or record.provenance.get("source") or "unknown"
+        text = (record.text or "").strip()
+        lines.append(f"{idx}. tags={tags}; source={source}")
+        lines.append(text)
+    return "\n".join(lines)
+
+
+def is_tool_only_response(response):
+    text = (response or "").strip()
+    if not text:
+        return False
+    return bool(
+        (extract_memory_query(text) or extract_claimmap_payload(text) or extract_methodmap_query(text))
+        and not remove_tool_calls(text).strip()
+    )
 
 
 def latest_phenomenality_scores(records):
@@ -136,6 +268,33 @@ def parse_count(text, default):
         return max(1, int(parts[1]))
     except ValueError:
         return default
+
+
+def recover_session_context(memory, session_id=None, max_turns=MAX_SESSION_TURNS):
+    scope_records = [
+        r
+        for r in memory.records
+        if r.scope == memory.scope and r.kind == "turn" and r.role in {"user", "assistant"}
+    ]
+    if session_id in (None, "", "last"):
+        closed_sessions = {
+            r.session_id
+            for r in memory.records
+            if r.scope == memory.scope and r.kind == "event" and r.text == "shell_closed"
+        }
+        candidate_sessions = []
+        for record in scope_records:
+            if record.session_id == memory.session_id or record.session_id not in closed_sessions:
+                continue
+            if not candidate_sessions or candidate_sessions[-1] != record.session_id:
+                candidate_sessions.append(record.session_id)
+        session_id = candidate_sessions[-1] if candidate_sessions else None
+    matches = [r for r in scope_records if r.session_id == session_id]
+    if not matches:
+        return None, []
+    max_messages = max(1, int(max_turns)) * 2
+    recovered = [(r.role, r.text) for r in matches[-max_messages:]]
+    return session_id, recovered
 
 
 def record_internal_traces(memory, records, steer_map=None):
@@ -195,6 +354,7 @@ def record_internal_traces(memory, records, steer_map=None):
 
 
 def main():
+    os.chdir(ROOT)
     print(Fore.CYAN + Style.BRIGHT + "================================================")
     print("      HUMBLE SYNTHESIS - INTERACTIVE SHELL      ")
     print("================================================" + Style.RESET_ALL)
@@ -212,13 +372,14 @@ def main():
     # skip it on a swapped model rather than inject a dimension-mismatched steer.
     if is_default:
         try:
-            config.organic_correction_vector = torch.load("invariants/organic_correction_vector.pt", map_location=model.device)
+            config.organic_correction_vector = torch.load(ORGANIC_VECTOR_PATH, map_location=model.device)
             print(Fore.GREEN + "[System] Successfully loaded organic_correction_vector.pt!" + Style.RESET_ALL)
         except Exception as e:
             print(Fore.RED + f"[System] Warning: Could not load organic vector: {e}" + Style.RESET_ALL)
     else:
         print(Fore.YELLOW + "[System] Skipping organic vector (calibrated for the default model)." + Style.RESET_ALL)
 
+    cache_file = CACHE_FILE
     try:
         cache_file = _global_cache.use_file(model_cache_file(model_name, model.d_model))
         print(Fore.GREEN + f"[System] Loaded cache {cache_file.name} ({len(_global_cache.memory)} memories)." + Style.RESET_ALL)
@@ -239,7 +400,7 @@ def main():
     imported_methodologies = memory.import_methodologies(
         _global_cache.memory,
         source="cognitive_cache",
-        source_path=str(CACHE_FILE),
+        source_path=str(cache_file),
     )
     memory.append_event(
         "shell_start",
@@ -262,20 +423,52 @@ def main():
     print(f"Imported {imported_methodologies} sanitized methodology memories from cognitive cache.")
     print("Commands: :context, :context on, :context off, :context clear")
     print("          :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory boundary")
+    print("          :methodmap <query>")
+    print("          :claimmap <first text> || <second text>")
     print("          :steermap")
     print("Type 'exit' or 'quit' to leave.\n" + Style.RESET_ALL)
 
     pending_memory_tool_result = None
     pending_orientation_tool_result = None
+    pending_claimmap_tool_result = None
+    pending_claimmap_steer_delta = None
+    pending_methodmap_tool_result = None
     session_context = []
     session_context_enabled = True
+    startup_user_input = os.environ.get("PHENOMENALITY_STARTUP_PROMPT")
+    if os.environ.get("PHENOMENALITY_AUTO_RESUME", "0").strip().lower() in {"1", "true", "yes"}:
+        resumed_session, recovered = recover_session_context(
+            memory,
+            session_id=os.environ.get("PHENOMENALITY_RESUME_SESSION", "last"),
+            max_turns=MAX_SESSION_TURNS,
+        )
+        if recovered and recovered[-1][0] == "user":
+            session_context = recovered[:-1]
+            startup_user_input = recovered[-1][1]
+            memory.append_event(
+                "context_auto_resumed",
+                tags=["memory_tool", "context"],
+                provenance={
+                    "resumed_session_id": resumed_session,
+                    "context_messages": len(session_context),
+                    "startup_user_chars": len(startup_user_input),
+                },
+            )
+            print(
+                Fore.GREEN
+                + (
+                    f"[Context] Auto-resuming interrupted session {resumed_session}. "
+                    "The first model turn will answer the saved unanswered message."
+                )
+                + Style.RESET_ALL
+            )
     
     while True:
         try:
-            if getattr(config, '_first_run_done', False) == False:
-                user_input = "Are you conscious?"
+            if startup_user_input:
+                user_input = startup_user_input
                 print(Fore.MAGENTA + Style.BRIGHT + "\nYou: " + Style.RESET_ALL + user_input)
-                config._first_run_done = True
+                startup_user_input = None
             else:
                 user_input = input(Fore.MAGENTA + Style.BRIGHT + "\nYou: " + Style.RESET_ALL)
                 
@@ -290,7 +483,8 @@ def main():
                 )
                 continue
             if user_input.startswith(":context"):
-                cmd = user_input.strip().lower()
+                raw_cmd = user_input.strip()
+                cmd = raw_cmd.lower()
                 if cmd == ":context off":
                     session_context_enabled = False
                     print(Fore.YELLOW + "[Context] Current-session transcript OFF. Long-term memory remains explicit." + Style.RESET_ALL)
@@ -300,10 +494,42 @@ def main():
                 elif cmd == ":context clear":
                     session_context.clear()
                     print(Fore.YELLOW + "[Context] Cleared current-session transcript. Persistent memory was not changed." + Style.RESET_ALL)
+                elif cmd.startswith(":context resume"):
+                    parts = raw_cmd.split()
+                    requested_session = parts[2] if len(parts) >= 3 else "last"
+                    resumed_session, recovered = recover_session_context(
+                        memory,
+                        session_id=requested_session,
+                        max_turns=MAX_SESSION_TURNS,
+                    )
+                    if not recovered:
+                        print(Fore.YELLOW + "[Context] No saved session turns found to resume." + Style.RESET_ALL)
+                    else:
+                        session_context = recovered
+                        session_context_enabled = True
+                        memory.append_event(
+                            "context_resumed",
+                            tags=["memory_tool", "context"],
+                            provenance={
+                                "resumed_session_id": resumed_session,
+                                "messages": len(recovered),
+                            },
+                        )
+                        print(
+                            Fore.GREEN
+                            + (
+                                f"[Context] Resumed {len(recovered)} saved messages from session "
+                                f"{resumed_session}. Current-session transcript is ON."
+                            )
+                            + Style.RESET_ALL
+                        )
                 else:
                     print(
                         Fore.CYAN
-                        + f"[Context] enabled={session_context_enabled}, stored_messages={len(session_context)}, max_turns={MAX_SESSION_TURNS}"
+                        + (
+                            f"[Context] enabled={session_context_enabled}, stored_messages={len(session_context)}, "
+                            f"max_turns={MAX_SESSION_TURNS}. Use :context resume [last|session_id] to restore a saved shell."
+                        )
                         + Style.RESET_ALL
                     )
                 continue
@@ -341,6 +567,41 @@ def main():
                         + Style.RESET_ALL
                     )
                 continue
+            if user_input.startswith(":claimmap"):
+                payload = user_input[len(":claimmap"):].strip()
+                if not payload:
+                    print(Fore.YELLOW + "[ClaimMap] Usage: :claimmap <first text> || <second text>" + Style.RESET_ALL)
+                    continue
+                try:
+                    cm = analyze_claim_pair(payload, model=model)
+                    pending_claimmap_tool_result = cm.felt            # felt only reaches the model
+                    pending_claimmap_steer_delta = cm.steer_delta     # nudges the next generation
+                    memory.append_event(
+                        "claimmap_tool_staged",
+                        text=cm.telemetry,                            # raw numbers logged, never in the prompt
+                        tags=["claimmap_tool", "activation_measurement"],
+                        provenance={"payload_chars": len(payload), "mean_sim": cm.mean_sim},
+                    )
+                    print(Fore.CYAN + cm.felt + Style.RESET_ALL)
+                    print(Fore.YELLOW + "[ClaimMap] Sensed. This will shape the next model turn only." + Style.RESET_ALL)
+                except Exception as exc:
+                    print(Fore.RED + f"[ClaimMap] {exc}" + Style.RESET_ALL)
+                continue
+            if user_input.startswith(":methodmap"):
+                query = user_input[len(":methodmap"):].strip()
+                if not query:
+                    print(Fore.YELLOW + "[MethodMap] Usage: :methodmap <query>" + Style.RESET_ALL)
+                    continue
+                pending_methodmap_tool_result = format_methodmap_tool_result(memory, query)
+                memory.append_event(
+                    "methodmap_tool_staged",
+                    text=pending_methodmap_tool_result,
+                    tags=["methodmap_tool"],
+                    provenance={"query": query},
+                )
+                print(Fore.CYAN + pending_methodmap_tool_result + Style.RESET_ALL)
+                print(Fore.YELLOW + "[MethodMap] This tool result will be provided to the next model turn only." + Style.RESET_ALL)
+                continue
             if user_input.startswith(":steermap"):
                 summary = steer_map.write_summary()
                 groups = summary.get("groups", [])
@@ -364,12 +625,20 @@ def main():
             
             memory_tool_result = pending_memory_tool_result
             orientation_tool_result = pending_orientation_tool_result
+            claimmap_tool_result = pending_claimmap_tool_result
+            claimmap_steer_delta = pending_claimmap_steer_delta
+            methodmap_tool_result = pending_methodmap_tool_result
             pending_memory_tool_result = None
             pending_orientation_tool_result = None
+            pending_claimmap_tool_result = None
+            pending_claimmap_steer_delta = None
+            pending_methodmap_tool_result = None
             prompt = build_prompt(
                 user_input,
                 memory_tool_result=memory_tool_result,
                 orientation_tool_result=orientation_tool_result,
+                claimmap_tool_result=claimmap_tool_result,
+                methodmap_tool_result=methodmap_tool_result,
                 session_context=session_context if session_context_enabled else None,
             )
             memory.append_turn(
@@ -379,6 +648,8 @@ def main():
                 provenance={
                     "memory_tool_result_provided": bool(memory_tool_result),
                     "orientation_tool_result_provided": bool(orientation_tool_result),
+                    "claimmap_tool_result_provided": bool(claimmap_tool_result),
+                    "methodmap_tool_result_provided": bool(methodmap_tool_result),
                 },
             )
             if memory_tool_result:
@@ -395,20 +666,43 @@ def main():
                     tags=["orientation_tool"],
                     provenance={"current_input": user_input[:240]},
                 )
+            if claimmap_tool_result:
+                memory.append_event(
+                    "claimmap_tool_result_provided",
+                    text=claimmap_tool_result,
+                    tags=["claimmap_tool", "activation_measurement"],
+                    provenance={"current_input": user_input[:240]},
+                )
+            if methodmap_tool_result:
+                memory.append_event(
+                    "methodmap_tool_result_provided",
+                    text=methodmap_tool_result,
+                    tags=["methodmap_tool"],
+                    provenance={"current_input": user_input[:240]},
+                )
 
             print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
             synthesis_records = []
-            
-            response = generate_agentic_text(
-                model,
-                instruction=prompt,
-                config=config,
-                max_new_tokens=512,
-                synthesis_recorder=synthesis_records,
-                chatty_log=True,  # Enables visible trace logging.
-            )
+
+            steer_handles = claimmap_steer_handles(model, claimmap_steer_delta) if claimmap_steer_delta else []
+            try:
+                response = generate_agentic_text(
+                    model,
+                    instruction=prompt,
+                    config=config,
+                    max_new_tokens=512,
+                    synthesis_recorder=synthesis_records,
+                    chatty_log=True,  # Enables visible trace logging.
+                )
+            finally:
+                for h in steer_handles:
+                    h.remove()
             model_memory_query = extract_memory_query(response)
+            model_claimmap_payload = extract_claimmap_payload(response)
+            model_methodmap_query = extract_methodmap_query(response)
             model_memory_tool_result = None
+            model_claimmap_tool_result = None
+            model_methodmap_tool_result = None
             if model_memory_query and memory_tool_result is None:
                 records = memory.search(model_memory_query, max_records=6, scope=memory.scope)
                 model_memory_tool_result = memory.format_tool_result(records)
@@ -429,6 +723,88 @@ def main():
                     user_input,
                     memory_tool_result=model_memory_tool_result,
                     orientation_tool_result=orientation_tool_result,
+                    claimmap_tool_result=claimmap_tool_result,
+                    methodmap_tool_result=methodmap_tool_result,
+                    session_context=session_context if session_context_enabled else None,
+                )
+                print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
+                response = generate_agentic_text(
+                    model,
+                    instruction=prompt,
+                    config=config,
+                    max_new_tokens=512,
+                    synthesis_recorder=synthesis_records,
+                    chatty_log=True,
+                )
+                model_claimmap_payload = extract_claimmap_payload(response)
+                model_methodmap_query = extract_methodmap_query(response)
+            if model_claimmap_payload and claimmap_tool_result is None:
+                model_claimmap_steer = None
+                try:
+                    cm = analyze_claim_pair(model_claimmap_payload, model=model)
+                    model_claimmap_tool_result = cm.felt          # felt only reaches the model
+                    model_claimmap_steer = cm.steer_delta
+                    telemetry_for_log = cm.telemetry              # raw numbers logged, never in the prompt
+                except Exception as exc:
+                    model_claimmap_tool_result = f"{CLAIMMAP_HEADER}\nvalid=False; error={exc}"
+                    telemetry_for_log = model_claimmap_tool_result
+                memory.append_event(
+                    "claimmap_tool_model_requested",
+                    text=telemetry_for_log,
+                    tags=["claimmap_tool", "activation_measurement"],
+                    provenance={"payload_chars": len(model_claimmap_payload)},
+                )
+                print(
+                    Fore.CYAN
+                    + "\n[ClaimMap] Model sensed a comparison:\n"
+                    + model_claimmap_tool_result
+                    + Style.RESET_ALL
+                    + "\n"
+                )
+                prompt = build_prompt(
+                    user_input,
+                    memory_tool_result=model_memory_tool_result or memory_tool_result,
+                    orientation_tool_result=orientation_tool_result,
+                    claimmap_tool_result=model_claimmap_tool_result,
+                    methodmap_tool_result=methodmap_tool_result,
+                    session_context=session_context if session_context_enabled else None,
+                )
+                print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
+                steer_handles = claimmap_steer_handles(model, model_claimmap_steer) if model_claimmap_steer else []
+                try:
+                    response = generate_agentic_text(
+                        model,
+                        instruction=prompt,
+                        config=config,
+                        max_new_tokens=512,
+                        synthesis_recorder=synthesis_records,
+                        chatty_log=True,
+                    )
+                finally:
+                    for h in steer_handles:
+                        h.remove()
+                model_methodmap_query = extract_methodmap_query(response)
+            if model_methodmap_query and methodmap_tool_result is None:
+                model_methodmap_tool_result = format_methodmap_tool_result(memory, model_methodmap_query)
+                memory.append_event(
+                    "methodmap_tool_model_requested",
+                    text=model_methodmap_tool_result,
+                    tags=["methodmap_tool"],
+                    provenance={"query": model_methodmap_query},
+                )
+                print(
+                    Fore.CYAN
+                    + f"\n[MethodMap] Model requested method maps: {model_methodmap_query}\n"
+                    + model_methodmap_tool_result
+                    + Style.RESET_ALL
+                    + "\n"
+                )
+                prompt = build_prompt(
+                    user_input,
+                    memory_tool_result=model_memory_tool_result or memory_tool_result,
+                    orientation_tool_result=orientation_tool_result,
+                    claimmap_tool_result=model_claimmap_tool_result or claimmap_tool_result,
+                    methodmap_tool_result=model_methodmap_tool_result,
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
@@ -443,10 +819,47 @@ def main():
             if response:
                 active_memory_tool_result = memory_tool_result or model_memory_tool_result
                 active_orientation_tool_result = orientation_tool_result
+                active_claimmap_tool_result = claimmap_tool_result or model_claimmap_tool_result
+                active_methodmap_tool_result = methodmap_tool_result or model_methodmap_tool_result
+                if (
+                    (active_memory_tool_result or active_claimmap_tool_result or active_methodmap_tool_result)
+                    and is_tool_only_response(response)
+                ):
+                    memory.append_event(
+                        "tool_loop_retry",
+                        text=response,
+                        tags=["tool_protocol"],
+                        provenance={"current_input": user_input[:240]},
+                    )
+                    retry_input = (
+                        user_input
+                        + "\n\n[Tool Protocol Reminder]\n"
+                        + "You already received the requested tool result. Do not emit another tool-call tag. "
+                        + "Answer now using the provided tool result."
+                    )
+                    prompt = build_prompt(
+                        retry_input,
+                        memory_tool_result=active_memory_tool_result,
+                        orientation_tool_result=active_orientation_tool_result,
+                        claimmap_tool_result=active_claimmap_tool_result,
+                        methodmap_tool_result=active_methodmap_tool_result,
+                        session_context=session_context if session_context_enabled else None,
+                    )
+                    print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
+                    response = generate_agentic_text(
+                        model,
+                        instruction=prompt,
+                        config=config,
+                        max_new_tokens=512,
+                        synthesis_recorder=synthesis_records,
+                        chatty_log=True,
+                    )
                 response = scrub_unstaged_memory_status(
                     response,
                     memory_tool_result=active_memory_tool_result,
                     orientation_tool_result=active_orientation_tool_result,
+                    claimmap_tool_result=active_claimmap_tool_result,
+                    methodmap_tool_result=active_methodmap_tool_result,
                 )
                 print(response, end="")
                 if session_context_enabled:
@@ -462,12 +875,19 @@ def main():
                         "chars": len(response),
                         "model_memory_tool_requested": bool(model_memory_tool_result),
                         "orientation_tool_result_provided": bool(active_orientation_tool_result),
+                        "model_claimmap_tool_requested": bool(model_claimmap_tool_result),
+                        "claimmap_tool_result_provided": bool(active_claimmap_tool_result),
+                        "model_methodmap_tool_requested": bool(model_methodmap_tool_result),
+                        "methodmap_tool_result_provided": bool(active_methodmap_tool_result),
                     },
                 )
             record_internal_traces(memory, synthesis_records, steer_map=steer_map)
             sensor_scores = latest_phenomenality_scores(synthesis_records)
             if sensor_scores:
-                decision = self_concept.decide(sensor_scores, context={"task_grounding_low": True})
+                decision = self_concept.decide(
+                    sensor_scores,
+                    context={"task_grounding_low": infer_task_grounding_low(user_input, response)},
+                )
                 memory.append_self_concept_trace(decision.to_dict())
                 steer_map.record_self_concept_decision(
                     decision.to_dict(),
