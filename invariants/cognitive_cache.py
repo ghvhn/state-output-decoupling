@@ -1,5 +1,6 @@
 import torch
 from pathlib import Path
+import io
 import os
 import re
 import torch.nn.functional as F
@@ -41,8 +42,12 @@ class CognitiveCache:
         self.load()
 
     def use_file(self, path):
-        """Re-point this cache at a model-specific file and reload its memories."""
-        self.file = Path(path)
+        """Re-point this cache at a model-specific file and reload its memories.
+        Skips a redundant reload when the path is unchanged and already loaded."""
+        path = Path(path)
+        if path == self.file and self.memory:
+            return self.file
+        self.file = path
         self.load()
         return self.file
 
@@ -54,6 +59,13 @@ class CognitiveCache:
         if t.ndim == 1:
             return t.contiguous()
         return t.reshape(-1, t.shape[-1])[-1].contiguous()
+
+    @staticmethod
+    def _is_oracle_metadata(metadata):
+        if not isinstance(metadata, dict):
+            return False
+        tag = str(metadata.get("tag") or "")
+        return tag == "oracle_repair" or tag.startswith("oracle_repair_") or metadata.get("oracle_mode") is not None
 
     def _coerce_entry(self, item):
         if isinstance(item, dict):
@@ -81,7 +93,12 @@ class CognitiveCache:
     def load(self):
         if self.file.exists():
             try:
-                raw = torch.load(self.file, map_location="cpu")
+                # Read the whole file into memory and close the OS handle before
+                # deserializing, so the .pt is never left memory-mapped. On Windows
+                # a lingering map makes the later torch.save fail with error 1224.
+                with open(self.file, "rb") as fh:
+                    buffer = io.BytesIO(fh.read())
+                raw = torch.load(buffer, map_location="cpu")
                 if not isinstance(raw, list):
                     raw = []
                 self.memory = []
@@ -99,7 +116,16 @@ class CognitiveCache:
             os.makedirs(self.file.parent, exist_ok=True)
 
     def save(self):
-        torch.save(self.memory, self.file)
+        # Atomic + non-fatal: write a temp file then replace, so a partial or
+        # locked write never corrupts the cache -- and a cache-write failure must
+        # NEVER crash a live session (this runs inside a generation forward hook).
+        try:
+            self.file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.file.with_suffix(self.file.suffix + ".tmp")
+            torch.save(self.memory, tmp)
+            os.replace(tmp, self.file)
+        except Exception as e:
+            print(f"    [Cognitive Cache] Save skipped ({e}); {len(self.memory)} memories kept in RAM.")
         
     def store(self, trigger_state, learned_vector, metadata=None):
         """
@@ -160,7 +186,7 @@ class CognitiveCache:
                 or metadata.get("promoted_by") != "humble_verifier"
             ):
                 continue
-            if ignore_oracle_cache and isinstance(metadata, dict) and metadata.get("tag") == "oracle_repair":
+            if ignore_oracle_cache and self._is_oracle_metadata(metadata):
                 continue
             if (
                 excluded_question_key is not None
@@ -171,7 +197,7 @@ class CognitiveCache:
             if (
                 excluded_oracle_question_key is not None
                 and isinstance(metadata, dict)
-                and metadata.get("tag") == "oracle_repair"
+                and self._is_oracle_metadata(metadata)
                 and metadata.get("question_key") == excluded_oracle_question_key
             ):
                 continue
