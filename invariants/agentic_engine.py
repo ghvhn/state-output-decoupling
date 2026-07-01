@@ -620,6 +620,7 @@ def generate_agentic_text(
     max_time=None,
     confidence_stabilization=False,
     pre_formatted=False,
+    mid_chunk_hook=None,
     **legacy_overrides,
 ):
     from invariants.config import AgenticConfig
@@ -821,6 +822,14 @@ def generate_agentic_text(
             
             current_inputs = {"input_ids": out, "attention_mask": torch.ones(out.shape, dtype=torch.long, device=out.device)}
             generated_text = M.tok.decode(out[0, original_plen:], skip_special_tokens=True)
+            # Mid-thought tool seam: any tool can be called whenever its state
+            # trigger crosses -- checked between chunks on the text so far. A tool
+            # that fires registers steering that bends the REMAINING chunks.
+            if mid_chunk_hook is not None:
+                try:
+                    mid_chunk_hook(generated_text)
+                except Exception as _hook_exc:
+                    print(f"    [ToolSense] mid-chunk hook error: {_hook_exc}", flush=True)
             tool_call = next(
                 (
                     (end, expr)
@@ -862,6 +871,8 @@ def generate_agentic_text(
     finally:
         for h in handles:
             h.remove()
+        if mid_chunk_hook is not None and hasattr(mid_chunk_hook, "cleanup"):
+            mid_chunk_hook.cleanup()
         config._generation_deadline = previous_deadline
         config._generation_budget_sec = previous_budget
              

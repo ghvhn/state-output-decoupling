@@ -24,6 +24,7 @@ from invariants.claimmap import (
     framing_tension_score,
 )
 from invariants.trigger_tuner import TriggerTuner
+from invariants.tool_sense import ToolSense, Tool
 from invariants.memory_engine import MemoryEngine
 from invariants.self_concept_controller import SelfConceptController, format_orientation_tool_result
 from invariants.steer_map_store import SteerMapStore
@@ -417,6 +418,27 @@ def main():
     # Every trigger is born tunable. Persisted values win over these defaults.
     tuner.register("claimmap_tension", 0.18, kind="threshold", comparator=">=")
     tuner.register("claimmap_alpha", 0.5, kind="coefficient")
+
+    # Tool-sensing seam: any tool fires mid-thought when its state trigger crosses.
+    # ClaimMap is the first tool through it; add a tool = register a detector.
+    tool_sense = ToolSense(model, tuner)
+
+    def _claimmap_detect(text):
+        a, b, score = framing_tension_score(text)
+        return score, ((a, b) if a is not None else None)
+
+    def _claimmap_act(payload, m):
+        a, b = payload
+        cm = analyze_claim_pair(f"{a} || {b}", model=m)
+        print(
+            Fore.MAGENTA
+            + "\n[ClaimMap] mid-thought: sensed a tension, steering the rest of this answer."
+            + Style.RESET_ALL,
+            flush=True,
+        )
+        return claimmap_steer_handles(m, cm.steer_delta, alpha=tuner.get("claimmap_alpha", 0.5))
+
+    tool_sense.register(Tool("claimmap_tension", _claimmap_detect, _claimmap_act))
     imported_methodologies = memory.import_methodologies(
         _global_cache.memory,
         source="cognitive_cache",
@@ -756,6 +778,7 @@ def main():
                     synthesis_recorder=synthesis_records,
                     chatty_log=True,  # Enables visible trace logging.
                     pre_formatted=True,
+                    mid_chunk_hook=tool_sense,  # tools fire mid-thought, between chunks
                 )
             finally:
                 for h in steer_handles:
