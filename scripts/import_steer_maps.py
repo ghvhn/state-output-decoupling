@@ -55,6 +55,13 @@ def main() -> int:
     print(f"[SteerMap] event_count={summary['event_count']}")
     print(f"[SteerMap] events_file={store.events_path}")
     print(f"[SteerMap] summary_file={store.summary_path}")
+    lift_rows = store.channel_lift(basis="gold")
+    if lift_rows:
+        print("[SteerMap] channel lift (gold lane) -- should each channel be on?")
+        for row in lift_rows:
+            fired = f"{row['fired_rate']:.2f} (n={row['fired_n']})" if row["fired_rate"] is not None else f"n={row['fired_n']}"
+            unfired = f"{row['unfired_rate']:.2f} (n={row['unfired_n']})" if row["unfired_rate"] is not None else f"n={row['unfired_n']}"
+            print(f"  {row['channel']}: fired={fired} unfired={unfired} lift={row['lift']}")
     return 0
 
 

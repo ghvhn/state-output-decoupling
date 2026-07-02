@@ -351,7 +351,9 @@ def _format_felt_map(
     right: torch.Tensor,
     rows: list[ConceptAlignment],
 ) -> str:
-    """Render the geometry as interior second-person language -- no numbers.
+    """Render the geometry as interior FIRST-person language -- no numbers.
+    Folded context conditions the model as if it were its own stream, so the
+    felt map speaks as the model's own noticing, never a narrator's.
 
     ClaimMap is a reasoning step, more internal than output. The model should
     feel the difference between the two framings, not read a spreadsheet back.
@@ -366,7 +368,7 @@ def _format_felt_map(
     b = _clip(right_text, 70)
 
     parts = [
-        f'You just held two framings against each other: "{a}" and "{b}".',
+        f'I just held two framings against each other: "{a}" and "{b}".',
         f"They {_closeness_phrase(mean_sim)}.",
     ]
     if least:
@@ -392,11 +394,11 @@ def _format_felt_map(
     if b_leans:
         parts.append(f'"{b}" carries more of {_join_phrases(b_leans[:3])}.')
     if caution is not None:
-        parts.append(f'Notice: "{caution[0]}" leans on {caution[1]}.')
+        parts.append(f'I notice "{caution[0]}" leans on {caution[1]}.')
 
     parts.append(
-        "This is your own geometry, not a verdict on which is true. "
-        "Do not report it -- answer from it."
+        "This is my own geometry, not a verdict on which is true -- "
+        "something to answer from, not to report."
     )
     return _truncate("\n".join(parts))
 
@@ -446,32 +448,54 @@ def run_activation_claimmap(payload: str, model: Any) -> str:
     return analyze_claim_pair(payload, model).felt
 
 
-def claimmap_steer_handles(model: Any, steer_delta: dict[int, torch.Tensor], layers=None, alpha: float = 0.5):
-    """Register forward hooks that nudge the NEXT generation along the A-minus-B
-    directions, so the comparison shifts the model's state, not just its prompt.
+def claimmap_steer_handles(
+    model: Any,
+    steer_delta: dict[int, torch.Tensor],
+    layers=None,
+    alpha: float = 0.0,
+    band=None,
+    cap_fraction=None,
+):
+    """Register forward hooks that nudge generation along the A-minus-B directions.
 
-    Returns hook handles; the caller MUST remove them after generation:
-        handles = claimmap_steer_handles(M, result.steer_delta)
-        try: ... generate ...
-        finally:
-            for h in handles: h.remove()
+    OFF by default (alpha=0 -> no handles). The steer delta is the RAW residual
+    difference, whose per-layer norm is large; even alpha=0.5 collapses generation
+    into a repetition loop. So steering is opt-in and must be tuned UP from ~0
+    while watching, never shipped live. Enable with :tune claimmap_alpha <small>.
 
-    Keep `alpha` modest and `layers` a mid-band subset -- full-strength
-    injection at every layer destabilizes generation the same way runaway
-    synthesis does. alpha needs tuning against a live run for your residual scale.
+    Fully flexible, always bounded: `layers` (or a `band` = (lo, hi) depth
+    fraction, defaulting to the live global steer band) picks where; `alpha`
+    picks how hard; `cap_fraction` optionally overrides the engine envelope that
+    clips the final per-token push either way.
+
+    Returns hook handles; the caller MUST remove them after generation.
     """
-    from invariants.engine import _steer_handles
+    from invariants.engine import _steer_handles, steer_band_layers
 
-    if not steer_delta:
+    if not steer_delta or alpha is None or alpha <= 0:
         return []
     n_layers = max(steer_delta) + 1
     if layers is None:
         # Middle band -- where the framing is worked through, before it commits.
-        layers = list(range(int(n_layers * 0.40), int(n_layers * 0.70)))
-    vecs = {layer: steer_delta[layer] for layer in layers if layer in steer_delta}
+        lo, hi = band if band is not None else (None, None)
+        layers = steer_band_layers(n_layers, lo=lo, hi=hi)
+    # Unit-normalize each layer's steer delta before applying. The raw residual
+    # difference has a large per-layer norm, and _steer_handles ADDS alpha*vec to
+    # EVERY token, so alpha*raw_delta collapses generation into a repetition loop
+    # (the "consensus consensus consensus" failure) even at alpha=0.5. Normalizing
+    # makes alpha the actual per-layer push magnitude (~alpha vs a residual norm of
+    # ~6-15), i.e. a bounded nudge no matter how large the raw delta is.
+    vecs = {}
+    for layer in layers:
+        if layer not in steer_delta:
+            continue
+        v = steer_delta[layer]
+        norm = v.norm()
+        if norm.item() > 0:
+            vecs[layer] = v / norm
     if not vecs:
         return []
-    return _steer_handles(model, vecs, list(vecs.keys()), alpha)
+    return _steer_handles(model, vecs, list(vecs.keys()), alpha, cap_fraction=cap_fraction)
 
 
 def split_claims(text: str) -> list[str]:

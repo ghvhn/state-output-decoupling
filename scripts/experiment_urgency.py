@@ -1,6 +1,6 @@
 import torch
 from pathlib import Path
-from invariants.engine import load_model, generate_text
+from invariants.engine import load_model, generate_text, _cap_steer
 
 def get_urgency_hook(urgency_vector, coefficient=1.0):
     def hook(module, input, output):
@@ -10,12 +10,14 @@ def get_urgency_hook(urgency_vector, coefficient=1.0):
         else:
             h = output
             rest = ()
-            
+
+        # Coefficient stays a free knob; the applied push routes through the
+        # shared steering envelope so it can never swamp the residual.
         if h.dim() == 3:
-            h[:, -1:, :] += coefficient * urgency_vector.to(h.device)
+            h[:, -1:, :] += _cap_steer(coefficient * urgency_vector.to(h.device), h[:, -1:, :])
         elif h.dim() == 2:
             # If it's somehow 2D (batch, hidden_dim) or (seq_len, hidden_dim)
-            h[-1:, :] += coefficient * urgency_vector.to(h.device)
+            h[-1:, :] += _cap_steer(coefficient * urgency_vector.to(h.device), h[-1:, :])
             
         if isinstance(output, tuple):
             return (h,) + rest

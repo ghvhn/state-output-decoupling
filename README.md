@@ -144,8 +144,7 @@ preset for the Qwen fallback with downloads enabled.
 pre-downloads the ~16 GB model into the local cache (the runner loads
 local-files-only, so this step is required), and runs a clean `bench-standard`
 pass to `invariants\out\bench_bootstrap.json`. The success Easter egg stays on:
-the interactive shell launches after the final summary is written. Pass
-`--boring` to the script's underlying run to suppress it for unattended use.
+the interactive shell launches after the final summary is written.
 
 `requirements-bench.txt` is the minimal set to *run* the benchmark. It drops the
 TDA / interpretability stack (`gudhi`, `transformer_lens`, `scikit-learn`,

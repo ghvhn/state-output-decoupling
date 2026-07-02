@@ -27,6 +27,9 @@ scratch_*.py
 
 # Benchmark Outputs
 invariants/out/*.json
+!invariants/out/vector_latent_space_*.json
+!invariants/out/vector_network_*.json
+!invariants/out/vector_entry_network_*.json
 invariants/out/*.html
 invariants/out/*.pid
 invariants/out/*.marker.txt

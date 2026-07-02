@@ -96,6 +96,12 @@ class SteerMapEvent:
     final_correct: Optional[bool] = None
     event_success: Optional[bool] = None
     success_label: str = "unknown"
+    # Which kind of evidence labeled this event. "gold" = scored benchmark
+    # outcome (final_correct + acceptance). "conversation" = the live, label-free
+    # productivity read of the turn the steer happened in (sense_score vs a
+    # tunable threshold) -- humans learn from conversations, and so does the
+    # band, but the lanes stay separate and auditable.
+    success_basis: str = "gold"
     step_index: Optional[int] = None
     step_bucket: str = "unknown"
     start_layer: Optional[int] = None
@@ -116,6 +122,17 @@ class SteerMapEvent:
 
 class SteerMapStore:
     """Append-only steering outcome store plus step/layer aggregation."""
+
+    # Channels the agentic engine accounts for per generation (see
+    # agentic_engine._note_channel). Zero-filled on ingest so labeled runs carry
+    # the unfired contrast a lift readout needs.
+    KNOWN_STEER_CHANNELS = (
+        "expert_branch",
+        "synthesis_delta",
+        "cache_delta",
+        "organic_correction",
+        "urgency",
+    )
 
     def __init__(
         self,
@@ -155,6 +172,208 @@ class SteerMapStore:
             event.event_success = False
         return event
 
+    @staticmethod
+    def _resolve_outcome(attempt, final_correct, conversation_outcome):
+        """One outcome policy for every event type. Gold (final_correct +
+        acceptance) always wins; with no gold, a live conversation labels via
+        its productivity read — deterministic given (score, threshold), both
+        stored so the label stays auditable and re-derivable."""
+        attempt = attempt or {}
+        attempt_accepted = _coerce_bool(attempt.get("accepted"))
+        final = _coerce_bool(final_correct)
+        basis = "gold"
+        if final is None:
+            success = None
+            label = "unlabeled"
+        elif final and (attempt_accepted is not False):
+            success = True
+            label = "final_correct"
+        elif final and attempt_accepted is False:
+            success = False
+            label = "final_correct_attempt_unaccepted"
+        else:
+            success = False
+            label = "final_wrong"
+        if final is None and isinstance(conversation_outcome, dict):
+            score = conversation_outcome.get("score")
+            threshold = conversation_outcome.get("threshold", 0.0)
+            if isinstance(score, (int, float)) and isinstance(threshold, (int, float)):
+                basis = "conversation"
+                success = bool(float(score) >= float(threshold))
+                label = "conversation_productive" if success else "conversation_unproductive"
+        return attempt_accepted, final, basis, success, label
+
+    def _record_channel_stats(
+        self,
+        record: dict[str, Any],
+        *,
+        source: str,
+        run_id: Optional[str],
+        row_index: Optional[int],
+        method: Optional[str],
+        attempt: dict[str, Any],
+        final_correct: Optional[bool],
+        source_path: Optional[str],
+        record_index: Optional[int],
+        conversation_outcome: Optional[dict[str, Any]],
+    ) -> Optional[list[SteerMapEvent]]:
+        """One event per channel per generation, zero-filled for known channels
+        that stayed silent, so a labeled run answers 'did outcomes differ when
+        this channel fired vs when it did not' (channel_lift). Whether a
+        channel should be ON is decided by this data, not by assertion."""
+        attempt_accepted, final, basis, success, label = self._resolve_outcome(
+            attempt, final_correct, conversation_outcome
+        )
+        channels_present = record.get("channels") if isinstance(record.get("channels"), dict) else {}
+        flags = record.get("flags") if isinstance(record.get("flags"), dict) else {}
+        any_fired = any(
+            (stats or {}).get("applications") for stats in channels_present.values()
+        )
+        if success is None and not any_fired:
+            return None  # nothing fired and nothing labeled: no evidence either way
+        created: list[SteerMapEvent] = []
+        for name in sorted(set(self.KNOWN_STEER_CHANNELS) | set(channels_present)):
+            stats = channels_present.get(name) or {}
+            applications = int(stats.get("applications", 0) or 0)
+            event_key = None
+            if source_path or row_index is not None or record_index is not None:
+                event_key = json.dumps(
+                    {
+                        "source_path": source_path,
+                        "row_index": row_index,
+                        "method": method,
+                        "attempt_mode": attempt.get("mode"),
+                        "attempt_round": attempt.get("round_index"),
+                        "record_index": record_index,
+                        "channel": name,
+                    },
+                    sort_keys=True,
+                    ensure_ascii=True,
+                )
+            if self.has_event_key(event_key):
+                continue
+            metrics: dict[str, Any] = {
+                "fired": applications > 0,
+                "applications": applications,
+                "ratio_sum": float(stats.get("ratio_sum", 0.0) or 0.0),
+                "ratio_max": float(stats.get("ratio_max", 0.0) or 0.0),
+                "clipped": int(stats.get("clipped", 0) or 0),
+            }
+            if basis == "conversation":
+                metrics["conversation_sense"] = float(conversation_outcome["score"])
+                metrics["conversation_threshold"] = float(conversation_outcome.get("threshold", 0.0))
+            created.append(
+                self.append(
+                    SteerMapEvent(
+                        kind="steer_channel",
+                        action=f"channel_{name}",
+                        source=source,
+                        event_key=event_key,
+                        run_id=run_id,
+                        row_index=row_index,
+                        method=method,
+                        attempt_mode=attempt.get("mode"),
+                        attempt_round=attempt.get("round_index"),
+                        attempt_accepted=attempt_accepted,
+                        final_correct=final,
+                        event_success=success,
+                        success_label=label,
+                        success_basis=basis,
+                        metrics=metrics,
+                        provenance={
+                            "source_path": source_path,
+                            "record_type": "steer_channel_stats",
+                            "record_index": record_index,
+                            "flags": flags,
+                        },
+                    )
+                )
+            )
+        return created or None
+
+    def record_layer_steer(
+        self,
+        channel: str,
+        layer: int,
+        alpha: float,
+        conversation_outcome: Optional[dict[str, Any]] = None,
+        metrics: Optional[dict[str, Any]] = None,
+        source: str = "interactive",
+    ) -> SteerMapEvent:
+        """One SINGLE-layer steer application, labeled by the turn it shaped.
+        This is the transfer-free evidence for where steering works: the push
+        landed on exactly one layer, so the outcome attributes to that layer —
+        no band confound, no borrowing from a different channel's geometry."""
+        _, _, basis, success, label = self._resolve_outcome(None, None, conversation_outcome)
+        event_metrics = {"alpha": float(alpha)}
+        if metrics:
+            event_metrics.update(metrics)
+        if basis == "conversation":
+            event_metrics["conversation_sense"] = float(conversation_outcome["score"])
+            event_metrics["conversation_threshold"] = float(conversation_outcome.get("threshold", 0.0))
+        return self.append(
+            SteerMapEvent(
+                kind="layer_steer",
+                action=f"layer_steer_{channel}",
+                source=source,
+                start_layer=int(layer),
+                end_layer=int(layer),
+                event_success=success,
+                success_label=label,
+                success_basis=basis,
+                metrics=event_metrics,
+            )
+        )
+
+    def layer_steer_counts(self, channel: str) -> dict[int, int]:
+        """How many single-layer steers each layer has received for `channel`
+        — the rotation input for pick_sweep_layer (least-tested first)."""
+        counts: dict[int, int] = {}
+        action = f"layer_steer_{channel}"
+        for event in self.events:
+            if event.kind == "layer_steer" and event.action == action and event.start_layer is not None:
+                counts[int(event.start_layer)] = counts.get(int(event.start_layer), 0) + 1
+        return counts
+
+    def channel_lift(self, basis: str = "any") -> list[dict[str, Any]]:
+        """Per-channel fired-vs-unfired outcome comparison over labeled channel
+        events. lift > 0 means generations where the channel fired ended better
+        than ones where it did not — the honest 'should this be on' readout.
+        Deterministic; `basis` restricts the evidence lane like suggest_band."""
+        if basis not in {"any", "gold", "conversation"}:
+            raise ValueError(f"basis must be 'any', 'gold', or 'conversation', got {basis!r}")
+        rows: dict[str, dict[str, Any]] = {}
+        for event in self.events:
+            if event.kind != "steer_channel" or event.event_success is None:
+                continue
+            event_basis = getattr(event, "success_basis", "gold") or "gold"
+            if basis != "any" and event_basis != basis:
+                continue
+            name = event.action[len("channel_"):] if event.action.startswith("channel_") else event.action
+            fired = bool((event.metrics or {}).get("fired"))
+            row = rows.setdefault(
+                name,
+                {"channel": name, "fired_n": 0, "fired_success": 0, "unfired_n": 0, "unfired_success": 0},
+            )
+            bucket = "fired" if fired else "unfired"
+            row[f"{bucket}_n"] += 1
+            if event.event_success:
+                row[f"{bucket}_success"] += 1
+        out: list[dict[str, Any]] = []
+        for row in sorted(rows.values(), key=lambda r: r["channel"]):
+            fired_rate = row["fired_success"] / row["fired_n"] if row["fired_n"] else None
+            unfired_rate = row["unfired_success"] / row["unfired_n"] if row["unfired_n"] else None
+            row["fired_rate"] = fired_rate
+            row["unfired_rate"] = unfired_rate
+            row["lift"] = (
+                round(fired_rate - unfired_rate, 4)
+                if fired_rate is not None and unfired_rate is not None
+                else None
+            )
+            row["basis"] = basis
+            out.append(row)
+        return out
+
     def append(self, event: SteerMapEvent) -> SteerMapEvent:
         event.step_bucket = _bucket_step(event.step_index)
         event.layer_key = _layer_key(event.start_layer, event.end_layer)
@@ -182,10 +401,24 @@ class SteerMapStore:
         final_correct: Optional[bool] = None,
         source_path: Optional[str] = None,
         record_index: Optional[int] = None,
-    ) -> Optional[SteerMapEvent]:
+        conversation_outcome: Optional[dict[str, Any]] = None,
+    ):
         if not isinstance(record, dict):
             return None
         attempt = attempt or {}
+        if record.get("type") == "steer_channel_stats":
+            return self._record_channel_stats(
+                record,
+                source=source,
+                run_id=run_id,
+                row_index=row_index,
+                method=method,
+                attempt=attempt,
+                final_correct=final_correct,
+                source_path=source_path,
+                record_index=record_index,
+                conversation_outcome=conversation_outcome,
+            )
         metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
         if record.get("type") == "routing_trace":
             action = f"route_{record.get('winner') or 'unknown'}"
@@ -212,20 +445,9 @@ class SteerMapStore:
         else:
             return None
 
-        attempt_accepted = _coerce_bool(attempt.get("accepted"))
-        final = _coerce_bool(final_correct)
-        if final is None:
-            success = None
-            label = "unlabeled"
-        elif final and (attempt_accepted is not False):
-            success = True
-            label = "final_correct"
-        elif final and attempt_accepted is False:
-            success = False
-            label = "final_correct_attempt_unaccepted"
-        else:
-            success = False
-            label = "final_wrong"
+        attempt_accepted, final, basis, success, label = self._resolve_outcome(
+            attempt, final_correct, conversation_outcome
+        )
 
         event_key = None
         if source_path or row_index is not None or record_index is not None:
@@ -249,6 +471,9 @@ class SteerMapStore:
         if self.has_event_key(event_key):
             return None
 
+        if basis == "conversation":
+            metrics["conversation_sense"] = float(conversation_outcome["score"])
+            metrics["conversation_threshold"] = float(conversation_outcome.get("threshold", 0.0))
         event = SteerMapEvent(
             kind="synthesis_record",
             action=action,
@@ -263,6 +488,7 @@ class SteerMapStore:
             final_correct=final,
             event_success=success,
             success_label=label,
+            success_basis=basis,
             step_index=int(step_index) if isinstance(step_index, int) else step_index,
             start_layer=start_layer,
             end_layer=end_layer,
@@ -342,9 +568,100 @@ class SteerMapStore:
                             imported += 1
         return imported
 
+    def suggest_band(
+        self, n_layers: int, min_events: int = 8, basis: str = "any", evidence: str = "any"
+    ) -> Optional[dict[str, Any]]:
+        """Data-informed steer band: derive the [lo, hi) depth-fraction window
+        deterministically from acceptance-aware per-layer outcomes.
+
+        `basis` picks the evidence lane: "gold" (scored benchmark outcomes),
+        "conversation" (live label-free productivity reads — humans learn from
+        conversations, so can the band), or "any" (both, with the composition
+        reported so the mix is never hidden).
+
+        `evidence` picks the event kind, because per-layer outcomes are NOT
+        interchangeable across intervention types: "synthesis" = where
+        synthesis/cache deltas landed well (a different channel's geometry);
+        "layer_steer" = single-layer steer applications — the transfer-free
+        basis for the steering band itself; "any" = both, mix reported.
+
+        Procedure (no RNG, no smoothing — same events, same band):
+        1. Attribute each labeled event to the layer its delta landed on
+           (end_layer, else start_layer).
+        2. A layer is eligible when it has >= min_events labeled events AND its
+           success rate >= the overall labeled success rate.
+        3. The band spans [min eligible, max eligible + 1) as depth fractions.
+
+        Returns None when no layer clears the evidence bar — the caller keeps
+        its explicit prior instead of steering on vibes."""
+        n_layers = int(n_layers)
+        if n_layers <= 0:
+            return None
+        if basis not in {"any", "gold", "conversation"}:
+            raise ValueError(f"basis must be 'any', 'gold', or 'conversation', got {basis!r}")
+        if evidence not in {"any", "synthesis", "layer_steer"}:
+            raise ValueError(f"evidence must be 'any', 'synthesis', or 'layer_steer', got {evidence!r}")
+        per_layer: dict[int, dict[str, int]] = {}
+        labeled = 0
+        successes = 0
+        labeled_by_basis: dict[str, int] = {}
+        labeled_by_evidence: dict[str, int] = {}
+        for event in self.events:
+            if event.event_success is None:
+                continue
+            event_basis = getattr(event, "success_basis", "gold") or "gold"
+            if basis != "any" and event_basis != basis:
+                continue
+            event_evidence = "layer_steer" if event.kind == "layer_steer" else "synthesis"
+            if evidence != "any" and event_evidence != evidence:
+                continue
+            layer = event.end_layer if event.end_layer is not None else event.start_layer
+            if not isinstance(layer, int) or not (0 <= layer < n_layers):
+                continue
+            row = per_layer.setdefault(layer, {"n": 0, "success": 0})
+            row["n"] += 1
+            labeled += 1
+            labeled_by_basis[event_basis] = labeled_by_basis.get(event_basis, 0) + 1
+            labeled_by_evidence[event_evidence] = labeled_by_evidence.get(event_evidence, 0) + 1
+            if event.event_success:
+                row["success"] += 1
+                successes += 1
+        if not labeled:
+            return None
+        overall = successes / labeled
+        eligible = sorted(
+            layer
+            for layer, row in per_layer.items()
+            if row["n"] >= max(1, int(min_events)) and (row["success"] / row["n"]) >= overall
+        )
+        if not eligible:
+            return None
+        lo = eligible[0] / n_layers
+        hi = (eligible[-1] + 1) / n_layers
+        if not (0.0 <= lo < hi <= 1.0):
+            return None
+        return {
+            "lo": lo,
+            "hi": hi,
+            "n_layers": n_layers,
+            "eligible_layers": eligible,
+            "overall_success_rate": overall,
+            "labeled_events": labeled,
+            "labeled_by_basis": labeled_by_basis,
+            "labeled_by_evidence": labeled_by_evidence,
+            "basis": basis,
+            "evidence": evidence,
+            "min_events": int(min_events),
+            "per_layer": {
+                layer: {"n": row["n"], "success_rate": row["success"] / row["n"]}
+                for layer, row in sorted(per_layer.items())
+            },
+        }
+
     def aggregate(self) -> dict[str, Any]:
         groups: dict[str, dict[str, Any]] = {}
         for event in self.events:
+            event_basis = getattr(event, "success_basis", "gold") or "gold"
             key = "|".join(
                 [
                     event.kind,
@@ -352,6 +669,7 @@ class SteerMapStore:
                     event.layer_key,
                     event.step_bucket,
                     str(event.expert or event.target_vector or ""),
+                    event_basis,
                 ]
             )
             row = groups.setdefault(
@@ -362,6 +680,7 @@ class SteerMapStore:
                     "layer_key": event.layer_key,
                     "step_bucket": event.step_bucket,
                     "expert_or_target": event.expert or event.target_vector,
+                    "success_basis": event_basis,
                     "n": 0,
                     "labeled_n": 0,
                     "success": 0,

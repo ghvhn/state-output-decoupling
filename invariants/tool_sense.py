@@ -22,7 +22,10 @@ from typing import Any, Callable, Optional
 @dataclass
 class Tool:
     name: str                                   # tuner trigger name (born tunable)
-    detect: Callable[[str], tuple[float, Any]]  # text -> (signal, payload or None)
+    detect: Callable[..., tuple[float, Any]]    # (text, state) -> (signal, payload or None)
+                                                # state = the live activation dict
+                                                # (last_phenomenality, ...). A tool fires
+                                                # from STATE, not a text tag.
     act: Callable[[Any, Any], Optional[list]]   # (payload, model) -> steer handles to
                                                 # apply to the remaining generation
     comparator: str = ">="                      # fire when signal >= threshold (or <=)
@@ -46,12 +49,19 @@ class ToolSense:
             return signal <= threshold
         return signal >= threshold
 
-    def __call__(self, text: str):
-        """Run every detector on the text so far; fire the ones that cross."""
+    def __call__(self, text: str, state: Optional[dict] = None):
+        """Run every detector on the text-so-far AND the live activation state;
+        fire the ones that cross. `state` is the engine's activation dict (e.g.
+        state["last_phenomenality"]) so a tool triggers from the model's own
+        internal signature, not a text tag."""
         for tool in self.tools:
             if tool.name in self._fired:
                 continue
-            signal, payload = tool.detect(text)
+            try:
+                signal, payload = tool.detect(text, state)
+            except TypeError:
+                # Back-compat: a detector that only accepts text.
+                signal, payload = tool.detect(text)
             if payload is None:
                 continue
             if self._crosses(tool, signal):

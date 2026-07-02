@@ -4,7 +4,7 @@ from pathlib import Path
 import torch
 import numpy as np
 
-from invariants.engine import load_model, extract, generate_text
+from invariants.engine import load_model, extract, generate_text, _cap_steer
 from invariants.taskscope import ITEMS, FRAMES
 
 OUT = Path(__file__).parent / "out"
@@ -12,13 +12,14 @@ OUT = Path(__file__).parent / "out"
 def subspace_steer_handles(M, belief_vec, layer, alpha, scrub_dims):
     add = (alpha * belief_vec).to(M.device)
     handles = []
-    
+
     def hook(module, inp, out, add=add, scrub_dims=scrub_dims):
         hs = out[0] if isinstance(out, tuple) else out
         # In transformers generation, hs shape varies (usually [batch, seq_len, d_model])
-        # We want to intervene on the last token position
+        # We want to intervene on the last token position; the push routes through
+        # the shared steering envelope so alpha stays flexible but bounded.
         hs_mod = hs.clone()
-        hs_mod[:, -1, :] = hs_mod[:, -1, :] + add.to(hs_mod.dtype)
+        hs_mod[:, -1, :] = hs_mod[:, -1, :] + _cap_steer(add, hs_mod[:, -1, :])
         
         # Scrub the topological barrier dimensions (Persona Mask)
         for d in scrub_dims:

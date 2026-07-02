@@ -136,7 +136,20 @@ class SelfConceptController:
             "scores": scores,
             "nearest": nearest,
             "context": context,
+            "map_available": bool(self.latent or self.network),
         }
+
+        if not evidence["map_available"]:
+            return SelfConceptDecision(
+                action="observe_only",
+                allowed=False,
+                intervention_type="none",
+                strength=0.0,
+                rationale="No vector relation map is loaded; self-concept orientation is disabled.",
+                evidence=evidence,
+                map_relations={},
+                source_map=source_map,
+            )
 
         flow_relation = self.relation("needless_interrupt_vector", "validated_flow_vector")
         if needless_interrupt > 0.1 and ambiguity < 0.12 and flow_relation is not None and flow_relation < 0:
@@ -157,7 +170,7 @@ class SelfConceptController:
                 source_map=source_map,
             )
 
-        if self_momentum > 0.14 and ambiguity < 0.18 and context.get("task_grounding_low", True):
+        if self_momentum > 0.14 and ambiguity < 0.18 and context.get("task_grounding_low", False):
             relation = self.relation("self_referential_momentum_vector", "narrowing_in_vector")
             return SelfConceptDecision(
                 action="orient_toward_task_grounding",
@@ -264,4 +277,3 @@ def format_orientation_tool_result(decision: SelfConceptDecision) -> str:
         f"- strength: {decision.strength:.3f}\n"
         f"- rationale: {decision.rationale}"
     )
-

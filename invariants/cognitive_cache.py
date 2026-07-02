@@ -123,7 +123,17 @@ class CognitiveCache:
             self.file.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.file.with_suffix(self.file.suffix + ".tmp")
             torch.save(self.memory, tmp)
-            os.replace(tmp, self.file)
+            try:
+                os.replace(tmp, self.file)
+            except PermissionError:
+                # Windows: the target can be lock-held (AV scan, indexer,
+                # another open handle) while still writable. Fall back to an
+                # in-place copy -- not atomic, but the tmp file keeps a
+                # complete good snapshot if the copy is interrupted.
+                import shutil
+
+                shutil.copyfile(tmp, self.file)
+                os.unlink(tmp)
         except Exception as e:
             print(f"    [Cognitive Cache] Save skipped ({e}); {len(self.memory)} memories kept in RAM.")
         

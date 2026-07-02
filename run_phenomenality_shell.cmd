@@ -1,5 +1,7 @@
 @echo off
 cd /d "%~dp0"
+chcp 65001 >nul
+set PYTHONIOENCODING=utf-8
 rem  Optional first argument: a model id/path to run the egg shell on, e.g.
 rem      run_phenomenality_shell.cmd Qwen/Qwen2.5-1.5B-Instruct
 rem  When launched from the benchmark egg, the model is passed via EGG_MODEL.
