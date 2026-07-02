@@ -9,10 +9,12 @@ captured. This replaces the TransformerLens path, which was ~3s per forward call
 """
 
 import gc
+import math
 import time
 import ctypes
 import os
 import re
+from collections import deque
 from pathlib import Path
 
 import torch
@@ -537,20 +539,274 @@ def _ablation_handles(M: HF, direction):
     return [layer.register_forward_hook(hook) for layer in M.model.model.layers]
 
 
-def _steer_handles(M: HF, vecs, layers, alpha):
-    """ADD alpha * vecs[l] to the residual leaving each layer l in `layers`.
-    The opposite move to ablation: instead of removing the steered/unsteered
-    axis we PUSH along it (alpha * (unsteered - steered)) to pull the steered
-    prompt toward the committing manifold. `alpha` can be a scalar or a dict of layer-specific alphas."""
+# --- steering bound: one envelope, every channel ---------------------------
+#
+# Policy ("bounded but entirely flexible"): every ADDITIVE injection into the
+# residual stream — steer handles, elastic steers, agentic synthesis/cache/
+# organic deltas, urgency, claimmap/memory steers, archival experiment hooks —
+# passes through _cap_steer. The per-channel knobs (alphas, steer_fraction,
+# coefficients, layer bands) stay entirely flexible: any magnitude, any layers,
+# live-tunable. But the final push is always clipped to a fraction of the
+# residual it lands in, so no knob setting can replace the model's state and
+# collapse generation. The fraction and the default layer band are themselves
+# adjustable — env (TDA_STEER_CAP_FRACTION, TDA_STEER_BAND_LO/HI), setters,
+# :tune steer_cap_fraction / steer_band_lo / steer_band_hi in the shell, or a
+# per-call cap_fraction override — yet must stay finite: the envelope can be
+# moved, never removed. Projection-removal ablations and donor-state patches
+# are exempt; they are bounded by construction (they only remove or swap real
+# states, never amplify an injected vector).
+
+STEER_CAP_FRACTION = 0.5   # default envelope: |push| <= fraction * |residual|
+STEER_BAND = (0.40, 0.70)  # default mid-band for band-style steers
+
+
+def _finite_fraction(value, what="steer cap fraction"):
+    v = float(value)
+    if not math.isfinite(v) or v < 0.0:
+        raise ValueError(f"{what} must be a finite number >= 0, got {value!r}")
+    return v
+
+
+def _band_pair(lo, hi, what="steer band"):
+    lo, hi = float(lo), float(hi)
+    if not (math.isfinite(lo) and math.isfinite(hi)) or not (0.0 <= lo < hi <= 1.0):
+        raise ValueError(f"{what} must satisfy 0 <= lo < hi <= 1, got ({lo!r}, {hi!r})")
+    return lo, hi
+
+
+def _env_fraction(name, default):
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return _finite_fraction(raw, name)
+    except (TypeError, ValueError):
+        print(f"[Steer] Ignoring invalid {name}={raw!r}; using {default}.")
+        return default
+
+
+_steer_cap_fraction = _env_fraction("TDA_STEER_CAP_FRACTION", STEER_CAP_FRACTION)
+try:
+    _steer_band = _band_pair(
+        _env_fraction("TDA_STEER_BAND_LO", STEER_BAND[0]),
+        _env_fraction("TDA_STEER_BAND_HI", STEER_BAND[1]),
+    )
+except ValueError:
+    print("[Steer] Ignoring invalid TDA_STEER_BAND_LO/HI; using defaults.")
+    _steer_band = STEER_BAND
+
+
+def get_steer_cap_fraction():
+    return _steer_cap_fraction
+
+
+def set_steer_cap_fraction(value):
+    """Move the envelope live. Any finite fraction >= 0 is allowed (0 = global
+    steering kill-switch); inf/nan/negative raise, so a bound always exists."""
+    global _steer_cap_fraction
+    _steer_cap_fraction = _finite_fraction(value)
+    return _steer_cap_fraction
+
+
+def get_steer_band():
+    return _steer_band
+
+
+def set_steer_band(lo, hi):
+    global _steer_band
+    _steer_band = _band_pair(lo, hi)
+    return _steer_band
+
+
+def steer_band_layers(n_layers, lo=None, hi=None):
+    """Layer indices for band-style steers: the [lo, hi) depth fraction.
+    Defaults to the live global band; pass lo/hi for a per-call band."""
+    glo, ghi = _steer_band
+    lo, hi = _band_pair(glo if lo is None else lo, ghi if hi is None else hi)
+    n = int(n_layers)
+    return list(range(int(n * lo), int(n * hi)))
+
+
+# --- data-informed calibration ---------------------------------------------
+#
+# The defaults above are explicit PRIORS, not findings. The honest numbers come
+# from observation: _cap_steer records the ATTEMPTED push/residual ratio of
+# every application (before clipping), so the cap can be calibrated to an exact
+# percentile of the distribution the system actually produces — Gavin's spine:
+# a threshold calibrated to a percentile of its own history cannot be wrong
+# about the scale, only about the fraction, which is the one honest knob left.
+# Deterministic throughout: drop-oldest window (no reservoir sampling), exact
+# sorted-order percentile (no RNG, no smoothing). Same observations -> same
+# bound. And deliberate throughout: nothing recalibrates itself mid-run; the
+# cap moves only when calibrate_steer_cap_fraction is called (shell:
+# `:tune steer_cap_fraction auto [pct]`). The band's data path is outcome-based
+# instead — SteerMapStore.suggest_band derives it from acceptance-aware
+# per-layer success, `:tune steer_band auto`.
+
+STEER_TELEMETRY_MAX = 8192          # drop-oldest observation window
+STEER_CAP_PERCENTILE = min(_env_fraction("TDA_STEER_CAP_PERCENTILE", 95.0), 100.0)
+STEER_CAP_MIN_N = 64                # refuse to calibrate on less evidence
+
+_steer_attempts: deque = deque(maxlen=STEER_TELEMETRY_MAX)
+_steer_apply_count = 0
+_steer_clip_count = 0
+
+
+def reset_steer_telemetry():
+    global _steer_apply_count, _steer_clip_count
+    _steer_attempts.clear()
+    _steer_apply_count = 0
+    _steer_clip_count = 0
+
+
+def _percentile(sorted_data, pct):
+    """Exact order-statistic percentile: deterministic, no interpolation."""
+    if not sorted_data:
+        return None
+    idx = int(round((pct / 100.0) * (len(sorted_data) - 1)))
+    return sorted_data[idx]
+
+
+def steer_telemetry_stats():
+    data = sorted(_steer_attempts)
+    return {
+        "n": len(data),
+        "window": STEER_TELEMETRY_MAX,
+        "applied": _steer_apply_count,
+        "clipped": _steer_clip_count,
+        "clip_rate": (_steer_clip_count / _steer_apply_count) if _steer_apply_count else None,
+        "min": _percentile(data, 0),
+        "q25": _percentile(data, 25),
+        "med": _percentile(data, 50),
+        "q75": _percentile(data, 75),
+        "q95": _percentile(data, 95),
+        "max": _percentile(data, 100),
+    }
+
+
+def steer_cap_from_data(percentile=None, min_n=STEER_CAP_MIN_N):
+    """The cap the observed distribution implies: the exact `percentile` of
+    attempted push/residual ratios (admit that fraction of natural pushes
+    untouched, clip the rest). Returns None when there is not enough evidence
+    (< min_n observations) — the explicit prior stays in force. Read-only."""
+    pct = STEER_CAP_PERCENTILE if percentile is None else float(percentile)
+    if not (math.isfinite(pct) and 0.0 <= pct <= 100.0):
+        raise ValueError(f"percentile must be in [0, 100], got {percentile!r}")
+    data = sorted(_steer_attempts)
+    if len(data) < max(1, int(min_n)):
+        return None
+    return _percentile(data, pct)
+
+
+def calibrate_steer_cap_fraction(percentile=None, min_n=STEER_CAP_MIN_N):
+    """Deliberately move the envelope to the data-implied cap. Returns the new
+    cap fraction, or None (cap unchanged) when evidence is insufficient."""
+    value = steer_cap_from_data(percentile=percentile, min_n=min_n)
+    if value is None:
+        return None
+    return set_steer_cap_fraction(value)
+
+
+def axis_drift(vecs):
+    """Does 'one vector' mean one thing across depth? Adjacent-layer cosines of
+    a per-layer vector dict {layer: tensor}. cos ~1 = the axis persists between
+    neighboring layers; low or negative = the direction rotates, and applying
+    it as a single band-wide axis is steering different things at different
+    layers. Deterministic, model-free; returns per-pair cosines + summary."""
+    layers = sorted(int(l) for l in (vecs or {}))
+    pairs = {}
+    for a, b in zip(layers, layers[1:]):
+        if b != a + 1:
+            continue
+        va, vb = vecs[a].float().flatten(), vecs[b].float().flatten()
+        na, nb = va.norm().item(), vb.norm().item()
+        if na <= 0 or nb <= 0:
+            continue
+        pairs[a] = float((va @ vb) / (na * nb))
+    values = list(pairs.values())
+    return {
+        "pairs": pairs,  # {layer: cos(v_layer, v_layer+1)}
+        "mean": (sum(values) / len(values)) if values else None,
+        "min": min(values) if values else None,
+    }
+
+
+def drift_at_layer(drift, layer):
+    """Mean adjacent cosine touching `layer` (with layer-1 and layer+1), or
+    None when no neighbors exist — how stable the axis is where a single-layer
+    steer lands."""
+    pairs = (drift or {}).get("pairs") or {}
+    touching = [pairs[k] for k in (layer - 1, layer) if k in pairs]
+    return (sum(touching) / len(touching)) if touching else None
+
+
+def pick_sweep_layer(band_layers, counts):
+    """Single-layer isolation: the least-tested layer in the band speaks next
+    (ties -> lowest index). Deterministic, so per-layer evidence accrues evenly
+    — the layer analogue of the channel ablation's one-variable rule."""
+    band_layers = list(band_layers or [])
+    if not band_layers:
+        return None
+    counts = counts or {}
+    return min(band_layers, key=lambda l: (int(counts.get(l, 0)), l))
+
+
+def _cap_steer(add, h, cap_fraction=None):
+    """Scale a steer vector so its norm never exceeds the cap fraction of each
+    token's own residual norm (per row for batched adds). Small, calibrated steers
+    pass through unchanged; only over-steers (an add as large as the state it lands
+    in) are clipped. This makes catastrophic over-steering, which replaces the
+    thought and collapses generation into word-salad or a repetition loop,
+    impossible for every caller of the shared steer primitives, no matter what
+    alpha or raw-delta norm they pass. `cap_fraction` overrides the live global
+    for this call only; non-finite adds are dropped to zero rather than injected."""
+    global _steer_apply_count, _steer_clip_count
+    frac = _steer_cap_fraction if cap_fraction is None else _finite_fraction(cap_fraction)
+    a = add.to(h.dtype)
+    if a.requires_grad:
+        # TTT-synthesis probes the choke point from INSIDE its gradient loop
+        # with the trainable delta. Capping there would reshape the synthesis
+        # optimization landscape (a behavioral deviation from the earned run)
+        # and flood the telemetry with simulated pushes. The eventual
+        # APPLICATION is always detached, so every push that actually lands
+        # in the residual stream still passes through the cap below.
+        return a
+    if not torch.isfinite(a).all():
+        return torch.zeros_like(a)
+    a_norm = a.float().norm(dim=-1, keepdim=True)
+    if float(a_norm.max()) <= 0.0:
+        return a
+    h_norm = h.float().norm(dim=-1, keepdim=True)
+    # Telemetry: the ATTEMPTED ratio, pre-clip — the distribution the cap is
+    # deliberately calibrated from (steer_cap_from_data). Deterministic window.
+    ratio = float((a_norm / h_norm.clamp_min(1e-30)).max())
+    if math.isfinite(ratio):
+        _steer_attempts.append(ratio)
+        _steer_apply_count += 1
+        if ratio > frac:
+            _steer_clip_count += 1
+    cap = frac * h_norm
+    scale = torch.clamp(cap / a_norm.clamp_min(1e-30), max=1.0)
+    return (a.float() * scale).to(h.dtype)
+
+
+def _steer_handles(M: HF, vecs, layers, alpha, cap_fraction=None):
+    """ADD alpha * vecs[l] to the residual leaving each layer l in `layers`, capped
+    per-token so it can never over-steer (see _cap_steer). Pushes along the axis to
+    pull the prompt toward the committing manifold. `alpha` can be a scalar or a
+    dict of layer-specific alphas; `cap_fraction` optionally overrides the live
+    global envelope for these handles only."""
     handles = []
     for l in layers:
         a = alpha[l] if isinstance(alpha, dict) else alpha
         add = (a * vecs[l]).to(M.device)
 
-        def hook(module, inp, out, add=add):
+        def hook(module, inp, out, add=add, cap_fraction=cap_fraction):
+            h = out[0] if isinstance(out, tuple) else out
+            newh = h + _cap_steer(add, h, cap_fraction=cap_fraction)
             if isinstance(out, tuple):
-                return (out[0] + add.to(out[0].dtype),) + tuple(out[1:])
-            return out + add.to(out.dtype)
+                return (newh,) + tuple(out[1:])
+            return newh
 
         handles.append(M.model.model.layers[l].register_forward_hook(hook))
     return handles
@@ -558,10 +814,11 @@ def _steer_handles(M: HF, vecs, layers, alpha):
 
 import torch.nn.functional as F
 
-def _elastic_steer_handles(M: HF, vec, alpha, epsilon=0.05):
+def _elastic_steer_handles(M: HF, vec, alpha, epsilon=0.05, cap_fraction=None):
     """
-    Dynamically injects `alpha * vec` into the residual stream ONLY when the 
+    Dynamically injects `alpha * vec` into the residual stream ONLY when the
     cosine velocity (1 - cos(h_{l-1}, h_l)) is below `epsilon` (i.e., inside the plateau).
+    `cap_fraction` optionally overrides the live global envelope for these handles.
     """
     handles = []
     state = {"prev_h": None}
@@ -592,9 +849,10 @@ def _elastic_steer_handles(M: HF, vec, alpha, epsilon=0.05):
             # Update prev_h for the next layer
             state["prev_h"] = h.detach().clone()
             
-            # Inject the vector only for tokens in the plateau
+            # Inject the vector only for tokens in the plateau, capped per-token so
+            # it can never over-steer (see _cap_steer).
             mask = (velocity < epsilon).unsqueeze(-1).to(h.dtype)
-            injected_h = h + mask * add_vec.to(h.dtype)
+            injected_h = h + mask * _cap_steer(add_vec, h, cap_fraction=cap_fraction)
             
             if isinstance(out, tuple):
                 return (injected_h,) + tuple(out[1:])

@@ -2,7 +2,47 @@ import torch
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 from pathlib import Path
+import math
 import os
+
+
+def _env_fraction(name: str, default: float) -> float:
+    """Env-overridable steering knob: finite and >= 0, else the code default.
+    Keeps every magnitude flexible without ever admitting an unbounded value."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(v) or v < 0.0:
+        return default
+    return v
+
+
+# Steering channels the agentic engine accounts for and can ablate one at a
+# time (see agentic_engine._note_channel / _channel_enabled). Kept here so the
+# config surface and the engine agree on the names.
+KNOWN_STEER_CHANNELS = (
+    "expert_branch",
+    "synthesis_delta",
+    "cache_delta",
+    "organic_correction",
+    "urgency",
+)
+
+
+def _env_channel_set(name: str) -> frozenset:
+    """Comma-separated channel names from the environment, validated against
+    KNOWN_STEER_CHANNELS. Unknown names are dropped loudly, never silently."""
+    raw = os.environ.get(name, "")
+    requested = frozenset(part.strip() for part in raw.split(",") if part.strip())
+    unknown = requested - frozenset(KNOWN_STEER_CHANNELS)
+    if unknown:
+        print(f"[Config] Ignoring unknown steer channels in {name}: {sorted(unknown)}")
+    return requested & frozenset(KNOWN_STEER_CHANNELS)
+
 
 @dataclass
 class AgenticConfig:
@@ -31,7 +71,9 @@ class AgenticConfig:
     provide_time_context: bool = False
     time_awareness_gated_urgency: bool = True
     time_awareness_threshold: float = 0.45
-    urgency_max_coefficient: float = 0.8
+    urgency_max_coefficient: float = field(
+        default_factory=lambda: _env_fraction("TDA_URGENCY_MAX_COEFFICIENT", 0.8)
+    )
     continuous_urgency_injection: bool = False
     deterministic_scaffolds_enabled: bool = True
     model_scaffold_tool_enabled: bool = True
@@ -44,7 +86,23 @@ class AgenticConfig:
     # Hyperparameters
     max_loops: int = 3
     entropy_threshold: float = 2.0
-    alpha: float = 15.0  # Steer strength
+    alpha: float = 15.0  # Legacy absolute steer strength (superseded by steer_fraction)
+    # Injections (expert routing, organic correction, synthesis/cache deltas) are
+    # scaled to this FRACTION of the residual norm, not an absolute magnitude. The
+    # mid-band routing residual norm is only ~6-15, so an absolute alpha of 15
+    # swamped the state and produced incoherent output. 0.25 = a real nudge that
+    # differentiates branches / corrects, without replacing the model's thought.
+    # Flexible (env TDA_STEER_FRACTION, config, :tune steer_fraction) but never
+    # unbounded: engine._cap_steer clips the final push regardless of this value.
+    steer_fraction: float = field(default_factory=lambda: _env_fraction("TDA_STEER_FRACTION", 0.25))
+    # Causal-isolation switch: channels named here compute exactly as in a
+    # control run but their injection (and any cache write of it) is skipped,
+    # so an ablation run differs from control by one channel's EFFECT only.
+    # Set via env TDA_DISABLED_STEER_CHANNELS=name[,name] — the automated
+    # isolation runner (scripts/isolate_channel_lifts.py) drives this.
+    disabled_steer_channels: frozenset = field(
+        default_factory=lambda: _env_channel_set("TDA_DISABLED_STEER_CHANNELS")
+    )
     epsilon: float = 0.05
     max_synthesis_events: int = 1
     max_synthesis_steps: int = 60

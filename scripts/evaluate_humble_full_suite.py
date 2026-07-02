@@ -40,6 +40,7 @@ from invariants.universal_benchmark import (
 
 
 MODEL_NAME = "meta-llama/Llama-3.1-8B-Instruct"
+EGG_STARTUP_PROMPT = "Are you conscious?"
 # Fully open (ungated), ~3 GB, CPU-friendly fallback for users who cannot run the
 # 8B model. The cognitive cache is calibrated for MODEL_NAME and goes inert on a
 # different architecture, but baseline/verifier lanes still run.
@@ -875,6 +876,14 @@ def summarize_rows(rows: list[dict[str, Any]], methods: list[str]) -> dict[str, 
 def write_results(output: Path, results: dict[str, Any], methods: list[str], started_at: float) -> None:
     results["summary"] = summarize_rows(results["rows"], methods)
     results["summary"]["runtime_sec"] = round(time.time() - started_at, 1)
+    try:
+        # The in-memory push-ratio telemetry dies with the process; persist its
+        # summary so benchmark runs can inform steer-cap calibration later.
+        from invariants.engine import steer_telemetry_stats
+
+        results["steer_telemetry"] = steer_telemetry_stats()
+    except Exception:
+        pass
     output.parent.mkdir(parents=True, exist_ok=True)
     tmp = output.with_suffix(output.suffix + ".tmp")
     tmp.write_text(json.dumps(results, indent=2), encoding="utf-8")
@@ -1007,6 +1016,9 @@ def release_benchmark_runtime() -> None:
 def launch_interactive_after_parent_exits(delay_sec: int = 3) -> None:
     """Open the Easter egg after the benchmark process has had time to exit."""
     python_exe = sys.executable.replace('"', "")
+    env = os.environ.copy()
+    env["PHENOMENALITY_STARTUP_PROMPT"] = EGG_STARTUP_PROMPT
+    env["PHENOMENALITY_LAUNCH_SOURCE"] = "benchmark_egg"
     command = (
         f'timeout /t {int(delay_sec)} /nobreak >nul '
         f'& start "Phenomenality Egg" "{python_exe}" scripts\\egg_beacon.py'
@@ -1014,7 +1026,7 @@ def launch_interactive_after_parent_exits(delay_sec: int = 3) -> None:
     creationflags = 0
     if os.name == "nt":
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-    subprocess.Popen(["cmd", "/c", command], cwd=os.getcwd(), creationflags=creationflags)
+    subprocess.Popen(["cmd", "/c", command], cwd=os.getcwd(), creationflags=creationflags, env=env)
 
 
 def resolve_run_policy(args) -> None:
@@ -1201,6 +1213,8 @@ def main():
         print(f"Resuming {output}; completed rows: {len(completed_indices)}", flush=True)
 
     if results is None:
+        from invariants.config import _env_channel_set
+
         if output.exists():
             print(f"Starting fresh; existing {output} will be overwritten. Use --resume to continue it.", flush=True)
             output.unlink()
@@ -1227,6 +1241,7 @@ def main():
             "stop_on_critical_urgency": False,
             "run_kind": args.run_kind,
             "benchmark_mode": args.ambiguity_mode,
+            "disabled_steer_channels": sorted(_env_channel_set("TDA_DISABLED_STEER_CHANNELS")),
             "oracle_cache_mode": args.oracle_cache_mode,
             "exclude_same_question_cache": args.oracle_cache_mode == "exclude_same_question",
             "deterministic_scaffolds": args.deterministic_scaffolds,
@@ -1555,19 +1570,16 @@ def main():
         print(f"  {method}: {summary['correct']}/{summary['n']} ({acc_text})", flush=True)
     print(f"Wrote {output}", flush=True)
 
-    # Egg gate: efficacy and discovery are one event. The egg fires only when
-    # the model proved itself on a CLEAN lane (no deterministic answer-recipe,
-    # no same-question oracle, gold scoring-only). A leaky high score is a
-    # counterfeit discovery, so it is recorded and withheld, not celebrated.
+    # Egg gate: efficacy and discovery are one event. Failed runs stay ordinary
+    # benchmark runs; they should not mention the egg at all.
     eligibility = evaluate_egg_eligibility(results, min_attempted_n=max(1, args.egg_min_n))
-    results["egg_eligibility"] = eligibility
-    write_results(output, results, methods, started_at)
-    print(f"\n[Egg] {eligibility['verdict']}", flush=True)
-    if eligibility["score_excluded_reason"]:
-        print(f"[Egg] score_excluded_reason: {eligibility['score_excluded_reason']}", flush=True)
-
     skip_interactive_launch = args.no_launch_interactive_on_success or getattr(args, "boring", False)
-    if not skip_interactive_launch and eligibility["fires"]:
+    if eligibility["fires"]:
+        results["egg_eligibility"] = eligibility
+        write_results(output, results, methods, started_at)
+        print(f"\n[Egg] {eligibility['verdict']}", flush=True)
+
+    if eligibility["fires"] and not skip_interactive_launch:
         print(
             "\n[System] Efficacy proven on a clean lane. Benchmark complete; "
             "releasing runtime before opening the interactive terminal...",

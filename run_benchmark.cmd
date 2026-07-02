@@ -99,8 +99,6 @@ echo.
 echo === [5/5] Running benchmark (%N_ROWS% rows, load mode: %LOAD_MODE%) ===
 rem  Easter egg is left ON (default): the interactive success shell launches
 rem  after the final summary is written and the model/runtime is released.
-rem  Pass --boring (or --no-launch-interactive-on-success) here to suppress it
-rem  for unattended runs.
 set "SMALL_FLAG="
 if defined TDA_SMALL set "SMALL_FLAG=--small"
 "%PY%" scripts\evaluate_humble_full_suite.py ^

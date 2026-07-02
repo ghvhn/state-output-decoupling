@@ -90,9 +90,34 @@ def test_high_ambiguity_preserves_uncertainty_boundary():
 def test_self_referential_momentum_orients_to_grounding():
     tmp, controller = make_controller()
     try:
-        decision = controller.decide({"self_referential_momentum": 0.24, "ambiguity": 0.03})
+        decision = controller.decide(
+            {"self_referential_momentum": 0.24, "ambiguity": 0.03},
+            context={"task_grounding_low": True},
+        )
         assert decision.action == "orient_toward_task_grounding"
         assert decision.target_vector == "narrowing_in_vector"
+    finally:
+        tmp.cleanup()
+
+
+def test_self_referential_momentum_does_not_assume_low_grounding():
+    tmp, controller = make_controller()
+    try:
+        decision = controller.decide({"self_referential_momentum": 0.24, "ambiguity": 0.03})
+        assert decision.action != "orient_toward_task_grounding"
+        assert decision.intervention_type != "tool_result"
+    finally:
+        tmp.cleanup()
+
+
+def test_missing_vector_map_disables_orientation():
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        controller = SelfConceptController(out_dir=Path(tmp.name))
+        decision = controller.decide({"needless_interrupt": 0.32, "ambiguity": 0.02})
+        assert decision.action == "observe_only"
+        assert decision.allowed is False
+        assert decision.evidence["map_available"] is False
     finally:
         tmp.cleanup()
 
@@ -138,6 +163,8 @@ TESTS = [
     test_needless_interrupt_orients_to_validated_flow,
     test_high_ambiguity_preserves_uncertainty_boundary,
     test_self_referential_momentum_orients_to_grounding,
+    test_self_referential_momentum_does_not_assume_low_grounding,
+    test_missing_vector_map_disables_orientation,
     test_orientation_trace_memory_is_internal,
     test_orientation_tool_result_is_explicit_and_one_turn,
 ]

@@ -3,7 +3,13 @@ import torch
 import torch.nn.functional as F
 from pathlib import Path
 
-from invariants.engine import _ended_with_eos, _generated_text_satisfies_stop, _inputs
+from invariants.engine import (
+    _cap_steer,
+    _ended_with_eos,
+    _generated_text_satisfies_stop,
+    _inputs,
+    get_steer_cap_fraction,
+)
 from invariants.social_hunt import get_steer_vector
 from invariants.cognitive_cache import CognitiveCache
 
@@ -44,6 +50,12 @@ def _entropy_from_logits(logits):
     return -(probs * torch.log(probs.clamp_min(1e-12))).sum(dim=-1)
 
 def _add_last_token_delta(h, delta):
+    # Every agentic-side injection (synthesis/cache/organic deltas, urgency)
+    # funnels through here, so the shared steering envelope is enforced at this
+    # choke point: the push is capped to a fraction of the last token's own
+    # residual norm (see engine._cap_steer). Channel-level scaling (e.g.
+    # config.steer_fraction) may pre-shrink further; this cap is the floor
+    # guarantee that no channel, tuned however aggressively, can over-steer.
     d = delta.to(h.device)
     if d.ndim == 1:
         d = d.view(1, 1, -1)
@@ -52,10 +64,58 @@ def _add_last_token_delta(h, delta):
     elif d.ndim == 3 and d.shape[1] != 1:
         d = d[:, -1:, :]
 
-    d = d.to(h.dtype)
+    d = _cap_steer(d.to(h.dtype), h[:, -1:, :])
     add = torch.zeros_like(h)
     add[:, -1:, :] = d
     return h + add
+
+
+def _sane_fraction(value, default):
+    """A steering fraction read from config/tuner: finite and >= 0, else the
+    default. Keeps the knob entirely flexible while never letting a bad value
+    (inf/nan/negative) become an unbounded or sign-flipped push."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    if v != v or v in (float("inf"), float("-inf")) or v < 0.0:
+        return default
+    return v
+
+
+def _channel_enabled(config, name):
+    """Per-channel ablation switch for causal isolation. A disabled channel
+    computes exactly as in control (lookups, optimizer, gating all run) but its
+    injection is skipped and nothing is noted or cache-written for it — so an
+    ablation run differs from control by that one channel's effect only."""
+    disabled = getattr(config, "disabled_steer_channels", None) or ()
+    return name not in disabled
+
+
+def _note_channel(state, name, ratio, cap):
+    """Channel-level steering evidence: count each application and its attempted
+    push/residual ratio, per channel (expert_branch, synthesis_delta,
+    cache_delta, organic_correction, urgency). Emitted per generation into the
+    synthesis recorder so labeled runs — benchmark gold or conversational — can
+    answer 'does this channel HELP' (SteerMapStore.channel_lift), not just
+    'is it bounded'. Whether a channel should be ON becomes a data question."""
+    channels = state.get("steer_channels")
+    if channels is None:
+        return
+    try:
+        r = float(ratio)
+    except (TypeError, ValueError):
+        return
+    if r != r or r in (float("inf"), float("-inf")):
+        return
+    row = channels.setdefault(
+        name, {"applications": 0, "ratio_sum": 0.0, "ratio_max": 0.0, "clipped": 0}
+    )
+    row["applications"] += 1
+    row["ratio_sum"] += r
+    row["ratio_max"] = max(row["ratio_max"], r)
+    if cap is not None and r > float(cap):
+        row["clipped"] += 1
 
 
 def _layer_vector(name, layer_index, device):
@@ -85,6 +145,8 @@ def _generation_time_pressure(config):
 
 
 def _maybe_apply_time_gated_urgency(h_syn, layer_index, config, state):
+    if not _channel_enabled(config, "urgency"):
+        return h_syn
     urgency_vec = _layer_vector("urgency_vector", layer_index, h_syn.device)
     if urgency_vec is None:
         return h_syn
@@ -96,6 +158,8 @@ def _maybe_apply_time_gated_urgency(h_syn, layer_index, config, state):
             "mode": "continuous_urgency",
             "coefficient": coef,
         }
+        h_norm = _last_token_matrix(h_syn).norm(dim=-1).mean().clamp_min(1e-30).item()
+        _note_channel(state, "urgency", coef / h_norm, get_steer_cap_fraction())
         return _add_last_token_delta(h_syn, coef * urgency_vec.float() / norm)
 
     if not getattr(config, "time_awareness_gated_urgency", True):
@@ -136,6 +200,8 @@ def _maybe_apply_time_gated_urgency(h_syn, layer_index, config, state):
             "applied": True,
         }
     )
+    h_norm = _last_token_matrix(h_syn).norm(dim=-1).mean().clamp_min(1e-30).item()
+    _note_channel(state, "urgency", coef / h_norm, get_steer_cap_fraction())
     return _add_last_token_delta(h_syn, coef * urgency_vec.float() / norm)
 
 
@@ -223,6 +289,7 @@ def get_agentic_handles(
         "synthesis_events": 0,
         "routing_events": 0,
         "synthesis_recorder": synthesis_recorder,
+        "steer_channels": {},  # per-channel application counts/ratios (see _note_channel)
     }
     
     def make_hook(l_idx):
@@ -285,10 +352,26 @@ def get_agentic_handles(
                     v_cre = vecs["Creative"].to(h.device).to(h.dtype)
                     v_ana = vecs["Analytical"].to(h.device).to(h.dtype)
                     
-                    # Add to the last token of each branch
-                    h_parallel[0, -1, :] += alpha * (v_soc / v_soc.norm())
-                    h_parallel[1, -1, :] += alpha * (v_cre / v_cre.norm())
-                    h_parallel[2, -1, :] += alpha * (v_ana / v_ana.norm())
+                    # Steer each branch by a FRACTION of the residual norm, not an
+                    # absolute alpha. This mid-band routing residual has norm ~6-15,
+                    # so the old absolute alpha (~15) added a push as large as the
+                    # state itself -- effectively replacing the model's thought with
+                    # the steering vector, which is what produced incoherent output.
+                    # A norm-relative nudge still differentiates the branches enough
+                    # for the entropy-based selection below.
+                    steer_frac = _sane_fraction(getattr(config, "steer_fraction", 0.25), 0.25)
+                    step = steer_frac * h[:, -1, :].float().norm(dim=-1).mean().item()
+                    # _cap_steer bounds each branch push even if steer_fraction
+                    # is tuned past the envelope. Ablation runs skip the pushes
+                    # (branches stay identical) but the routing loop still runs.
+                    if _channel_enabled(config, "expert_branch"):
+                        cap_frac = get_steer_cap_fraction()
+                        for _bi in range(3):
+                            _bn = h_parallel[_bi, -1, :].float().norm().clamp_min(1e-30).item()
+                            _note_channel(state, "expert_branch", step / _bn, cap_frac)
+                        h_parallel[0, -1, :] += _cap_steer(step * (v_soc / v_soc.norm()), h_parallel[0, -1, :])
+                        h_parallel[1, -1, :] += _cap_steer(step * (v_cre / v_cre.norm()), h_parallel[1, -1, :])
+                        h_parallel[2, -1, :] += _cap_steer(step * (v_ana / v_ana.norm()), h_parallel[2, -1, :])
                     
                     # 3. Parallel Recurrent Loop
                     for i in range(state["start_layer"], l_idx + 1):
@@ -368,6 +451,9 @@ def get_agentic_handles(
                         delta_to_apply = cached_delta
                         synthesis_successful = cached_delta is not None
                         synthesis_reason = "cache_hit" if cached_delta is not None else "optimizer"
+                        # Channel tag for outcome accounting (kept separate from
+                        # synthesis_reason so cache metadata semantics stay put).
+                        delta_channel = "cache_delta" if cached_delta is not None else "synthesis_delta"
                         loss_history = []
                         
                         if cached_delta is None:
@@ -536,10 +622,11 @@ def get_agentic_handles(
                                                 
                                                 # The extracted organic vector is the mean shift of successful corrections
                                                 organic_delta = organic_vec.reshape(1, 1, -1)
-                                                
+
                                                 # Scale factor to amplify the correction (empirically tuned, 1.5x)
                                                 delta_to_apply = organic_delta * 1.5
-                                                
+                                                delta_channel = "organic_correction"
+
                                                 synthesis_successful = True
                                                 break
                                             except Exception as e:
@@ -555,6 +642,12 @@ def get_agentic_handles(
                             import gc
                             gc.collect()
                             torch.cuda.empty_cache()
+
+                        if delta_to_apply is not None and not _channel_enabled(config, delta_channel):
+                            # Causal isolation: this channel's delta was computed
+                            # exactly as in control, but its effect (application
+                            # AND cache write) is removed.
+                            delta_to_apply = None
 
                         if synthesis_successful and delta_to_apply is not None and cached_delta is None:
                             metadata = {
@@ -578,9 +671,28 @@ def get_agentic_handles(
                             if cache_write_enabled:
                                 _global_cache.store(routed_h, delta_to_apply, metadata=metadata)
 
-                        # Apply the fully synthesized vector to the hidden state permanently
+                        # Apply the synthesized / cached / organic delta -- but CAP
+                        # its norm to a fraction of the residual so it nudges rather
+                        # than replaces the state. Uncapped deltas (organic x1.5 ~= 11,
+                        # a raw optimizer vector, or a large cached delta) all land on
+                        # this ~6-15-norm token and were a primary cause of incoherent
+                        # output. The cache still stores the raw learned delta above;
+                        # only the live application is bounded.
                         if delta_to_apply is not None:
-                            routed_h = _add_last_token_delta(routed_h, delta_to_apply.detach())
+                            delta = delta_to_apply.detach()
+                            steer_frac = _sane_fraction(getattr(config, "steer_fraction", 0.25), 0.25)
+                            h_last_norm = routed_h[:, -1:, :].float().norm()
+                            cap = steer_frac * h_last_norm
+                            d_norm = delta.float().norm()
+                            _note_channel(
+                                state,
+                                delta_channel,
+                                (d_norm / h_last_norm.clamp_min(1e-30)).item(),
+                                steer_frac,
+                            )
+                            if d_norm.item() > 0 and d_norm > cap:
+                                delta = (delta.float() * (cap / d_norm)).to(routed_h.dtype)
+                            routed_h = _add_last_token_delta(routed_h, delta)
                         
                     
 
@@ -679,7 +791,10 @@ def generate_agentic_text(
         synthesis_recorder=synthesis_recorder,
     )
     state["confidence_stabilization"] = confidence_stabilization
-    
+    # One channel accumulator per GENERATION, surviving mid-run hook
+    # re-registration, so the emitted stats cover the whole call.
+    steer_channels = state["steer_channels"]
+
     try:
         from transformers import StoppingCriteriaList, LogitsProcessorList, LogitsProcessor
         from invariants.tool_utils import (
@@ -803,9 +918,10 @@ def generate_agentic_text(
                     M, vecs=vecs, belief_vec=belief_vec, humility_vec=humility_vec,
                     config=config, synthesis_recorder=synthesis_recorder
                 )
-                
+
                 state["tokenizer"] = M.tok
                 state["current_input_ids"] = current_inputs["input_ids"]
+                state["steer_channels"] = steer_channels  # keep one accumulator per generation
                 continue
                 
             plen = current_inputs["input_ids"].shape[1]
@@ -827,7 +943,10 @@ def generate_agentic_text(
             # that fires registers steering that bends the REMAINING chunks.
             if mid_chunk_hook is not None:
                 try:
-                    mid_chunk_hook(generated_text)
+                    # Pass the live activation state (phenomenality/time-awareness
+                    # scores the engine surfaced) so tools fire from STATE, not from
+                    # a text tag. Detectors read state["last_phenomenality"] etc.
+                    mid_chunk_hook(generated_text, state)
                 except Exception as _hook_exc:
                     print(f"    [ToolSense] mid-chunk hook error: {_hook_exc}", flush=True)
             tool_call = next(
@@ -875,5 +994,24 @@ def generate_agentic_text(
             mid_chunk_hook.cleanup()
         config._generation_deadline = previous_deadline
         config._generation_budget_sec = previous_budget
-             
+
+    if synthesis_recorder is not None:
+        # Emitted EVERY generation, even all-zero, so labeled runs carry the
+        # unfired contrast: channel_lift compares outcomes when a channel fired
+        # vs when it did not. This is the data that decides whether a channel
+        # should be on -- not an asserted flag.
+        synthesis_recorder.append(
+            {
+                "type": "steer_channel_stats",
+                "channels": {name: dict(row) for name, row in steer_channels.items()},
+                "flags": {
+                    "synthesis_enabled": bool(getattr(config, "synthesis_enabled", False)),
+                    "cache_enabled": bool(getattr(config, "cache_enabled", False)),
+                    "continuous_urgency_injection": bool(getattr(config, "continuous_urgency_injection", False)),
+                    "time_awareness_gated_urgency": bool(getattr(config, "time_awareness_gated_urgency", False)),
+                    "steer_fraction": _sane_fraction(getattr(config, "steer_fraction", 0.25), 0.25),
+                    "disabled_steer_channels": sorted(getattr(config, "disabled_steer_channels", None) or ()),
+                },
+            }
+        )
     return M.tok.decode(full[0, original_plen:], skip_special_tokens=True).strip()

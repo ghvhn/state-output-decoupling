@@ -118,7 +118,10 @@ def test_prompt_only_contains_memory_when_tool_result_is_staged():
     )
     with_tool = build_prompt("Elaborate, please.", memory_tool_result=tool_result)
     assert "The first topic was next-token prediction." in with_tool
-    assert "[Current User Message]" in with_tool
+    # Bare-mode contract: no labeled sections, native chat format only. The
+    # staged memory folds into the current user turn, ahead of the user's text.
+    assert "<|start_header_id|>user<|end_header_id|>" in with_tool
+    assert with_tool.index("The first topic was next-token prediction.") < with_tool.index("Elaborate, please.")
     assert with_tool.count("[Memory Tool Result]") == 1
 
 
