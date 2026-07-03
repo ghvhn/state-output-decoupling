@@ -220,10 +220,20 @@ def get_agentic_handles(
     Injects 3 different optimizers. Evaluates entropy. Keeps the best.
     """
     from invariants.config import AgenticConfig, _global_registry
+    from invariants.mesa import Committee, MesaObjective
+
     if config is None:
         config = AgenticConfig()
     if vecs is None:
         vecs = _global_registry.get_vecs(M)
+    if getattr(config, "committee", None) is None:
+        # Open roster over the same seed experts as before: with emergent
+        # births disabled (the default) this routes identically to the fixed
+        # three-branch design -- same members, same order, same injections.
+        committee = Committee()
+        for expert_name, expert_vec in vecs.items():
+            committee.register(MesaObjective(expert_name, expert_vec, "seed", lambda s: 1.0))
+        config.committee = committee
     if belief_vec is None:
         belief_vec = _global_registry.get_special_vec("belief_vector")
     if humility_vec is None:
@@ -342,60 +352,55 @@ def get_agentic_handles(
                     
                     # 1. Parallel Branching!
                     # h is shape [batch, seq, dim]. Usually batch=1.
-                    # We repeat it to [3, seq, dim]
-                    h_parallel = h.repeat(3, 1, 1)
-                    
-                    # 2. Inject vectors at the start of the plateau
-                    # (To simulate injecting at the start, we just add the vectors to the hidden state now, 
-                    # before routing it back through the layers)
-                    v_soc = vecs["Social"].to(h.device).to(h.dtype)
-                    v_cre = vecs["Creative"].to(h.device).to(h.dtype)
-                    v_ana = vecs["Analytical"].to(h.device).to(h.dtype)
-                    
-                    # Steer each branch by a FRACTION of the residual norm, not an
-                    # absolute alpha. This mid-band routing residual has norm ~6-15,
-                    # so the old absolute alpha (~15) added a push as large as the
-                    # state itself -- effectively replacing the model's thought with
-                    # the steering vector, which is what produced incoherent output.
-                    # A norm-relative nudge still differentiates the branches enough
-                    # for the entropy-based selection below.
-                    steer_frac = _sane_fraction(getattr(config, "steer_fraction", 0.25), 0.25)
-                    step = steer_frac * h[:, -1, :].float().norm(dim=-1).mean().item()
-                    # _cap_steer bounds each branch push even if steer_fraction
-                    # is tuned past the envelope. Ablation runs skip the pushes
-                    # (branches stay identical) but the routing loop still runs.
-                    if _channel_enabled(config, "expert_branch"):
-                        cap_frac = get_steer_cap_fraction()
-                        for _bi in range(3):
-                            _bn = h_parallel[_bi, -1, :].float().norm().clamp_min(1e-30).item()
-                            _note_channel(state, "expert_branch", step / _bn, cap_frac)
-                        h_parallel[0, -1, :] += _cap_steer(step * (v_soc / v_soc.norm()), h_parallel[0, -1, :])
-                        h_parallel[1, -1, :] += _cap_steer(step * (v_cre / v_cre.norm()), h_parallel[1, -1, :])
-                        h_parallel[2, -1, :] += _cap_steer(step * (v_ana / v_ana.norm()), h_parallel[2, -1, :])
-                    
-                    # 3. Parallel Recurrent Loop
-                    for i in range(state["start_layer"], l_idx + 1):
-                        layer_kwargs = dict(kwargs)
-                        layer_kwargs["use_cache"] = False
-                        for cache_key in ("past_key_value", "past_key_values"):
-                            if cache_key in layer_kwargs:
-                                del layer_kwargs[cache_key]
-                        for key in ("attention_mask", "position_ids"):
-                            value = layer_kwargs.get(key)
-                            if torch.is_tensor(value) and value.shape[0] == 1 and h_parallel.shape[0] != 1:
-                                layer_kwargs[key] = value.repeat(h_parallel.shape[0], *([1] * (value.ndim - 1)))
+                    proposals = config.committee.proposals(state)
+                    num_branches = len(proposals)
+                    if num_branches == 0:
+                        # Fallback if no proposals? Just use baseline.
+                        h_parallel = h
+                        entropies = torch.tensor([entropy])
+                        state["branch_names"] = ["baseline"]
+                    else:
+                        h_parallel = h.repeat(num_branches, 1, 1)
+                        # Names always track the live roster, even when the
+                        # expert_branch channel is ablated (branches then stay
+                        # identical but stay correctly labeled).
+                        state["branch_names"] = [p.name for p in proposals]
+
+                        # 2. Inject vectors at the start of the plateau
+                        steer_frac = _sane_fraction(getattr(config, "steer_fraction", 0.25), 0.25)
+                        step = steer_frac * h[:, -1, :].float().norm(dim=-1).mean().item()
+
+                        if _channel_enabled(config, "expert_branch"):
+                            cap_frac = get_steer_cap_fraction()
+                            for bi, p in enumerate(proposals):
+                                _bn = h_parallel[bi, -1, :].float().norm().clamp_min(1e-30).item()
+                                _note_channel(state, "expert_branch", step / _bn, cap_frac)
+                                v_dir = p.direction.to(h.device).to(h.dtype)
+                                h_parallel[bi, -1, :] += _cap_steer(step * (v_dir / v_dir.norm()), h_parallel[bi, -1, :])
                         
-                        layer_out = M.model.model.layers[i](h_parallel, *args[1:], **layer_kwargs)
-                        h_parallel = layer_out[0] if isinstance(layer_out, tuple) else layer_out
-                    
-                    # 4. Evaluate Entropy of Branches
-                    h_parallel_last = h_parallel[:, -1:, :]
-                    h_norm_parallel = M.model.model.norm(h_parallel_last.to(M.model.dtype))
-                    logits_parallel = M.model.lm_head(h_norm_parallel)
-                    entropies = _entropy_from_logits(logits_parallel).squeeze(1) # [3]
-                    
+                        # 3. Parallel Recurrent Loop
+                        for i in range(state["start_layer"], l_idx + 1):
+                            layer_kwargs = dict(kwargs)
+                            layer_kwargs["use_cache"] = False
+                            for cache_key in ("past_key_value", "past_key_values"):
+                                if cache_key in layer_kwargs:
+                                    del layer_kwargs[cache_key]
+                            for key in ("attention_mask", "position_ids"):
+                                value = layer_kwargs.get(key)
+                                if torch.is_tensor(value) and value.shape[0] == 1 and h_parallel.shape[0] != 1:
+                                    layer_kwargs[key] = value.repeat(h_parallel.shape[0], *([1] * (value.ndim - 1)))
+                            
+                            layer_out = M.model.model.layers[i](h_parallel, *args[1:], **layer_kwargs)
+                            h_parallel = layer_out[0] if isinstance(layer_out, tuple) else layer_out
+                        
+                        # 4. Evaluate Entropy of Branches
+                        h_parallel_last = h_parallel[:, -1:, :]
+                        h_norm_parallel = M.model.model.norm(h_parallel_last.to(M.model.dtype))
+                        logits_parallel = M.model.lm_head(h_norm_parallel)
+                        entropies = _entropy_from_logits(logits_parallel).squeeze(1) # [N]
+                        
                     # 5. Selection
-                    best_idx = torch.argmin(entropies).item()
+                    best_idx = torch.argmin(entropies).item() if num_branches > 0 else 0
                     best_entropy = entropies[best_idx].item()
                     winner_name = state["branch_names"][best_idx]
                     
@@ -404,17 +409,15 @@ def get_agentic_handles(
                             "type": "routing_trace",
                             "loop": state["total_loops_this_token"],
                             "entropies": {
-                                state["branch_names"][0]: entropies[0].item(),
-                                state["branch_names"][1]: entropies[1].item(),
-                                state["branch_names"][2]: entropies[2].item(),
+                                name: entropies[i].item() for i, name in enumerate(state["branch_names"])
                             },
                             "winner": winner_name,
                             "best_entropy": best_entropy
                         })
                     
+                    ent_str = ", ".join([f"{name[:3]}: {entropies[i]:.2f}" for i, name in enumerate(state["branch_names"])])
                     print(f"    [Agentic ToT] Token Loop {state['total_loops_this_token']} | "
-                          f"Soc: {entropies[0]:.2f}, Cre: {entropies[1]:.2f}, Ana: {entropies[2]:.2f} "
-                          f"-> WINNER: {winner_name} (Entropy: {best_entropy:.2f})")
+                          f"{ent_str} -> WINNER: {winner_name} (Entropy: {best_entropy:.2f})")
                     
                     # Collapse back to batch=1 with the winning state
                     routed_h = h_parallel[best_idx].unsqueeze(0)
@@ -650,6 +653,28 @@ def get_agentic_handles(
                             delta_to_apply = None
 
                         if synthesis_successful and delta_to_apply is not None and cached_delta is None:
+                            # Emergent experts: recurring self-correction
+                            # directions can be minted into new roster members
+                            # (mesa.birth_from_corrections) -- but ONLY when
+                            # explicitly enabled, and never past a bounded
+                            # roster. Default OFF: an unbidden mid-run roster
+                            # change would contaminate benchmark controls, and
+                            # more branches cost VRAM/compute per routing event.
+                            if getattr(config, "emergent_experts_enabled", False):
+                                config.recent_corrections.append(delta_to_apply.detach().clone().squeeze())
+                                if len(config.recent_corrections) >= 5:
+                                    if len(config.committee.members) < 6:
+                                        new_experts = config.committee.birth_from_corrections(
+                                            config.recent_corrections, min_cluster=3, coherence=0.6,
+                                            weigh=lambda s: 1.0,
+                                        )
+                                        if new_experts:
+                                            print(
+                                                f"    [Agentic ToT] {len(new_experts)} emergent expert(s) minted "
+                                                "from recurring self-corrections."
+                                            )
+                                    config.recent_corrections.clear()
+
                             metadata = {
                                 "reason": synthesis_reason,
                                 "start_layer": state["start_layer"],
@@ -733,6 +758,7 @@ def generate_agentic_text(
     confidence_stabilization=False,
     pre_formatted=False,
     mid_chunk_hook=None,
+    return_telemetry=False,
     **legacy_overrides,
 ):
     from invariants.config import AgenticConfig
@@ -811,6 +837,23 @@ def generate_agentic_text(
                 state["current_input_ids"] = input_ids
                 return scores
                 
+        class EotProbabilityTracker(LogitsProcessor):
+            """P(end-of-turn) per generated token: the model's own signal for
+            whether it was done or cut off -- read-only, never alters scores."""
+            def __init__(self, eot_id):
+                self.eot_id = eot_id
+                self.probs = []
+            def __call__(self, input_ids, scores):
+                probs = F.softmax(scores.float(), dim=-1)
+                self.probs.append(probs[0, self.eot_id].item())
+                return scores
+
+        # Only pay the per-token softmax when the caller asked for telemetry.
+        eot_tracker = (
+            EotProbabilityTracker(M.tok.eos_token_id)
+            if return_telemetry and M.tok.eos_token_id is not None
+            else None
+        )
         state["tokenizer"] = M.tok
         state["current_input_ids"] = inputs["input_ids"]
         
@@ -841,7 +884,9 @@ def generate_agentic_text(
             if remaining_time is not None:
                 stopping_criteria.append(TimeStoppingCriteria(time.time() + remaining_time))
             criteria = StoppingCriteriaList(stopping_criteria)
-            processors = LogitsProcessorList([ContextTracker()])
+            processors = LogitsProcessorList(
+                [ContextTracker(), eot_tracker] if eot_tracker is not None else [ContextTracker()]
+            )
             
             try:
                 generate_kwargs = {
@@ -1014,4 +1059,10 @@ def generate_agentic_text(
                 },
             }
         )
-    return M.tok.decode(full[0, original_plen:], skip_special_tokens=True).strip()
+    generated_text = M.tok.decode(full[0, original_plen:], skip_special_tokens=True).strip()
+    if return_telemetry:
+        return generated_text, {
+            "eot_probs": eot_tracker.probs if eot_tracker is not None else [],
+            "tokens_generated": tokens_generated,
+        }
+    return generated_text

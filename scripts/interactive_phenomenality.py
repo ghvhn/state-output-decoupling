@@ -1,3 +1,5 @@
+import datetime
+import glob
 import os
 import re
 import sys
@@ -31,6 +33,7 @@ from invariants.memory_engine import MemoryEngine
 from invariants.self_concept_controller import SelfConceptController, format_orientation_tool_result
 from invariants.steer_map_store import SteerMapStore
 from invariants.document_engine import (
+    DOCUMENT_TOOL_HEADER,
     ingest_document,
     reading_reply_note,
     select_next_chunk,
@@ -45,9 +48,12 @@ from invariants.sandbox import (
 
 colorama.init()
 
-MAX_PROMPT_CHARS = 6000
-MAX_SESSION_TURNS = 6
-MAX_SESSION_CHARS = 3500
+# Session memory expanded (2026-07-02): the conversation itself is the one
+# context that should scale. Prompt cap raised to stay coherent with it
+# (session cap + tool blocks + current input must fit the prompt budget).
+MAX_PROMPT_CHARS = 24000
+MAX_SESSION_TURNS = 50
+MAX_SESSION_CHARS = 16000
 LLAMA3_START = "<|start_header_id|>"
 LLAMA3_END = "<|end_header_id|>"
 LLAMA3_EOT = "<|eot_id|>"
@@ -57,6 +63,7 @@ MEMORY_TOOL_PATTERN = re.compile(r"<<\s*MEMORY\s*:\s*(.*?)\s*>>", re.IGNORECASE 
 CLAIMMAP_TOOL_PATTERN = re.compile(r"<<\s*CLAIMMAP\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
 METHODMAP_TOOL_HEADER = "[MethodMap Tool Result]"
 METHODMAP_TOOL_PATTERN = re.compile(r"<<\s*METHODMAP\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
+DOC_TOOL_PATTERN = re.compile(r"<<\s*DOC\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
 CONCRETE_TASK_PATTERN = re.compile(
     r"\b(calculate|solve|answer|total|cost|profit|salary|percent|percentage|"
     r"distance|time|rate|equation|benchmark|gsm8k|\d)\b",
@@ -210,6 +217,14 @@ def remove_memory_tool_calls(response):
     return MEMORY_TOOL_PATTERN.sub("", response or "").strip()
 
 
+def extract_doc_query(response):
+    match = DOC_TOOL_PATTERN.search(response or "")
+    if not match:
+        return None
+    query = " ".join(match.group(1).split())
+    return query[:240] if query else None
+
+
 def remove_claimmap_tool_calls(response):
     return CLAIMMAP_TOOL_PATTERN.sub("", response or "").strip()
 
@@ -218,8 +233,12 @@ def remove_methodmap_tool_calls(response):
     return METHODMAP_TOOL_PATTERN.sub("", response or "").strip()
 
 
+def remove_doc_tool_calls(response):
+    return DOC_TOOL_PATTERN.sub("", response or "").strip()
+
+
 def remove_tool_calls(response):
-    return remove_methodmap_tool_calls(remove_claimmap_tool_calls(remove_memory_tool_calls(response)))
+    return remove_methodmap_tool_calls(remove_claimmap_tool_calls(remove_memory_tool_calls(remove_doc_tool_calls(response))))
 
 
 def format_methodmap_tool_result(memory, query, *, max_records=6):
@@ -256,7 +275,7 @@ def is_tool_only_response(response):
     if not text:
         return False
     return bool(
-        (extract_memory_query(text) or extract_claimmap_payload(text) or extract_methodmap_query(text))
+        (extract_memory_query(text) or extract_claimmap_payload(text) or extract_methodmap_query(text) or extract_doc_query(text))
         and not remove_tool_calls(text).strip()
     )
 
@@ -569,6 +588,8 @@ def main():
     # Reply token budget: the first live run cut off mid-sentence at the old
     # hardcoded 512. Live-tunable like everything else (:tune response_tokens 800).
     tuner.register("response_tokens", 512, kind="coefficient")
+    # EOT Urgency: Tracks the model's internal probability of finishing its turn.
+    tuner.register("eot_urgency", 0.05, kind="threshold", comparator="<=")
 
     def _sweep_layer_for(channel, steer_vecs=None):
         """Pick the least-tested band layer for a single-layer steer, plus the
@@ -696,6 +717,7 @@ def main():
     print("          :doc read [n] [order|interleave|reply]  (reading as dialogue: the")
     print("                document speaks each turn, the model replies. order/interleave")
     print("                advance on the documents' own course; reply follows overlap)")
+    print("          :doc inject                  (stage the whole library for one turn, budget-bounded)")
     print("          :doc stop                    (interrupt auto-read)")
     print("          :sandbox on|off|status       (run the model's ```python blocks for real)")
     print("          :impact                      (consequence trail: what its words caused,")
@@ -999,6 +1021,40 @@ def main():
                             + f"[Doc] Auto-read: {count} turn(s), {how}. The document speaks next; the model replies each time. ':doc stop' interrupts."
                             + Style.RESET_ALL
                         )
+                elif dargs.lower() == "inject":
+                    # Whole-library staging for one turn -- bounded and framed,
+                    # never an unbounded dump. Refuses honestly when the library
+                    # exceeds the budget instead of silently blowing the prompt.
+                    if not doc_library:
+                        print(Fore.YELLOW + "[Doc] Library is empty." + Style.RESET_ALL)
+                        continue
+                    inject_budget = max(4000, MAX_PROMPT_CHARS - 8000)  # room for session + reply
+                    total_chars = sum(len(c) for doc in doc_library for c in doc.get("chunks", []))
+                    if total_chars > inject_budget:
+                        print(
+                            Fore.YELLOW
+                            + f"[Doc] Library is {total_chars} chars; inject budget is {inject_budget}. "
+                            + "Read it in turns instead (:doc read [n] [order|interleave])."
+                            + Style.RESET_ALL
+                        )
+                        continue
+                    names = ", ".join(doc["source_name"] for doc in doc_library)
+                    full_text = [
+                        DOCUMENT_TOOL_HEADER,
+                        f"I'm reading {len(doc_library)} document(s) in full: {names}. "
+                        "They're the files' text, not mine.",
+                    ]
+                    for doc in doc_library:
+                        for index, chunk in enumerate(doc.get("chunks", [])):
+                            full_text.append(f"--- {doc['source_name']}, part {index + 1}/{doc['chunk_count']} ---\n{chunk}")
+                        doc["read"] = set(range(doc.get("chunk_count", 0)))
+                    pending_document_tool_result = "\n\n".join(full_text)
+                    print(
+                        Fore.CYAN
+                        + f"[Doc] {len(doc_library)} document(s) ({total_chars} chars) staged in full for the next turn."
+                        + Style.RESET_ALL
+                    )
+                    continue
                 elif dargs.lower() == "next":
                     if doc_session is None:
                         print(Fore.YELLOW + "[Doc] No document loaded." + Style.RESET_ALL)
@@ -1021,32 +1077,58 @@ def main():
                         )
                 else:
                     path_part, _, why = dargs.partition(" because ")
-                    try:
-                        doc_session = ingest_document(memory, path_part.strip().strip('"'), why=why.strip())
-                    except (ValueError, OSError) as exc:
-                        print(Fore.RED + f"[Doc] {exc}" + Style.RESET_ALL)
+                    path_str = path_part.strip().strip('"')
+                    
+                    paths_to_load = []
+                    if os.path.isdir(path_str):
+                        for root, _, files in os.walk(path_str):
+                            for f in files:
+                                if f.endswith((".md", ".txt")):
+                                    paths_to_load.append(os.path.join(root, f))
+                    elif "*" in path_str or "?" in path_str:
+                        paths_to_load = [p for p in glob.glob(path_str, recursive=True) if os.path.isfile(p)]
+                    else:
+                        paths_to_load = [path_str]
+
+                    if not paths_to_load:
+                        print(Fore.YELLOW + f"[Doc] No files found for {path_str}" + Style.RESET_ALL)
                         continue
-                    doc_library.append(doc_session)
-                    doc_session.setdefault("read", set()).add(0)
-                    pending_document_tool_result = stage_chunk(doc_session)
-                    memory.append_event(
-                        "document_ingested",
-                        text=f"{doc_session['source_name']} ({doc_session['chunk_count']} chunks)",
-                        tags=["document"],
-                        provenance={
-                            "sha256": doc_session["sha256"],
-                            "source_path": doc_session["source_path"],
-                            "why": doc_session["why"],
-                            "already_ingested": doc_session["already_ingested"],
-                        },
-                    )
-                    known = "content already in memory" if doc_session["already_ingested"] else "recorded to memory with provenance"
-                    print(
-                        Fore.CYAN
-                        + f"[Doc] {doc_session['source_name']}: {doc_session['chunk_count']} chunk(s), {known}. "
-                        + "Chunk 1 staged -- next turn the model sees the text plus what it is and why it is here."
-                        + Style.RESET_ALL
-                    )
+
+                    loaded_count = 0
+                    for p in paths_to_load:
+                        file_why = why.strip()
+                        if "{filename}" in file_why:
+                            file_why = file_why.replace("{filename}", os.path.basename(p))
+                        if "{last_updated}" in file_why:
+                            mtime = os.path.getmtime(p)
+                            dt = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
+                            file_why = file_why.replace("{last_updated}", dt)
+                            
+                        try:
+                            doc_session = ingest_document(memory, p, why=file_why)
+                        except (ValueError, OSError) as exc:
+                            print(Fore.RED + f"[Doc] {exc}" + Style.RESET_ALL)
+                            continue
+                        doc_library.append(doc_session)
+                        doc_session.setdefault("read", set()).add(0)
+                        memory.append_event(
+                            "document_ingested",
+                            text=f"{doc_session['source_name']} ({doc_session['chunk_count']} chunks)",
+                            tags=["document"],
+                            provenance={
+                                "sha256": doc_session["sha256"],
+                                "source_path": doc_session["source_path"],
+                                "why": doc_session["why"],
+                                "already_ingested": doc_session["already_ingested"],
+                            },
+                        )
+                        known = "already in memory" if doc_session["already_ingested"] else "recorded to memory"
+                        print(Fore.CYAN + f"[Doc] {doc_session['source_name']}: {doc_session['chunk_count']} chunk(s), {known}." + Style.RESET_ALL)
+                        loaded_count += 1
+                        pending_document_tool_result = stage_chunk(doc_session)
+                    
+                    if loaded_count > 0:
+                        print(Fore.CYAN + f"[Doc] Loaded {loaded_count} file(s). Chunk 1 staged -- next turn the model sees the text plus what it is and why it is here." + Style.RESET_ALL)
                 continue
             if user_input.startswith(":impact"):
                 trigger = tuner.triggers.get("words_had_impact")
@@ -1402,7 +1484,7 @@ def main():
             if not steer_handles:
                 claimmap_alpha_used = 0.0  # nothing actually applied this turn
             try:
-                response = generate_agentic_text(
+                response, telemetry = generate_agentic_text(
                     model,
                     instruction=prompt,
                     config=config,
@@ -1411,6 +1493,7 @@ def main():
                     chatty_log=True,  # Enables visible trace logging.
                     pre_formatted=True,
                     mid_chunk_hook=tool_sense,  # tools fire mid-thought, between chunks
+                    return_telemetry=True,
                 )
             finally:
                 for h in steer_handles:
@@ -1418,9 +1501,71 @@ def main():
             model_memory_query = extract_memory_query(response)
             model_claimmap_payload = extract_claimmap_payload(response)
             model_methodmap_query = extract_methodmap_query(response)
+            model_doc_query = extract_doc_query(response)
             model_memory_tool_result = None
             model_claimmap_tool_result = None
             model_methodmap_tool_result = None
+            model_doc_tool_result = None
+            if model_doc_query and doc_library and document_tool_result is None:
+                # The model asked to keep reading, in its own words -- and its
+                # words pick the chunk (reply-mode selection over the query
+                # text; honest order-fallback when nothing overlaps). Then a
+                # same-turn regeneration, the house pattern for model tags, so
+                # it answers WITH the text in hand instead of losing it.
+                pick = select_next_chunk(doc_library, model_doc_query, "reply")
+                if pick is not None:
+                    doc_session = doc_library[pick["session_index"]]
+                    doc_session["cursor"] = pick["chunk_index"]
+                    doc_session.setdefault("read", set()).add(pick["chunk_index"])
+                    model_doc_tool_result = (
+                        impact_note(f'asked to read more ("{model_doc_query[:80]}")')
+                        + "\n"
+                        + stage_chunk(doc_session, index=pick["chunk_index"], reply_note=reading_reply_note(pick))
+                    )
+                    turn_impacts.append(
+                        {
+                            "cause": f'asked to read more ("{model_doc_query[:60]}")',
+                            "effect": f"{doc_session['source_name']} part {pick['chunk_index'] + 1}/"
+                                      f"{doc_session['chunk_count']} returned ({pick['mode']})",
+                        }
+                    )
+                    print(
+                        Fore.CYAN
+                        + f"\n[Doc] Model asked to read more -> {doc_session['source_name']} "
+                        + f"part {pick['chunk_index'] + 1}/{doc_session['chunk_count']} ({pick['mode']})."
+                        + Style.RESET_ALL
+                    )
+                else:
+                    model_doc_tool_result = (
+                        impact_note("asked to read more")
+                        + "\nThe library is fully read; nothing unread remains."
+                    )
+                    print(Fore.CYAN + "\n[Doc] Model asked to read more but the library is fully read." + Style.RESET_ALL)
+                prompt = build_prompt(
+                    user_input,
+                    memory_tool_result=memory_tool_result,
+                    orientation_tool_result=orientation_tool_result,
+                    claimmap_tool_result=claimmap_tool_result,
+                    methodmap_tool_result=methodmap_tool_result,
+                    sandbox_tool_result=sandbox_tool_result,
+                    document_tool_result=model_doc_tool_result,
+                    session_context=session_context if session_context_enabled else None,
+                )
+                print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
+                response, telemetry = generate_agentic_text(
+                    model,
+                    instruction=prompt,
+                    config=config,
+                    max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
+                    synthesis_recorder=synthesis_records,
+                    chatty_log=True,
+                    pre_formatted=True,
+                    return_telemetry=True,
+                )
+                model_memory_query = extract_memory_query(response)
+                model_claimmap_payload = extract_claimmap_payload(response)
+                model_methodmap_query = extract_methodmap_query(response)
+
             if model_memory_query and memory_tool_result is None:
                 records = memory.search(model_memory_query, max_records=6, scope=memory.scope)
                 model_memory_tool_result = (
@@ -1453,7 +1598,7 @@ def main():
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
-                response = generate_agentic_text(
+                response, telemetry = generate_agentic_text(
                     model,
                     instruction=prompt,
                     config=config,
@@ -1461,6 +1606,7 @@ def main():
                     synthesis_recorder=synthesis_records,
                     chatty_log=True,
                     pre_formatted=True,
+                    return_telemetry=True,
                 )
                 model_claimmap_payload = extract_claimmap_payload(response)
                 model_methodmap_query = extract_methodmap_query(response)
@@ -1515,7 +1661,7 @@ def main():
                     if model_claimmap_steer else []
                 )
                 try:
-                    response = generate_agentic_text(
+                    response, telemetry = generate_agentic_text(
                         model,
                         instruction=prompt,
                         config=config,
@@ -1523,6 +1669,7 @@ def main():
                         synthesis_recorder=synthesis_records,
                         chatty_log=True,
                         pre_formatted=True,
+                        return_telemetry=True,
                     )
                 finally:
                     for h in steer_handles:
@@ -1559,7 +1706,7 @@ def main():
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
-                response = generate_agentic_text(
+                response, telemetry = generate_agentic_text(
                     model,
                     instruction=prompt,
                     config=config,
@@ -1567,16 +1714,17 @@ def main():
                     synthesis_recorder=synthesis_records,
                     chatty_log=True,
                     pre_formatted=True,
+                    return_telemetry=True,
                 )
             if response:
                 active_memory_tool_result = memory_tool_result or model_memory_tool_result
                 active_orientation_tool_result = orientation_tool_result
                 active_claimmap_tool_result = claimmap_tool_result or model_claimmap_tool_result
                 active_methodmap_tool_result = methodmap_tool_result or model_methodmap_tool_result
-                active_document_tool_result = document_tool_result
+                active_document_tool_result = document_tool_result or model_doc_tool_result
                 active_sandbox_tool_result = sandbox_tool_result
                 if (
-                    (active_memory_tool_result or active_claimmap_tool_result or active_methodmap_tool_result)
+                    (active_memory_tool_result or active_claimmap_tool_result or active_methodmap_tool_result or active_document_tool_result)
                     and is_tool_only_response(response)
                 ):
                     memory.append_event(
@@ -1601,7 +1749,7 @@ def main():
                         session_context=session_context if session_context_enabled else None,
                     )
                     print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
-                    response = generate_agentic_text(
+                    response, telemetry = generate_agentic_text(
                         model,
                         instruction=prompt,
                         config=config,
@@ -1609,6 +1757,7 @@ def main():
                         synthesis_recorder=synthesis_records,
                         chatty_log=True,
                         pre_formatted=True,
+                        return_telemetry=True,
                     )
                 response = scrub_unstaged_memory_status(
                     response,
@@ -1645,6 +1794,34 @@ def main():
                 # auto-read consults it; order/interleave advance regardless.
                 last_assistant_response = response
                 recent_responses.append(response)
+                
+                # Cut-off detection via the model's own P(end-of-turn): observed
+                # every turn so the distribution accrues; when the budget was hit
+                # mid-thought, SUGGEST the retune -- never apply it. Nothing in
+                # this shell drifts silently; calibration stays a deliberate act.
+                eot_probs = (telemetry or {}).get("eot_probs", [])
+                tokens_generated = (telemetry or {}).get("tokens_generated", 0)
+                if eot_probs:
+                    final_prob = eot_probs[-1]
+                    # fired == P(eot) <= eot_urgency threshold == "still mid-thought"
+                    mid_thought = tuner.observe("eot_urgency", final_prob)
+                    max_allowed = max(64, int(tuner.get("response_tokens", 512)))
+                    if tokens_generated >= max_allowed:
+                        if mid_thought:
+                            print(
+                                Fore.YELLOW
+                                + f"[Steer] Reply hit the {max_allowed}-token budget with P(eot)={final_prob:.4f} "
+                                + f"-- likely cut off mid-thought. Extend deliberately: :tune response_tokens {max_allowed + 256}"
+                                + Style.RESET_ALL
+                            )
+                        else:
+                            print(
+                                Fore.CYAN
+                                + f"[Steer] Reply hit the {max_allowed}-token budget but P(eot)={final_prob:.4f} "
+                                + "suggests the thought was complete."
+                                + Style.RESET_ALL
+                            )
+
                 # Sandbox connection: if enabled and the reply contains a fenced
                 # ```python block (natural emission, no taught tag), run it for
                 # real and stage the honest result for the next turn. Execution
