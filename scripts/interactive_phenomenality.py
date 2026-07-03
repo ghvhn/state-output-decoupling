@@ -1514,7 +1514,7 @@ def main():
                     provenance={"current_input": user_input[:240]},
                 )
 
-            print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
+            print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
             synthesis_records = []
 
             # Live steering surface: cap/band/fraction move with the tuner each
@@ -1607,7 +1607,7 @@ def main():
                     document_tool_result=model_doc_tool_result,
                     session_context=session_context if session_context_enabled else None,
                 )
-                print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
+                print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
                 response, telemetry = generate_agentic_text(
                     model,
                     instruction=prompt,
@@ -1653,7 +1653,7 @@ def main():
                     methodmap_tool_result=methodmap_tool_result,
                     session_context=session_context if session_context_enabled else None,
                 )
-                print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
+                print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
                 response, telemetry = generate_agentic_text(
                     model,
                     instruction=prompt,
@@ -1704,7 +1704,7 @@ def main():
                     methodmap_tool_result=methodmap_tool_result,
                     session_context=session_context if session_context_enabled else None,
                 )
-                print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
+                print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
                 tag_alpha = tuner.get("claimmap_alpha", 0.0)
                 tag_sweep_layers = None
                 if model_claimmap_steer and tag_alpha > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
@@ -1761,7 +1761,7 @@ def main():
                     methodmap_tool_result=model_methodmap_tool_result,
                     session_context=session_context if session_context_enabled else None,
                 )
-                print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
+                print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
                 response, telemetry = generate_agentic_text(
                     model,
                     instruction=prompt,
@@ -1804,7 +1804,7 @@ def main():
                         document_tool_result=active_document_tool_result,
                         session_context=session_context if session_context_enabled else None,
                     )
-                    print(Fore.GREEN + Style.BRIGHT + "\nAssistant: " + Style.RESET_ALL, end="")
+                    print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
                     response, telemetry = generate_agentic_text(
                         model,
                         instruction=prompt,
