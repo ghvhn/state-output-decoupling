@@ -740,15 +740,27 @@ def drift_at_layer(drift, layer):
     return (sum(touching) / len(touching)) if touching else None
 
 
+def pick_sweep_layers(band_layers, counts, width=1):
+    """Sweep selection at any width: the `width` least-tested layers in the
+    band (ties -> lowest index), as one overlay steer. width=1 is pure
+    per-layer isolation; width=k trades attribution sharpness (outcomes score
+    a k-layer group, not a single layer) for push coverage — the shared
+    counts still rotate coverage evenly either way. Deterministic: same
+    counts, same layers."""
+    band_layers = list(band_layers or [])
+    if not band_layers or int(width) <= 0:
+        return []
+    counts = counts or {}
+    ordered = sorted(band_layers, key=lambda l: (int(counts.get(l, 0)), l))
+    return sorted(ordered[: min(int(width), len(ordered))])
+
+
 def pick_sweep_layer(band_layers, counts):
     """Single-layer isolation: the least-tested layer in the band speaks next
     (ties -> lowest index). Deterministic, so per-layer evidence accrues evenly
     — the layer analogue of the channel ablation's one-variable rule."""
-    band_layers = list(band_layers or [])
-    if not band_layers:
-        return None
-    counts = counts or {}
-    return min(band_layers, key=lambda l: (int(counts.get(l, 0)), l))
+    layers = pick_sweep_layers(band_layers, counts, width=1)
+    return layers[0] if layers else None
 
 
 def _cap_steer(add, h, cap_fraction=None):

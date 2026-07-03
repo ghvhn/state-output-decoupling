@@ -657,15 +657,20 @@ def main():
     # EOT Urgency: Tracks the model's internal probability of finishing its turn.
     tuner.register("eot_urgency", 0.05, kind="threshold", comparator="<=")
 
-    def _sweep_layer_for(channel, steer_vecs=None):
-        """Pick the least-tested band layer for a single-layer steer, plus the
-        local axis drift of the vector dict being applied (is the direction
-        even the same thing next door?)."""
-        from invariants.engine import axis_drift, drift_at_layer, pick_sweep_layer, steer_band_layers
+    def _sweep_layers_for(channel, steer_vecs=None):
+        """Pick the steer_layer_sweep least-tested band layers (width 1 =
+        isolation; width k = deterministic overlay), plus per-layer local axis
+        drift of the vector dict being applied (is the direction even the
+        same thing next door?). Empty list = sweep off (full band)."""
+        from invariants.engine import axis_drift, drift_at_layer, pick_sweep_layers, steer_band_layers
+        width = max(0, int(tuner.get("steer_layer_sweep", 0)))
+        if width <= 0:
+            return [], {}
         n_layers = getattr(model, "n_layers", None) or len(model.model.model.layers)
-        layer = pick_sweep_layer(steer_band_layers(n_layers), steer_map.layer_steer_counts(channel))
-        drift = drift_at_layer(axis_drift(steer_vecs), layer) if (steer_vecs and layer is not None) else None
-        return layer, drift
+        layers = pick_sweep_layers(steer_band_layers(n_layers), steer_map.layer_steer_counts(channel), width)
+        drift = axis_drift(steer_vecs) if steer_vecs else None
+        drifts = {L: drift_at_layer(drift, L) for L in layers} if drift else {L: None for L in layers}
+        return layers, drifts
 
     _sync_steer_tunables(tuner, config)
 
@@ -714,10 +719,11 @@ def main():
         alpha = tuner.get("memory_alpha", 0.0)
         sweep_layers = None
         if alpha > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
-            layer, _ = _sweep_layer_for("memory")
-            if layer is not None:
-                sweep_layers = [layer]
-                sweep_state["fires"].append(("memory", layer, alpha, None))
+            _mls, _ = _sweep_layers_for("memory")
+            if _mls:
+                sweep_layers = _mls
+                for _sl in _mls:
+                    sweep_state["fires"].append(("memory", _sl, alpha, None, len(_mls)))
         return _memory_steer_handles(m, (records[0].text or "").strip(),
                                      alpha=alpha, layers=sweep_layers)
 
@@ -1642,14 +1648,16 @@ def main():
             claimmap_alpha_used = tuner.get("claimmap_alpha", 0.0) if claimmap_steer_delta else 0.0
             turn_sweep_layers = None
             if claimmap_steer_delta and claimmap_alpha_used > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
-                sweep_layer, sweep_drift = _sweep_layer_for("claimmap", claimmap_steer_delta)
-                if sweep_layer is not None:
-                    turn_sweep_layers = [sweep_layer]
-                    sweep_state["fires"].append(("claimmap", sweep_layer, claimmap_alpha_used, sweep_drift))
+                sweep_layers, sweep_drifts = _sweep_layers_for("claimmap", claimmap_steer_delta)
+                if sweep_layers:
+                    turn_sweep_layers = sweep_layers
+                    for _sl in sweep_layers:
+                        sweep_state["fires"].append(("claimmap", _sl, claimmap_alpha_used, sweep_drifts.get(_sl), len(sweep_layers)))
                     print(
                         Fore.MAGENTA
-                        + f"[Steer] layer sweep: this turn's claimmap steer pushes L{sweep_layer} only"
-                        + (f" (local axis drift {sweep_drift:.3f})" if sweep_drift is not None else "")
+                        + "[Steer] layer sweep: this turn's claimmap steer pushes "
+                        + "+".join(f"L{_sl}" for _sl in sweep_layers)
+                        + f" (width {len(sweep_layers)})"
                         + Style.RESET_ALL
                     )
             steer_handles = (
@@ -1828,10 +1836,11 @@ def main():
                 tag_alpha = tuner.get("claimmap_alpha", 0.0)
                 tag_sweep_layers = None
                 if model_claimmap_steer and tag_alpha > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
-                    tag_layer, tag_drift = _sweep_layer_for("claimmap", model_claimmap_steer)
-                    if tag_layer is not None:
-                        tag_sweep_layers = [tag_layer]
-                        sweep_state["fires"].append(("claimmap", tag_layer, tag_alpha, tag_drift))
+                    _tls, _tds = _sweep_layers_for("claimmap", model_claimmap_steer)
+                    if _tls:
+                        tag_sweep_layers = _tls
+                        for _sl in _tls:
+                            sweep_state["fires"].append(("claimmap", _sl, tag_alpha, _tds.get(_sl), len(_tls)))
                 steer_handles = (
                     claimmap_steer_handles(model, model_claimmap_steer, alpha=tag_alpha, layers=tag_sweep_layers)
                     if model_claimmap_steer else []
@@ -2097,13 +2106,13 @@ def main():
             # Layer isolation evidence: each single-layer steer this turn lands
             # on ITS layer in the steer map, labeled by the turn's outcome —
             # per-layer success accrues with no band confound.
-            for sweep_channel, sweep_l, sweep_alpha, sweep_d in sweep_state["fires"]:
+            for sweep_channel, sweep_l, sweep_alpha, sweep_d, sweep_w in sweep_state["fires"]:
                 steer_map.record_layer_steer(
                     sweep_channel,
                     sweep_l,
                     sweep_alpha,
                     conversation_outcome=conversation_outcome,
-                    metrics={"axis_drift_at_layer": sweep_d},
+                    metrics={"axis_drift_at_layer": sweep_d, "sweep_width": sweep_w},
                 )
             sweep_state["fires"] = []
             record_internal_traces(
