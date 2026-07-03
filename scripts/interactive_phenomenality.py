@@ -36,6 +36,7 @@ from invariants.document_engine import (
     DOCUMENT_TOOL_HEADER,
     ingest_document,
     reading_reply_note,
+    record_chunk_read,
     select_next_chunk,
     stage_chunk,
 )
@@ -813,6 +814,7 @@ def main():
                     doc_session = doc_library[pick["session_index"]]
                     doc_session["cursor"] = pick["chunk_index"]
                     doc_session.setdefault("read", set()).add(pick["chunk_index"])
+                    record_chunk_read(memory, doc_session, pick["chunk_index"])
                     if pick["mode"] in ("reply", "reply_thread"):
                         # Only the echo-following mode is word-contingent; the
                         # order/interleave course is deliberately not.
@@ -1082,6 +1084,8 @@ def main():
                     for doc in doc_library:
                         for index, chunk in enumerate(doc.get("chunks", [])):
                             full_text.append(f"--- {doc['source_name']}, part {index + 1}/{doc['chunk_count']} ---\n{chunk}")
+                            if index not in doc.get("read", set()):
+                                record_chunk_read(memory, doc, index)
                         doc["read"] = set(range(doc.get("chunk_count", 0)))
                     pending_document_tool_result = "\n\n".join(full_text)
                     print(
@@ -1098,13 +1102,8 @@ def main():
                     else:
                         doc_session["cursor"] += 1
                         doc_session.setdefault("read", set()).add(doc_session["cursor"])
+                        record_chunk_read(memory, doc_session, doc_session["cursor"])
                         pending_document_tool_result = stage_chunk(doc_session)
-                        memory.append_event(
-                            "document_chunk_staged",
-                            text=f"{doc_session['source_name']} chunk {doc_session['cursor'] + 1}/{doc_session['chunk_count']}",
-                            tags=["document"],
-                            provenance={"sha256": doc_session["sha256"], "chunk_index": doc_session["cursor"]},
-                        )
                         print(
                             Fore.CYAN
                             + f"[Doc] Chunk {doc_session['cursor'] + 1}/{doc_session['chunk_count']} staged for the next turn."
@@ -1164,23 +1163,42 @@ def main():
                             },
                         )
                         known = "already in memory" if doc_session["already_ingested"] else "recorded to memory"
-                        print(Fore.CYAN + f"[Doc] {doc_session['source_name']}: {doc_session['chunk_count']} chunk(s), {known}." + Style.RESET_ALL)
+                        progress = f", {len(doc_session['read'])}/{doc_session['chunk_count']} already read" if doc_session["read"] else ""
+                        print(Fore.CYAN + f"[Doc] {doc_session['source_name']}: {doc_session['chunk_count']} chunk(s), {known}{progress}." + Style.RESET_ALL)
                         loaded_count += 1
 
                     if loaded_count > 0:
-                        # Stage the FIRST loaded file's first chunk, and mark
-                        # read only what was actually staged -- a batch load
-                        # must never silently skip the other files' openings.
-                        doc_session = doc_library[-loaded_count]
-                        doc_session.setdefault("read", set()).add(0)
-                        doc_session["cursor"] = 0
-                        pending_document_tool_result = stage_chunk(doc_session)
-                        print(
-                            Fore.CYAN
-                            + f"[Doc] Loaded {loaded_count} file(s). Staged: {doc_session['source_name']} "
-                            + f"part 1/{doc_session['chunk_count']} -- ':doc read [n] [order|interleave]' walks the rest."
-                            + Style.RESET_ALL
-                        )
+                        # Resume-aware staging: the first UNREAD chunk of the
+                        # first not-fully-read file in this batch. Prior
+                        # progress (restored from memory by sha) is respected,
+                        # and only what is actually staged gets marked read.
+                        staged_any = False
+                        for candidate in doc_library[-loaded_count:]:
+                            unread = [i for i in range(candidate["chunk_count"]) if i not in candidate.get("read", set())]
+                            if not unread:
+                                continue
+                            doc_session = candidate
+                            doc_session["cursor"] = unread[0]
+                            doc_session.setdefault("read", set()).add(unread[0])
+                            record_chunk_read(memory, doc_session, unread[0])
+                            pending_document_tool_result = stage_chunk(doc_session)
+                            print(
+                                Fore.CYAN
+                                + f"[Doc] Loaded {loaded_count} file(s). Staged: {doc_session['source_name']} "
+                                + f"part {unread[0] + 1}/{doc_session['chunk_count']}"
+                                + (" (resuming)" if unread[0] > 0 else "")
+                                + " -- ':doc read [n] [order|interleave|updated]' walks the rest."
+                                + Style.RESET_ALL
+                            )
+                            staged_any = True
+                            break
+                        if not staged_any:
+                            print(
+                                Fore.CYAN
+                                + f"[Doc] Loaded {loaded_count} file(s) -- all already fully read. "
+                                + "Nothing staged; ':doc read' would find nothing new."
+                                + Style.RESET_ALL
+                            )
                 continue
             if user_input.startswith(":impact"):
                 trigger = tuner.triggers.get("words_had_impact")
@@ -1594,6 +1612,7 @@ def main():
                     doc_session = doc_library[pick["session_index"]]
                     doc_session["cursor"] = pick["chunk_index"]
                     doc_session.setdefault("read", set()).add(pick["chunk_index"])
+                    record_chunk_read(memory, doc_session, pick["chunk_index"])
                     model_doc_tool_result = (
                         impact_note(f'asked to read more ("{model_doc_query[:80]}")')
                         + "\n"
