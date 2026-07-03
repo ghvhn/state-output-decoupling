@@ -367,6 +367,29 @@ def test_impact_attribution_is_minimal_and_first_person():
     assert "Because I asked" in kept and "answer text" in kept
 
 
+def test_outcome_calibration_requires_exploration():
+    from scripts.interactive_phenomenality import OUTCOME_CALIBRATABLE, outcome_calibration
+
+    # Two explored values, clear winner by mean sense.
+    pairs = [(0.02, 0.4)] * 6 + [(0.05, 0.1)] * 6
+    assert outcome_calibration(pairs) == 0.02
+    # Winner flips with the outcomes, not the values.
+    pairs2 = [(0.02, 0.1)] * 6 + [(0.05, 0.4)] * 6
+    assert outcome_calibration(pairs2) == 0.05
+    # Tie -> conservative (smaller value).
+    tie = [(0.02, 0.3)] * 5 + [(0.05, 0.3)] * 5
+    assert outcome_calibration(tie) == 0.02
+    # No exploration (one value) or thin evidence -> refuse.
+    assert outcome_calibration([(0.02, 0.5)] * 50) is None
+    assert outcome_calibration([(0.02, 0.5)] * 5 + [(0.05, 0.5)] * 4) is None
+    assert outcome_calibration([]) is None
+    assert outcome_calibration(pairs) == outcome_calibration(pairs)  # deterministic
+    # The strength/budget class is covered; band pieces stay on their route.
+    assert "claimmap_alpha" in OUTCOME_CALIBRATABLE
+    assert "routing_events" in OUTCOME_CALIBRATABLE
+    assert "steer_band_lo" not in OUTCOME_CALIBRATABLE
+
+
 def test_paired_threshold_goes_both_ways():
     """Any threshold stream can anchor any other: the target bar is the cut
     (in the target's own units) between anchor-fired and anchor-unfired
@@ -477,6 +500,7 @@ TESTS = [
     test_resume_is_real_across_sessions,
     test_reply_mode_can_return_to_earlier_threads,
     test_impact_attribution_is_minimal_and_first_person,
+    test_outcome_calibration_requires_exploration,
     test_paired_threshold_goes_both_ways,
     test_calibration_policy_refuses_what_should_not_self_calibrate,
     test_intent_relative_threshold_is_a_discriminant_cut,

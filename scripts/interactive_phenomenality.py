@@ -482,6 +482,29 @@ CALIBRATION_CIRCULAR = {
 }
 
 
+# Strength/budget knobs that may be calibrated FROM OUTCOMES (never from
+# their own value distribution): each turn credits (current value, sense),
+# and :calibrate <knob> outcome picks the tried value whose turns went best.
+OUTCOME_CALIBRATABLE = tuple(sorted(CALIBRATION_CIRCULAR - {"steer_band_lo", "steer_band_hi"}))
+
+
+def outcome_calibration(pairs, min_per_value=5, min_values=2):
+    """Argmax-over-tried-values: group outcomes by the knob value in force,
+    require real exploration (>= min_values distinct values, each with
+    >= min_per_value outcomes), and return the tried value with the best
+    mean outcome (ties -> the smaller value: conservative). None otherwise.
+    Legitimate where self-percentiles are circular, because the criterion is
+    an OUTCOME stream, not the knob's own history -- and no verdict exists
+    without variation: no exploration, no calibration."""
+    groups = {}
+    for value, outcome in pairs:
+        groups.setdefault(round(float(value), 6), []).append(float(outcome))
+    qualified = {v: outs for v, outs in groups.items() if len(outs) >= min_per_value}
+    if len(qualified) < min_values:
+        return None
+    return min(qualified, key=lambda v: (-(sum(qualified[v]) / len(qualified[v])), v))
+
+
 def calibration_policy(name):
     """Evaluate a calibration request by name. Returns (route, reason):
     route "cap" | "band" | "threshold" | "reject". Rejections are safety
@@ -497,8 +520,8 @@ def calibration_policy(name):
     if name in CALIBRATION_CIRCULAR:
         return "reject", (
             "this knob shapes the very distribution it would be calibrated to (circular). "
-            "Set it deliberately, or earn it from outcome evidence (:steer lift, "
-            ":calibrate steer_band, isolation runs)"
+            "Set it deliberately, or earn it from outcomes: try at least two values, then "
+            ":calibrate <name> outcome"
         )
     return "threshold", ""
 
@@ -1575,6 +1598,30 @@ def main():
                     continue
                 cal_name = cargs[0]
                 route, reason = calibration_policy(cal_name)
+                if len(cargs) >= 2 and cargs[1].lower() == "outcome":
+                    if cal_name not in OUTCOME_CALIBRATABLE and route != "threshold":
+                        print(Fore.YELLOW + f"[Calibrate] outcome route not available for '{cal_name}'." + Style.RESET_ALL)
+                        continue
+                    trig = tuner.triggers.get(cal_name)
+                    pairs = list(trig.outcomes) if trig is not None else []
+                    v = outcome_calibration(pairs)
+                    if v is None:
+                        tried = sorted({round(float(sig), 6) for sig, _ in pairs})
+                        print(
+                            Fore.YELLOW
+                            + f"[Calibrate] refused: outcome calibration needs >=2 tried values with >=5 "
+                            + f"sensed turns each (tried so far: {tried or 'none'}). No exploration, no verdict."
+                            + Style.RESET_ALL
+                        )
+                    else:
+                        tuner.set(cal_name, v)
+                        print(
+                            Fore.GREEN
+                            + f"[Calibrate] {cal_name} = {round(v, 4)} -- the tried value whose turns "
+                            + f"went best ({len(pairs)} sensed turns across the values explored)."
+                            + Style.RESET_ALL
+                        )
+                    continue
                 if route == "reject":
                     print(Fore.YELLOW + f"[Calibrate] rejected for '{cal_name}': {reason}." + Style.RESET_ALL)
                     continue
@@ -2411,6 +2458,14 @@ def main():
             if turn_sense is not None:
                 tuner.credit("words_had_impact", impact_signal, turn_sense)
             turn_row["words_had_impact"] = float(impact_signal)
+            # Outcome evidence for strength/budget knobs: pair each knob's
+            # value-in-force with this turn's sense (batched; one save).
+            if turn_sense is not None:
+                for _knob in OUTCOME_CALIBRATABLE:
+                    _trig = tuner.triggers.get(_knob)
+                    if _trig is not None:
+                        _trig.credit(_trig.value, turn_sense)
+                tuner.save()
             if turn_row:
                 turn_log.append(dict(turn_row))
                 try:

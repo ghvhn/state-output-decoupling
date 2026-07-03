@@ -153,6 +153,12 @@ Knobs you'll actually touch:
   rows carry both streams; probes are always labeled minted hypotheses.
   Bare probe names also work as plain percentile targets
   (`:calibrate situational_authority 80`).
+- **`:calibrate <knob> outcome`** — the legitimate route for strength/budget
+  knobs (alphas, fractions, routing/synthesis budgets, response tokens):
+  every turn pairs each knob's value-in-force with the turn's sense, and
+  this picks the TRIED value whose turns went best. Refused without real
+  exploration (>=2 distinct tried values, >=5 sensed turns each): no
+  exploration, no verdict. Self-percentiles for these stay refused.
 
 ## Model-invocable tags (its words, its impact)
 
