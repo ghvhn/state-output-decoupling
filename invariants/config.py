@@ -104,6 +104,13 @@ class AgenticConfig:
     emergent_experts_enabled: bool = False
     committee: Optional[Any] = None
     recent_corrections: list = field(default_factory=list)
+    # Roster bound for expert minting (seeds are unbounded by design -- the
+    # seed count is data: DOMAINS entries + invariants/models/*.pt). Flexible
+    # like every other bound (env TDA_MAX_COMMITTEE_SIZE), never removable:
+    # each extra member is one more parallel branch per routing event.
+    max_committee_size: int = field(
+        default_factory=lambda: max(1, int(_env_fraction("TDA_MAX_COMMITTEE_SIZE", 6)))
+    )
     
     # Causal-isolation switch: channels named here compute exactly as in a
     # control run but their injection (and any cache write of it) is skipped,

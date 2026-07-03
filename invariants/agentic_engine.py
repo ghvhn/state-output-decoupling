@@ -663,7 +663,8 @@ def get_agentic_handles(
                             if getattr(config, "emergent_experts_enabled", False):
                                 config.recent_corrections.append(delta_to_apply.detach().clone().squeeze())
                                 if len(config.recent_corrections) >= 5:
-                                    if len(config.committee.members) < 6:
+                                    roster_cap = max(1, int(getattr(config, "max_committee_size", 6)))
+                                    if len(config.committee.members) < roster_cap:
                                         new_experts = config.committee.birth_from_corrections(
                                             config.recent_corrections, min_cluster=3, coherence=0.6,
                                             weigh=lambda s: 1.0,
