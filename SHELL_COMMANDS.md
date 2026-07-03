@@ -130,6 +130,23 @@ Knobs you'll actually touch:
   trail, and the lift readout (does experienced impact track better
   deliberation?).
 
+## Named-concept probes
+
+- **`:probe <name> <framing with it> || <framing without it>`** — mint a
+  sensor for any concept you can name: the per-layer activation direction
+  separating your two framings (operator-authored on purpose — the model
+  authoring its own probe definitions would let its words shape the
+  instrument that judges them). The probe scores every turn from then on
+  (one extra forward per turn), centered against its own rolling history,
+  paired with sense. Persisted to `invariants/out/probes/`. `:probe` lists;
+  `:probe drop <name>` deactivates.
+- **`:calibrate conversation_productive <probe_name>`** — anchor the
+  productive bar to the named concept: the sense cut between high-probe and
+  low-probe turns (same discriminant as the `intent` route). Refused until
+  5+5 paired turns exist and the probe signal is non-degenerate; the
+  readout always states the probe is a minted hypothesis, not a validated
+  instrument.
+
 ## Model-invocable tags (its words, its impact)
 
 The model can reach for tools itself; results return same-turn with a

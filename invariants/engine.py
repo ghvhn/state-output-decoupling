@@ -747,6 +747,40 @@ def drift_at_layer(drift, layer):
     return (sum(touching) / len(touching)) if touching else None
 
 
+def probe_direction(hs_a, hs_b, layers):
+    """Mint a named-concept probe from two contrastive framings: per-layer
+    unit direction of (state_A - state_B) at the last token. The concept is
+    whatever separates the framings in the model's own geometry -- a
+    HYPOTHESIS of a sensor, not a validated one, until outcomes say so."""
+    direction = {}
+    for layer in layers:
+        if not (0 <= layer < hs_a.shape[0] and layer < hs_b.shape[0]):
+            continue
+        diff = (hs_a[layer, -1, :] - hs_b[layer, -1, :]).float()
+        norm = diff.norm()
+        if norm.item() > 0:
+            direction[int(layer)] = diff / norm
+    return direction
+
+
+def probe_score(hs, direction):
+    """Score a state along a minted probe: mean cosine of the last-token
+    state with the probe direction across its layers. Raw and uncentered --
+    the caller centers against its own rolling history (the concept-map
+    lesson: common-mode must be removed before a projection means anything)."""
+    if not direction:
+        return 0.0
+    cosines = []
+    for layer, vec in direction.items():
+        if not (0 <= layer < hs.shape[0]):
+            continue
+        h = hs[layer, -1, :].float()
+        h_norm = h.norm().item()
+        if h_norm > 0:
+            cosines.append(float(h @ vec) / h_norm)
+    return (sum(cosines) / len(cosines)) if cosines else 0.0
+
+
 def pick_sweep_layers(band_layers, counts, width=1):
     """Sweep selection at any width: the `width` least-tested layers in the
     band (ties -> lowest index), as one overlay steer. width=1 is pure

@@ -812,7 +812,9 @@ def main():
     print("          :claimmap <first text> || <second text>")
     print("          :steermap")
     print("          :steer  (envelope + observed push distribution + data-implied cap/band)")
-    print("          :calibrate <name> [pct|intent|band args]  (data-calibrate any knob BY NAME;")
+    print("          :probe <name> <with it> || <without it>  (mint a named-concept sensor from")
+    print("                YOUR contrastive framings; scores every turn; :probe lists; :probe drop <name>)")
+    print("          :calibrate <name> [pct|intent|<probe>|band args]  (data-calibrate any knob BY NAME;")
     print("                the system evaluates the request and refuses unsafe ones --")
     print("                circular strength knobs, binary streams, vacuous p100 caps)")
     print("          :tune, :tune <name> <value>, :tune <name> auto [percentile]")
@@ -851,6 +853,8 @@ def main():
     last_assistant_response = ""
     recent_responses = deque(maxlen=4)  # reflection stream for reply-mode thread returns
     prev_unsettledness = None  # ambiguity+disagreement of the previous turn (intent axis)
+    probes = {}  # name -> {direction, history, framings}; minted concept sensors (unvalidated until outcomes accrue)
+    PROBE_DIR = os.path.join(ROOT, "invariants", "out", "probes")
     MAX_AUTOREAD = 20           # per :doc read command; reading stays a deliberate act
     sandbox_enabled = False     # deliberate opt-in, like every intervention here
     session_context = []
@@ -1442,6 +1446,67 @@ def main():
                             + Style.RESET_ALL
                         )
                 continue
+            if user_input.startswith(":probe"):
+                pargs = user_input[len(":probe"):].strip()
+                if not pargs:
+                    if not probes:
+                        print(Fore.CYAN + "[Probe] none active. Mint one: :probe <name> <framing WITH it> || <framing WITHOUT it>" + Style.RESET_ALL)
+                    for pname, pdata in probes.items():
+                        trig = tuner.triggers.get(f"probe_{pname}")
+                        n_pairs = len(trig.outcomes) if trig else 0
+                        print(Fore.CYAN + f"[Probe] {pname}: {len(pdata['direction'])} layers, {n_pairs} paired turns." + Style.RESET_ALL)
+                    continue
+                if pargs.lower().startswith("drop "):
+                    dropped = pargs[5:].strip()
+                    if probes.pop(dropped, None) is not None:
+                        print(Fore.CYAN + f"[Probe] {dropped} dropped (its observed stream is kept)." + Style.RESET_ALL)
+                    else:
+                        print(Fore.YELLOW + f"[Probe] no active probe named {dropped}." + Style.RESET_ALL)
+                    continue
+                pname, _, framings = pargs.partition(" ")
+                pname = re.sub(r"[^a-z0-9_]", "_", pname.lower())[:40]
+                if "||" not in framings:
+                    print(
+                        Fore.YELLOW
+                        + f"[Probe] '{pname}' needs contrastive framings YOU write: "
+                        + ":probe <name> <with it> || <without it>. (The model authoring its own "
+                        + "probe definitions would let its words shape the instrument that judges them.)"
+                        + Style.RESET_ALL
+                    )
+                    continue
+                a_text, _, b_text = framings.partition("||")
+                a_text, b_text = a_text.strip(), b_text.strip()
+                from invariants.engine import _inputs, _hidden_states, probe_direction, steer_band_layers
+                ids_a = _inputs(model, a_text[:600])
+                hs_a = _hidden_states(model, ids_a["input_ids"], ids_a.get("attention_mask"))
+                ids_b = _inputs(model, b_text[:600])
+                hs_b = _hidden_states(model, ids_b["input_ids"], ids_b.get("attention_mask"))
+                direction = probe_direction(hs_a, hs_b, steer_band_layers(hs_a.shape[0]))
+                if not direction:
+                    print(Fore.YELLOW + "[Probe] framings produced no usable direction; try more contrastive text." + Style.RESET_ALL)
+                    continue
+                probes[pname] = {"direction": direction, "history": deque(maxlen=40), "framings": (a_text, b_text)}
+                tuner.register(f"probe_{pname}", 0.0, kind="threshold", comparator=">=")
+                try:
+                    os.makedirs(PROBE_DIR, exist_ok=True)
+                    torch.save({"direction": direction, "framings": (a_text, b_text)}, os.path.join(PROBE_DIR, f"{pname}.pt"))
+                except Exception:
+                    pass
+                memory.append_event(
+                    "probe_minted",
+                    text=f"{pname}: {a_text} || {b_text}",
+                    tags=["probe"],
+                    provenance={"layers": sorted(direction), "authored_by": "operator"},
+                )
+                print(
+                    Fore.CYAN
+                    + f"[Probe] {pname} minted over {len(direction)} layers from your framings -- an UNVALIDATED "
+                    + "hypothesis-sensor. It scores every turn from here (one extra forward per turn), centered "
+                    + "against its own rolling history, paired with sense. Calibrate against it once evidence "
+                    + f"accrues: :calibrate conversation_productive {pname}"
+                    + Style.RESET_ALL
+                )
+                continue
             if user_input.startswith(":calibrate"):
                 cargs = user_input[len(":calibrate"):].split()
                 if not cargs:
@@ -1489,9 +1554,50 @@ def main():
                     user_input = ":tune steer_band auto " + " ".join(cargs[1:])
                     # fall through to the :tune handler below with the same args
                 if route == "threshold":
-                    if cal_name == "conversation_productive" and len(cargs) >= 2 and cargs[1].lower() == "intent":
+                    anchor = cargs[1].lower() if len(cargs) >= 2 else None
+                    anchor_is_word = anchor is not None and not anchor.replace(".", "").isdigit()
+                    if cal_name == "conversation_productive" and anchor == "intent":
                         user_input = ":tune conversation_productive auto intent"
                         # fall through to the shared intent route below
+                    elif cal_name == "conversation_productive" and anchor_is_word:
+                        # Named-concept anchor: the bar becomes the sense cut
+                        # between high-<anchor> and low-<anchor> turns -- same
+                        # discriminant as the intent route, over a probe the
+                        # operator minted and the turns then measured.
+                        trig = tuner.triggers.get(f"probe_{anchor}")
+                        if trig is None:
+                            print(
+                                Fore.YELLOW
+                                + f"[Calibrate] no probe for '{anchor}'. Mint it first -- "
+                                + f":probe {anchor} <framing with it> || <framing without it> -- then talk "
+                                + "so paired evidence accrues."
+                                + Style.RESET_ALL
+                            )
+                            continue
+                        pairs = list(trig.outcomes)
+                        signals = [sig for sig, _ in pairs]
+                        if signals and max(signals) - min(signals) < 1e-9:
+                            print(Fore.YELLOW + f"[Calibrate] refused: probe_{anchor} signal is degenerate (no variation)." + Style.RESET_ALL)
+                            continue
+                        v = intent_relative_threshold(pairs)
+                        if v is None:
+                            n_hi = sum(1 for sig, _ in pairs if sig > 0)
+                            print(
+                                Fore.YELLOW
+                                + f"[Calibrate] refused: need >=5 high-{anchor} and >=5 low-{anchor} turns "
+                                + f"with sense (have {n_hi} and {len(pairs) - n_hi})."
+                                + Style.RESET_ALL
+                            )
+                        else:
+                            tuner.set("conversation_productive", v)
+                            print(
+                                Fore.GREEN
+                                + f"[Calibrate] conversation_productive = {round(v, 4)} -- the sense cut between "
+                                + f"high-{anchor} and low-{anchor} turns ({len(pairs)} paired; probe is a minted "
+                                + "hypothesis, not a validated instrument)."
+                                + Style.RESET_ALL
+                            )
+                        continue
                     elif not user_input.startswith(":tune"):
                         trig = tuner.triggers.get(cal_name)
                         if trig is None:
@@ -2175,6 +2281,22 @@ def main():
                     "score": float(turn_sense),
                     "threshold": float(tuner.get("conversation_productive", 0.0)),
                 }
+            # Minted probes score every turn: raw projection of the reply
+            # state on each probe direction, centered against the probe's own
+            # rolling history, paired with sense via the credit channel.
+            if probes and response:
+                from invariants.engine import _inputs as _p_inputs, _hidden_states as _p_hidden, probe_score
+                p_ids = _p_inputs(model, response[:600])
+                p_hs = _p_hidden(model, p_ids["input_ids"], p_ids.get("attention_mask"))
+                for pname, pdata in probes.items():
+                    raw = probe_score(p_hs, pdata["direction"])
+                    hist = pdata["history"]
+                    sig = raw - (sum(hist) / len(hist)) if hist else 0.0
+                    hist.append(raw)
+                    tuner.observe(f"probe_{pname}", sig)
+                    if turn_sense is not None:
+                        tuner.credit(f"probe_{pname}", sig, turn_sense)
+
             # Intent axis: did this turn settle intent (lower
             # ambiguity+disagreement than last turn)? Observed every turn the
             # sensors fire; paired with sense via the credit channel.
