@@ -68,6 +68,9 @@ Knobs you'll actually touch:
 | `conversation_productive` | 0.0 | sense threshold labeling turns productive |
 | `response_tokens` | 512 | reply token budget (cut-off suggestions reference it) |
 | `reading_settled_streak` | 2 | consecutive productive reading turns that end a 'satisfied' auto-read |
+| `routing_events` | 4 | expert competitions allowed per reply (the consultation budget) |
+| `routing_loops` | 3 | expert competitions allowed per token |
+| `routing_entropy` | 2.0 | next-token entropy that triggers an expert competition |
 | `eot_urgency` | 0.05 | P(end-of-turn) below this at the budget = "cut off mid-thought" |
 | `sandbox_success` | 0.5 | observation stream of real execution outcomes |
 | `words_had_impact` | 0.5 | observation stream of word-caused turns |
