@@ -95,6 +95,16 @@ class AgenticConfig:
     # Flexible (env TDA_STEER_FRACTION, config, :tune steer_fraction) but never
     # unbounded: engine._cap_steer clips the final push regardless of this value.
     steer_fraction: float = field(default_factory=lambda: _env_fraction("TDA_STEER_FRACTION", 0.25))
+    
+    # Dynamic emergent experts (mesa.Committee): the expert roster starts as
+    # the seeded three and can MINT new experts from recurring self-correction
+    # deltas -- but only when explicitly enabled. Default OFF so benchmark
+    # lanes keep the fixed-roster control (an unbidden roster change mid-run
+    # would contaminate the egg lane). The shell may opt in deliberately.
+    emergent_experts_enabled: bool = False
+    committee: Optional[Any] = None
+    recent_corrections: list = field(default_factory=list)
+    
     # Causal-isolation switch: channels named here compute exactly as in a
     # control run but their injection (and any cache write of it) is skipped,
     # so an ablation run differs from control by one channel's EFFECT only.

@@ -22,10 +22,9 @@ Pure stdlib — no torch, no model.
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from typing import Any, Optional
-
-import re
 
 DEFAULT_MAX_CHARS = 2400        # per chunk; sized to leave prompt room in bare mode
 MAX_DOCUMENT_BYTES = 2_000_000  # refuse silently huge files; be explicit instead
