@@ -943,9 +943,10 @@ def generate_agentic_text(
                 else:
                     user_answer = (
                         config.clarification_fallback
-                        or "Resolve the uncertainty internally and continue without external information."
+                        or "I'll resolve this myself: take the reading best supported by the "
+                        "actual wording and continue, rather than reaching for outside information."
                     )
-                    clarification_label = "Internal Disambiguation Policy"
+                    clarification_label = "Note to self"
                     print(f"[Internal Disambiguation Policy]: {user_answer}")
                 
                 clarification = f"\n\n[{clarification_label}]: {user_answer}\n"
