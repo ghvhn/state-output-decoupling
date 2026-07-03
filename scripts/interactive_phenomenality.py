@@ -504,6 +504,18 @@ def _sync_steer_tunables(tuner, config):
     config.entropy_threshold = _sane_fraction(
         tuner.get("routing_entropy", config.entropy_threshold), config.entropy_threshold
     )
+    config.max_synthesis_events = max(
+        0, int(_sane_fraction(tuner.get("synthesis_events", config.max_synthesis_events), config.max_synthesis_events))
+    )
+    config.max_synthesis_steps = max(
+        0, int(_sane_fraction(tuner.get("synthesis_steps", config.max_synthesis_steps), config.max_synthesis_steps))
+    )
+    config.epsilon = _sane_fraction(tuner.get("plateau_epsilon", config.epsilon), config.epsilon)
+    # The synthesis budget is PER REPLY, but its counter lives on the shared
+    # config object -- the benchmark resets it per attempt; the shell must
+    # reset it per turn or synthesis (and the cache-delta retrieval inside
+    # the same gate) fires once per SESSION and silently never again.
+    config._synthesis_events_used = 0
 
 
 def main():
@@ -616,6 +628,11 @@ def main():
     tuner.register("routing_events", config.max_routing_events, kind="coefficient")
     tuner.register("routing_loops", config.max_loops, kind="coefficient")
     tuner.register("routing_entropy", config.entropy_threshold, kind="coefficient")
+    # Synthesis schedule, same shape: events per reply, optimizer steps per
+    # event, and the plateau-velocity trigger that starts one.
+    tuner.register("synthesis_events", config.max_synthesis_events, kind="coefficient")
+    tuner.register("synthesis_steps", config.max_synthesis_steps, kind="coefficient")
+    tuner.register("plateau_epsilon", config.epsilon, kind="coefficient")
     # EOT Urgency: Tracks the model's internal probability of finishing its turn.
     tuner.register("eot_urgency", 0.05, kind="threshold", comparator="<=")
 
