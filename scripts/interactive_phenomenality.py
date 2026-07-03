@@ -997,7 +997,8 @@ def main():
                 elif dargs.lower() == "stop":
                     doc_autoread = None
                     print(Fore.CYAN + "[Doc] Auto-read stopped." + Style.RESET_ALL)
-                elif dargs.lower().startswith("read"):
+                elif dargs.split()[0].lower() == "read":
+                    # exact first-token match: ':doc readings' is a PATH, not auto-read
                     if not doc_library:
                         print(Fore.YELLOW + "[Doc] Nothing to read yet. :doc <path> first." + Style.RESET_ALL)
                     else:
