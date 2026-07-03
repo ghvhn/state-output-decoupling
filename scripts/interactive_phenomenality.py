@@ -493,6 +493,17 @@ def _sync_steer_tunables(tuner, config):
     config.steer_fraction = _sane_fraction(
         tuner.get("steer_fraction", config.steer_fraction), config.steer_fraction
     )
+    # Expert-consultation budgets follow the tuner too (ints >= 0; bad values
+    # fall back to the current config rather than landing).
+    config.max_routing_events = max(
+        0, int(_sane_fraction(tuner.get("routing_events", config.max_routing_events), config.max_routing_events))
+    )
+    config.max_loops = max(
+        0, int(_sane_fraction(tuner.get("routing_loops", config.max_loops), config.max_loops))
+    )
+    config.entropy_threshold = _sane_fraction(
+        tuner.get("routing_entropy", config.entropy_threshold), config.entropy_threshold
+    )
 
 
 def main():
@@ -599,6 +610,12 @@ def main():
     # clear the conversation_productive bar -- "satisfied" is the existing
     # sense signal, not a new oracle. Streak length is a knob like everything.
     tuner.register("reading_settled_streak", 2, kind="coefficient")
+    # Expert consultation surface: routing fires on entropy > routing_entropy,
+    # at most routing_loops times per token and routing_events times per
+    # reply. Budgets, not truths -- live-tunable like every other number here.
+    tuner.register("routing_events", config.max_routing_events, kind="coefficient")
+    tuner.register("routing_loops", config.max_loops, kind="coefficient")
+    tuner.register("routing_entropy", config.entropy_threshold, kind="coefficient")
     # EOT Urgency: Tracks the model's internal probability of finishing its turn.
     tuner.register("eot_urgency", 0.05, kind="threshold", comparator="<=")
 
