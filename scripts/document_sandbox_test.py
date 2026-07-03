@@ -367,6 +367,43 @@ def test_impact_attribution_is_minimal_and_first_person():
     assert "Because I asked" in kept and "answer text" in kept
 
 
+def test_paired_threshold_goes_both_ways():
+    """Any threshold stream can anchor any other: the target bar is the cut
+    (in the target's own units) between anchor-fired and anchor-unfired
+    turns, over the per-turn signals table."""
+    from scripts.interactive_phenomenality import paired_threshold, resolve_stream
+
+    rows = (
+        [{"sense": 0.4, "probe_authority": 0.2}] * 5      # authority fired, sense high
+        + [{"sense": -0.1, "probe_authority": -0.3}] * 5  # authority unfired, sense low
+        + [{"sense": 0.9}]                                # missing anchor: ignored
+    )
+    # Forward: sense bar anchored to the authority probe (fires at >= 0).
+    v = paired_threshold(rows, "sense", "probe_authority", 0.0, ">=")
+    assert abs(v - (0.4 + (-0.1)) / 2.0) < 1e-9
+    # Reverse: authority bar anchored to productivity (sense fires at >= 0).
+    v2 = paired_threshold(rows, "probe_authority", "sense", 0.0, ">=")
+    assert abs(v2 - (0.2 + (-0.3)) / 2.0) < 1e-9
+    # Comparator respected (<= anchors on the LOW side).
+    v3 = paired_threshold(rows, "sense", "probe_authority", 0.0, "<=")
+    assert abs(v3 - ((-0.1) + 0.4) / 2.0) < 1e-9
+    # Deterministic; refuses on thin or one-sided evidence.
+    assert paired_threshold(rows, "sense", "probe_authority", 0.0, ">=") == v
+    assert paired_threshold(rows[:6], "sense", "probe_authority", 0.0, ">=") is None
+    assert paired_threshold([{"sense": 1.0, "probe_authority": 1.0}] * 20,
+                            "sense", "probe_authority", 0.0, ">=") is None  # never unfired
+    assert paired_threshold([], "sense", "probe_authority", 0.0, ">=") is None
+
+    # Stream resolution: aliases, registered names, bare probe names.
+    class FakeTuner:
+        triggers = {"intent_settling": 1, "probe_authority": 1}
+    assert resolve_stream("intent", FakeTuner) == "intent_settling"
+    assert resolve_stream("productive", FakeTuner) == "sense"
+    assert resolve_stream("impact", FakeTuner) == "words_had_impact"
+    assert resolve_stream("authority", FakeTuner) == "probe_authority"
+    assert resolve_stream("nonexistent", FakeTuner) is None
+
+
 def test_calibration_policy_refuses_what_should_not_self_calibrate():
     from scripts.interactive_phenomenality import calibration_policy
 
@@ -440,6 +477,7 @@ TESTS = [
     test_resume_is_real_across_sessions,
     test_reply_mode_can_return_to_earlier_threads,
     test_impact_attribution_is_minimal_and_first_person,
+    test_paired_threshold_goes_both_ways,
     test_calibration_policy_refuses_what_should_not_self_calibrate,
     test_intent_relative_threshold_is_a_discriminant_cut,
     test_reply_note_lands_in_the_frame,

@@ -140,12 +140,19 @@ Knobs you'll actually touch:
   (one extra forward per turn), centered against its own rolling history,
   paired with sense. Persisted to `invariants/out/probes/`. `:probe` lists;
   `:probe drop <name>` deactivates.
-- **`:calibrate conversation_productive <probe_name>`** — anchor the
-  productive bar to the named concept: the sense cut between high-probe and
-  low-probe turns (same discriminant as the `intent` route). Refused until
-  5+5 paired turns exist and the probe signal is non-degenerate; the
-  readout always states the probe is a minted hypothesis, not a validated
-  instrument.
+- **`:calibrate <target> <anchor>` — paired calibration, both ways.** Any
+  threshold stream can be the target OR the anchor, by name (aliases:
+  `productive`→sense, `intent`, `impact`, bare probe names). The target's
+  bar becomes the cut, in its own units, between anchor-fired and
+  anchor-unfired turns, over the persisted per-turn signals table
+  (`invariants/out/turn_signals.jsonl`). So
+  `:calibrate conversation_productive situational_authority` anchors
+  productivity to the concept, and
+  `:calibrate situational_authority productive` asks the reverse — what
+  authority level distinguishes productive turns. Refused until 5+5 paired
+  rows carry both streams; probes are always labeled minted hypotheses.
+  Bare probe names also work as plain percentile targets
+  (`:calibrate situational_authority 80`).
 
 ## Model-invocable tags (its words, its impact)
 
