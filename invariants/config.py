@@ -62,8 +62,8 @@ class AgenticConfig:
     interactive_disambiguation: bool = False
     defer_disambiguation: bool = False
     clarification_fallback: Optional[str] = (
-        "Resolve the uncertainty internally: list the plausible interpretations, "
-        "choose the one best supported by the original wording, and continue without external information."
+        "I'll resolve this myself: name the plausible readings, take the one best "
+        "supported by the actual wording, and continue without reaching for outside information."
     )
     clarifying_questions: list[Dict[str, Any]] = field(default_factory=list)
     chatty_log: bool = False

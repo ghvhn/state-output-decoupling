@@ -532,8 +532,14 @@ def main():
     config.cache_write_enabled = True
     config.cache_write_scope = "interactive_phenomenality"
     
-    # Enable interactive disambiguation as requested
-    config.interactive_disambiguation = True
+    # Disambiguation resolves INTERNALLY, never by halting to interrogate the
+    # operator. Reading is non-adapting reality: when a chunk is ambiguous the
+    # model reconciles its own thoughts with what the text says, it does not
+    # ask a human what the document meant. The old interactive path popped a
+    # display-only "SYSTEM HALTED" modal (its real input was a hidden terminal
+    # prompt) and injected a hardcoded GSM8K "you are a reasoning engine"
+    # persona -- both contrary to the bare-mode, first-person spine. Off here.
+    config.interactive_disambiguation = False
 
     memory = MemoryEngine(scope="interactive_phenomenality")
     self_concept = SelfConceptController()
