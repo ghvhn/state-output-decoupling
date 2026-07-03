@@ -779,6 +779,7 @@ def main():
     
     while True:
         try:
+            reading_turn_source = None  # set when the turn is the model reading, not the operator speaking
             if startup_user_input:
                 user_input = startup_user_input
                 print(Fore.MAGENTA + Style.BRIGHT + "\nYou: " + Style.RESET_ALL + user_input)
@@ -831,8 +832,12 @@ def main():
                 if doc_autoread["remaining"] <= 0:
                     doc_autoread = None
                 user_input = staged_reading
+                # A reading turn is the model's own act -- the frame literally
+                # begins "I'm reading ..." -- so the console says "Me:", not
+                # "You:". The operator didn't speak; it is reading to itself.
+                reading_turn_source = doc_session["source_name"] if doc_session else "reading"
                 preview = " ".join(staged_reading.split())[:160]
-                print(Fore.MAGENTA + Style.BRIGHT + "\nYou: " + Style.RESET_ALL + preview + " [...]")
+                print(Fore.CYAN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL + preview + " [...]")
             else:
                 user_input = input(Fore.MAGENTA + Style.BRIGHT + "\nYou: " + Style.RESET_ALL)
                 
@@ -1446,11 +1451,16 @@ def main():
                 document_tool_result=document_tool_result,
                 session_context=session_context if session_context_enabled else None,
             )
+            # Honest attribution in the permanent record: a reading turn is the
+            # model's own act (it occupies the user slot in the chat template,
+            # but the operator never typed it).
             memory.append_turn(
                 "user",
                 user_input,
-                tags=["operator_input"],
+                tags=["reading_turn" if reading_turn_source else "operator_input"],
                 provenance={
+                    "spoken_by": "model_reading" if reading_turn_source else "operator",
+                    "document_source": reading_turn_source,
                     "memory_tool_result_provided": bool(memory_tool_result),
                     "orientation_tool_result_provided": bool(orientation_tool_result),
                     "claimmap_tool_result_provided": bool(claimmap_tool_result),
