@@ -68,6 +68,20 @@ earliest chunk — same inputs, same pick):
 Nothing is ever re-served (per-chunk read set), advancing is bounded and
 operator-initiated, and a fully-read library ends the dialogue explicitly.
 
+### The reading room (`readings/`)
+
+Six purpose-written makeup files for the model to read about itself —
+addressed to the reader they describe, quoting real excerpts from its own
+source (every quote verified against the code), sized to the chunker (1–2
+chunks each), and including one snippet deliberately safe to run in the
+sandbox so a claim about the envelope can be VERIFIED by executing code
+(attempted push 50.0 → applied 2.5). Ingest the whole room in one command:
+
+    :doc readings because {filename} describes my own makeup
+
+Then `:doc read 10 order` (the room is numbered for order mode), with
+`:sandbox on` if the reader should be able to check the math itself.
+
 ### Self-reading (noticed by Gavin, 2026-07-02)
 
 Feeding the repo's own design docs through `:doc` means the model learns its
