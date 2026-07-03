@@ -594,6 +594,10 @@ def main():
     # Reply token budget: the first live run cut off mid-sentence at the old
     # hardcoded 512. Live-tunable like everything else (:tune response_tokens 800).
     tuner.register("response_tokens", 512, kind="coefficient")
+    # ':doc read ... satisfied' stops once this many consecutive reading turns
+    # clear the conversation_productive bar -- "satisfied" is the existing
+    # sense signal, not a new oracle. Streak length is a knob like everything.
+    tuner.register("reading_settled_streak", 2, kind="coefficient")
     # EOT Urgency: Tracks the model's internal probability of finishing its turn.
     tuner.register("eot_urgency", 0.05, kind="threshold", comparator="<=")
 
@@ -720,9 +724,11 @@ def main():
     print("                ONE least-tested band layer; per-layer outcomes accrue, transfer-free)")
     print("          :doc <path> [because <why>]  (share a document into the conversation)")
     print("          :doc next | :doc status      (stage the next chunk / show progress)")
-    print("          :doc read [n] [order|interleave|reply]  (reading as dialogue: the")
-    print("                document speaks each turn, the model replies. order/interleave")
-    print("                advance on the documents' own course; reply follows overlap)")
+    print("          :doc read [n] [order|interleave|reply|updated] [satisfied]")
+    print("                (reading as dialogue: the document speaks each turn, the model")
+    print("                replies. order/interleave/updated advance on the documents' own")
+    print("                course -- updated = by file mtime, chronological; reply follows")
+    print("                overlap. 'satisfied' stops early once sense settles)")
     print("          :doc inject                  (stage the whole library for one turn, budget-bounded)")
     print("          :doc stop                    (interrupt auto-read)")
     print("          :sandbox on|off|status       (run the model's ```python blocks for real)")
@@ -1014,25 +1020,40 @@ def main():
                         print(Fore.YELLOW + "[Doc] Nothing to read yet. :doc <path> first." + Style.RESET_ALL)
                     else:
                         count, mode = 1, "order"
+                        until_settled, explicit_count = False, False
+                        mode_aliases = {"weave": "interleave", "mtime": "updated", "chrono": "updated"}
                         for extra in dargs.split()[1:]:
                             token = extra.strip().lower()
-                            if token in {"order", "reply", "interleave", "weave"}:
-                                mode = "interleave" if token == "weave" else token
+                            if token in {"order", "reply", "interleave", "weave", "updated", "mtime", "chrono"}:
+                                mode = mode_aliases.get(token, token)
+                            elif token in {"satisfied", "settled", "until"}:
+                                until_settled = True
                             else:
                                 try:
                                     count = int(token)
+                                    explicit_count = True
                                 except ValueError:
                                     pass
+                        if until_settled and not explicit_count:
+                            count = MAX_AUTOREAD  # "until satisfied" reads up to the cap
                         count = max(1, min(MAX_AUTOREAD, count))
-                        doc_autoread = {"remaining": count, "mode": mode}
+                        doc_autoread = {"remaining": count, "mode": mode, "until_settled": until_settled, "settled_streak": 0}
                         how = {
                             "order": "in document order -- the text advances on its own course",
                             "interleave": "weaving between documents -- their course, not the model's echo",
                             "reply": "chunks chosen by overlap with its replies (echo-following; deliberate use)",
+                            "updated": "in the order the files were last written (chronological)",
                         }[mode]
+                        stop_note = (
+                            " Stops early once the reading settles (sense clears conversation_productive "
+                            f"{max(1, int(tuner.get('reading_settled_streak', 2)))} turn(s) in a row)."
+                            if until_settled
+                            else ""
+                        )
                         print(
                             Fore.CYAN
-                            + f"[Doc] Auto-read: {count} turn(s), {how}. The document speaks next; the model replies each time. ':doc stop' interrupts."
+                            + f"[Doc] Auto-read: up to {count} turn(s), {how}.{stop_note} "
+                            + "The document speaks next; the model replies each time. ':doc stop' interrupts."
                             + Style.RESET_ALL
                         )
                 elif dargs.lower() == "inject":
@@ -1925,6 +1946,30 @@ def main():
                     "score": float(turn_sense),
                     "threshold": float(tuner.get("conversation_productive", 0.0)),
                 }
+            # "Read until satisfied": a reading turn counts as settled when its
+            # sense clears the conversation_productive bar (or needed no
+            # deliberation at all); enough settled turns in a row end the
+            # auto-read early, honestly, with the remainder still unread.
+            if doc_autoread and doc_autoread.get("until_settled") and reading_turn_source:
+                settled_turn = turn_sense is None or turn_sense >= float(
+                    tuner.get("conversation_productive", 0.0)
+                )
+                doc_autoread["settled_streak"] = (
+                    doc_autoread.get("settled_streak", 0) + 1 if settled_turn else 0
+                )
+                needed = max(1, int(tuner.get("reading_settled_streak", 2)))
+                if doc_autoread["settled_streak"] >= needed:
+                    unread_left = sum(
+                        s["chunk_count"] - len(s.get("read") or ()) for s in doc_library
+                    )
+                    print(
+                        Fore.CYAN
+                        + f"[Doc] Reading settled: {needed} productive turn(s) in a row. "
+                        + f"Stopping with {unread_left} chunk(s) unread -- ':doc read' resumes anytime."
+                        + Style.RESET_ALL
+                    )
+                    doc_autoread = None
+
             # Agency ledger: was this turn's context really caused by the
             # model's own words? Observed every turn (so the contingency rate
             # is visible) and credited with the turn's sense, so :tune lift on
