@@ -129,6 +129,28 @@ model is always tracking the same thing on a single axis"):
   later be read against axis stability (does steering work where the axis is
   coherent?).
 
+### Registered prediction: lawful transport and re-writing the dropped
+(Gavin, 2026-07-03)
+
+Hypothesis, two halves. (1) A layer is steerable not only where the axis is
+STABLE but wherever its evolution follows a SET EQUATION — a fixed transport
+law per layer (constant rotation is as steerable as identity, because the
+push arrives downstream in predictable form). The instrument is
+`axis_drift["var"]`: low variance of adjacent cosines = lawful, regardless
+of mean; recorded per sweep fire as `axis_lawfulness_var`. (2) The HIGHEST-
+value steers may be where a concept has stopped being recorded — computed
+mid-band, consumed, absent from later residuals while still relevant — so
+the steer RE-WRITES what the computation dropped. This matches the
+transition-layer bottleneck (correct intermediate states lost by render
+time) and the late-zone L27 gold hint. Decisive covariate: per-layer
+PRESENCE of the steered direction (cos of the actual hidden state with the
+direction, from captured stage/claimmap states); the hypothesis predicts
+per-layer success correlates with LOW presence (restoration) rather than
+high (reinforcement). Counter-hypothesis to keep honest: a direction absent
+late may be absent because no later layer reads it anymore — restoring an
+unread channel does nothing. The presence-vs-success correlation separates
+"dropped but readable" from "dropped and unread"; outcomes decide.
+
 Workflow: `:tune steer_layer_sweep 1`, `:tune claimmap_alpha 0.02`, talk.
 Each steered turn tests one layer; `:steer` watches the per-layer curve
 fill in; when layers clear the bar, `:tune steer_band auto 3 layersteer`
