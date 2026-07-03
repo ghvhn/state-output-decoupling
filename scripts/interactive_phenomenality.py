@@ -1084,12 +1084,19 @@ def main():
                     
                     paths_to_load = []
                     if os.path.isdir(path_str):
-                        for root, _, files in os.walk(path_str):
-                            for f in files:
-                                if f.endswith((".md", ".txt")):
+                        # Snatch the whole folder: .md/.txt/.py, deterministic
+                        # order, junk dirs pruned so ':doc .' can't swallow
+                        # a venv or caches.
+                        skip_dirs = {"__pycache__", "node_modules", ".venv", "venv", "out", "data"}
+                        for root, dirnames, files in os.walk(path_str):
+                            dirnames[:] = sorted(
+                                d for d in dirnames if not d.startswith(".") and d not in skip_dirs
+                            )
+                            for f in sorted(files):
+                                if f.endswith((".md", ".txt", ".py")):
                                     paths_to_load.append(os.path.join(root, f))
                     elif "*" in path_str or "?" in path_str:
-                        paths_to_load = [p for p in glob.glob(path_str, recursive=True) if os.path.isfile(p)]
+                        paths_to_load = sorted(p for p in glob.glob(path_str, recursive=True) if os.path.isfile(p))
                     else:
                         paths_to_load = [path_str]
 
@@ -1113,7 +1120,6 @@ def main():
                             print(Fore.RED + f"[Doc] {exc}" + Style.RESET_ALL)
                             continue
                         doc_library.append(doc_session)
-                        doc_session.setdefault("read", set()).add(0)
                         memory.append_event(
                             "document_ingested",
                             text=f"{doc_session['source_name']} ({doc_session['chunk_count']} chunks)",
@@ -1128,10 +1134,21 @@ def main():
                         known = "already in memory" if doc_session["already_ingested"] else "recorded to memory"
                         print(Fore.CYAN + f"[Doc] {doc_session['source_name']}: {doc_session['chunk_count']} chunk(s), {known}." + Style.RESET_ALL)
                         loaded_count += 1
-                        pending_document_tool_result = stage_chunk(doc_session)
-                    
+
                     if loaded_count > 0:
-                        print(Fore.CYAN + f"[Doc] Loaded {loaded_count} file(s). Chunk 1 staged -- next turn the model sees the text plus what it is and why it is here." + Style.RESET_ALL)
+                        # Stage the FIRST loaded file's first chunk, and mark
+                        # read only what was actually staged -- a batch load
+                        # must never silently skip the other files' openings.
+                        doc_session = doc_library[-loaded_count]
+                        doc_session.setdefault("read", set()).add(0)
+                        doc_session["cursor"] = 0
+                        pending_document_tool_result = stage_chunk(doc_session)
+                        print(
+                            Fore.CYAN
+                            + f"[Doc] Loaded {loaded_count} file(s). Staged: {doc_session['source_name']} "
+                            + f"part 1/{doc_session['chunk_count']} -- ':doc read [n] [order|interleave]' walks the rest."
+                            + Style.RESET_ALL
+                        )
                 continue
             if user_input.startswith(":impact"):
                 trigger = tuner.triggers.get("words_had_impact")
