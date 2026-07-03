@@ -720,6 +720,8 @@ def main():
     print("          :doc inject                  (stage the whole library for one turn, budget-bounded)")
     print("          :doc stop                    (interrupt auto-read)")
     print("          :sandbox on|off|status       (run the model's ```python blocks for real)")
+    print("          :experts on|off|status       (mint new steering experts from its own")
+    print("                recurring self-corrections; roster bounded; default off)")
     print("          :impact                      (consequence trail: what its words caused,")
     print("                and whether experienced impact tracks better deliberation)")
     print("Type 'exit' or 'quit' to leave.\n" + Style.RESET_ALL)
@@ -1151,6 +1153,26 @@ def main():
                     print(Fore.YELLOW + "[Impact] No consequence events yet this session. Real levers: write code (:sandbox on), ask tools, steer a reply-mode reading." + Style.RESET_ALL)
                 for event in list(impact_state["log"])[-10:]:
                     print(Fore.CYAN + f"  because it {event['cause']} -> {event['effect']}" + Style.RESET_ALL)
+                continue
+            if user_input.startswith(":experts"):
+                earg = user_input[len(":experts"):].strip().lower()
+                if earg == "on":
+                    config.emergent_experts_enabled = True
+                    print(
+                        Fore.YELLOW
+                        + "[Experts] ON: recurring self-correction directions can now be minted into "
+                        + "new roster experts (mesa Committee, roster bounded at 6). Its own corrective "
+                        + "conclusions become steering directions -- bounded by the envelope like everything else."
+                        + Style.RESET_ALL
+                    )
+                elif earg == "off":
+                    config.emergent_experts_enabled = False
+                    print(Fore.CYAN + "[Experts] OFF: roster frozen at its current members." + Style.RESET_ALL)
+                else:
+                    roster = getattr(config, "committee", None)
+                    names = [m.name for m in roster.members] if roster else ["(seeded on first generation)"]
+                    state_txt = "ON" if getattr(config, "emergent_experts_enabled", False) else "OFF"
+                    print(Fore.CYAN + f"[Experts] {state_txt}; roster: {', '.join(names)} (:experts on|off)." + Style.RESET_ALL)
                 continue
             if user_input.startswith(":sandbox"):
                 sarg = user_input[len(":sandbox"):].strip().lower()
