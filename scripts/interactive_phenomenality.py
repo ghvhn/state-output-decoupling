@@ -699,12 +699,12 @@ def main():
         from invariants.engine import axis_drift, drift_at_layer, pick_sweep_layers, steer_band_layers
         width = max(0, int(tuner.get("steer_layer_sweep", 0)))
         if width <= 0:
-            return [], {}
+            return [], {}, None
         n_layers = getattr(model, "n_layers", None) or len(model.model.model.layers)
         layers = pick_sweep_layers(steer_band_layers(n_layers), steer_map.layer_steer_counts(channel), width)
         drift = axis_drift(steer_vecs) if steer_vecs else None
         drifts = {L: drift_at_layer(drift, L) for L in layers} if drift else {L: None for L in layers}
-        return layers, drifts
+        return layers, drifts, (drift.get("var") if drift else None)
 
     _sync_steer_tunables(tuner, config)
 
@@ -753,11 +753,11 @@ def main():
         alpha = tuner.get("memory_alpha", 0.0)
         sweep_layers = None
         if alpha > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
-            _mls, _ = _sweep_layers_for("memory")
+            _mls, _, _mvar = _sweep_layers_for("memory")
             if _mls:
                 sweep_layers = _mls
                 for _sl in _mls:
-                    sweep_state["fires"].append(("memory", _sl, alpha, None, len(_mls)))
+                    sweep_state["fires"].append(("memory", _sl, alpha, None, len(_mls), _mvar))
         return _memory_steer_handles(m, (records[0].text or "").strip(),
                                      alpha=alpha, layers=sweep_layers)
 
@@ -1769,11 +1769,11 @@ def main():
             claimmap_alpha_used = tuner.get("claimmap_alpha", 0.0) if claimmap_steer_delta else 0.0
             turn_sweep_layers = None
             if claimmap_steer_delta and claimmap_alpha_used > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
-                sweep_layers, sweep_drifts = _sweep_layers_for("claimmap", claimmap_steer_delta)
+                sweep_layers, sweep_drifts, sweep_lawfulness = _sweep_layers_for("claimmap", claimmap_steer_delta)
                 if sweep_layers:
                     turn_sweep_layers = sweep_layers
                     for _sl in sweep_layers:
-                        sweep_state["fires"].append(("claimmap", _sl, claimmap_alpha_used, sweep_drifts.get(_sl), len(sweep_layers)))
+                        sweep_state["fires"].append(("claimmap", _sl, claimmap_alpha_used, sweep_drifts.get(_sl), len(sweep_layers), sweep_lawfulness))
                     print(
                         Fore.MAGENTA
                         + "[Steer] layer sweep: this turn's claimmap steer pushes "
@@ -1957,11 +1957,11 @@ def main():
                 tag_alpha = tuner.get("claimmap_alpha", 0.0)
                 tag_sweep_layers = None
                 if model_claimmap_steer and tag_alpha > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
-                    _tls, _tds = _sweep_layers_for("claimmap", model_claimmap_steer)
+                    _tls, _tds, _tvar = _sweep_layers_for("claimmap", model_claimmap_steer)
                     if _tls:
                         tag_sweep_layers = _tls
                         for _sl in _tls:
-                            sweep_state["fires"].append(("claimmap", _sl, tag_alpha, _tds.get(_sl), len(_tls)))
+                            sweep_state["fires"].append(("claimmap", _sl, tag_alpha, _tds.get(_sl), len(_tls), _tvar))
                 steer_handles = (
                     claimmap_steer_handles(model, model_claimmap_steer, alpha=tag_alpha, layers=tag_sweep_layers)
                     if model_claimmap_steer else []
@@ -2227,13 +2227,14 @@ def main():
             # Layer isolation evidence: each single-layer steer this turn lands
             # on ITS layer in the steer map, labeled by the turn's outcome —
             # per-layer success accrues with no band confound.
-            for sweep_channel, sweep_l, sweep_alpha, sweep_d, sweep_w in sweep_state["fires"]:
+            for sweep_channel, sweep_l, sweep_alpha, sweep_d, sweep_w, sweep_v in sweep_state["fires"]:
                 steer_map.record_layer_steer(
                     sweep_channel,
                     sweep_l,
                     sweep_alpha,
                     conversation_outcome=conversation_outcome,
-                    metrics={"axis_drift_at_layer": sweep_d, "sweep_width": sweep_w},
+                    metrics={"axis_drift_at_layer": sweep_d, "sweep_width": sweep_w,
+                             "axis_lawfulness_var": sweep_v},
                 )
             sweep_state["fires"] = []
             record_internal_traces(

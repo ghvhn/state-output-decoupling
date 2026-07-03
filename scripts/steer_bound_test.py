@@ -578,7 +578,19 @@ def test_axis_drift_reads_whether_one_axis_persists():
     # Gaps and zero vectors are skipped, not fabricated.
     sparse = axis_drift({1: same, 3: same, 4: torch.zeros(3)})
     assert sparse["pairs"] == {} and sparse["mean"] is None
-    assert axis_drift({}) == {"pairs": {}, "mean": None, "min": None}
+    assert axis_drift({}) == {"pairs": {}, "mean": None, "min": None, "var": None}
+
+    # Lawfulness ("set equation"): a constant per-layer rotation has adjacent
+    # cosines all equal -> variance ~0 (steerable: the transport law is fixed,
+    # even though the axis moves). Erratic evolution -> variance > 0.
+    import math as _m
+    def rot(theta):
+        return torch.tensor([_m.cos(theta), _m.sin(theta), 0.0])
+    lawful = axis_drift({i: rot(i * 0.4) for i in range(6)})     # fixed 0.4-rad steps
+    assert lawful["var"] is not None and lawful["var"] < 1e-10
+    assert abs(lawful["mean"] - _m.cos(0.4)) < 1e-6              # rotating, yet lawful
+    erratic = axis_drift({0: rot(0.0), 1: rot(0.1), 2: rot(1.5), 3: rot(1.6)})
+    assert erratic["var"] > 0.01                                  # the law itself changes
     # drift_at_layer averages the cosines touching the steered layer.
     assert abs(drift_at_layer(drift, 11) - 0.5) < 1e-6   # (1.0 + 0.0) / 2
     assert drift_at_layer(drift, 99) is None

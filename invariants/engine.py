@@ -724,10 +724,17 @@ def axis_drift(vecs):
             continue
         pairs[a] = float((va @ vb) / (na * nb))
     values = list(pairs.values())
+    mean = (sum(values) / len(values)) if values else None
+    # Lawfulness: LOW variance of adjacent cosines = the axis evolves by a
+    # SET EQUATION (constant transport per layer -- steerable even while
+    # rotating, because the push arrives downstream in predictable form).
+    # High variance = the relationship itself changes layer to layer.
+    var = (sum((v - mean) ** 2 for v in values) / len(values)) if values else None
     return {
         "pairs": pairs,  # {layer: cos(v_layer, v_layer+1)}
-        "mean": (sum(values) / len(values)) if values else None,
+        "mean": mean,
         "min": min(values) if values else None,
+        "var": var,
     }
 
 
