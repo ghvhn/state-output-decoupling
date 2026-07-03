@@ -1,5 +1,6 @@
 import datetime
 import glob
+import json
 import os
 import re
 import sys
@@ -502,6 +503,44 @@ def calibration_policy(name):
     return "threshold", ""
 
 
+# Streams usable on either side of a paired calibration. A target's bar is
+# set in ITS stream's units; conversation_productive judges the sense stream.
+STREAM_ALIASES = {"intent": "intent_settling", "impact": "words_had_impact",
+                  "productive": "sense", "sense": "sense"}
+
+
+def resolve_stream(name, tuner):
+    """A nameable stream: alias, registered trigger, or bare probe name."""
+    name = (name or "").lower()
+    if name in STREAM_ALIASES:
+        return STREAM_ALIASES[name]
+    if name in tuner.triggers:
+        return name
+    if f"probe_{name}" in tuner.triggers:
+        return f"probe_{name}"
+    return None
+
+
+def paired_threshold(rows, target_stream, anchor_stream, anchor_value, comparator=">=", min_n=5):
+    """The generalized both-ways discriminant: over per-turn rows, split by
+    whether the ANCHOR stream fired (its own value+comparator), and return
+    the midpoint of the TARGET stream's group medians -- the target bar that
+    best separates anchor-fired turns from anchor-unfired ones. None until
+    both groups have min_n rows carrying both streams. Deterministic."""
+    fired, unfired = [], []
+    for row in rows:
+        if target_stream not in row or anchor_stream not in row:
+            continue
+        a = row[anchor_stream]
+        hit = (a <= anchor_value) if comparator == "<=" else (a >= anchor_value)
+        (fired if hit else unfired).append(row[target_stream])
+    if len(fired) < min_n or len(unfired) < min_n:
+        return None
+    fired.sort()
+    unfired.sort()
+    return (fired[len(fired) // 2] + unfired[len(unfired) // 2]) / 2.0
+
+
 def intent_relative_threshold(pairs, min_n=5):
     """Set the productive bar RELATIVE TO INTENT-SHAPING, not at an arbitrary
     quantile: given (settling, sense) pairs -- settling > 0 means the turn
@@ -855,6 +894,20 @@ def main():
     prev_unsettledness = None  # ambiguity+disagreement of the previous turn (intent axis)
     probes = {}  # name -> {direction, history, framings}; minted concept sensors (unvalidated until outcomes accrue)
     PROBE_DIR = os.path.join(ROOT, "invariants", "out", "probes")
+    # Per-turn signals table: one row per turn with every stream's value --
+    # the substrate that lets ANY named stream anchor ANY threshold target
+    # (both ways). Persisted, so paired evidence survives restarts.
+    TURN_SIGNALS_PATH = os.path.join(ROOT, "invariants", "out", "turn_signals.jsonl")
+    turn_log = deque(maxlen=400)
+    try:
+        with open(TURN_SIGNALS_PATH, "r", encoding="utf-8") as _tf:
+            for _line in _tf.readlines()[-400:]:
+                try:
+                    turn_log.append(json.loads(_line))
+                except Exception:
+                    continue
+    except OSError:
+        pass
     MAX_AUTOREAD = 20           # per :doc read command; reading stays a deliberate act
     sandbox_enabled = False     # deliberate opt-in, like every intervention here
     session_context = []
@@ -1559,50 +1612,57 @@ def main():
                     if cal_name == "conversation_productive" and anchor == "intent":
                         user_input = ":tune conversation_productive auto intent"
                         # fall through to the shared intent route below
-                    elif cal_name == "conversation_productive" and anchor_is_word:
-                        # Named-concept anchor: the bar becomes the sense cut
-                        # between high-<anchor> and low-<anchor> turns -- same
-                        # discriminant as the intent route, over a probe the
-                        # operator minted and the turns then measured.
-                        trig = tuner.triggers.get(f"probe_{anchor}")
-                        if trig is None:
+                    elif anchor_is_word and anchor != "intent":
+                        # BOTH WAYS: any threshold target, anchored to any
+                        # named stream. The target's bar becomes the cut (in
+                        # the target stream's own units) between turns where
+                        # the anchor fired and turns where it did not.
+                        target_trigger = cal_name if cal_name in tuner.triggers else f"probe_{cal_name}"
+                        target_stream = "sense" if cal_name == "conversation_productive" else resolve_stream(cal_name, tuner)
+                        anchor_stream = resolve_stream(anchor, tuner)
+                        if target_stream is None or target_trigger not in tuner.triggers:
+                            print(Fore.YELLOW + f"[Calibrate] unknown target '{cal_name}'." + Style.RESET_ALL)
+                            continue
+                        if anchor_stream is None:
                             print(
                                 Fore.YELLOW
-                                + f"[Calibrate] no probe for '{anchor}'. Mint it first -- "
-                                + f":probe {anchor} <framing with it> || <framing without it> -- then talk "
-                                + "so paired evidence accrues."
+                                + f"[Calibrate] unknown anchor '{anchor}'. Name an observed stream "
+                                + "(productive/intent/impact/a probe), or mint one: "
+                                + f":probe {anchor} <with it> || <without it>."
                                 + Style.RESET_ALL
                             )
                             continue
-                        pairs = list(trig.outcomes)
-                        signals = [sig for sig, _ in pairs]
-                        if signals and max(signals) - min(signals) < 1e-9:
-                            print(Fore.YELLOW + f"[Calibrate] refused: probe_{anchor} signal is degenerate (no variation)." + Style.RESET_ALL)
-                            continue
-                        v = intent_relative_threshold(pairs)
+                        a_trig = tuner.triggers.get(anchor_stream)
+                        v = paired_threshold(
+                            list(turn_log), target_stream, anchor_stream,
+                            a_trig.value if a_trig else 0.0,
+                            a_trig.comparator if a_trig else ">=",
+                        )
                         if v is None:
-                            n_hi = sum(1 for sig, _ in pairs if sig > 0)
+                            n_rows = sum(1 for r in turn_log if target_stream in r and anchor_stream in r)
                             print(
                                 Fore.YELLOW
-                                + f"[Calibrate] refused: need >=5 high-{anchor} and >=5 low-{anchor} turns "
-                                + f"with sense (have {n_hi} and {len(pairs) - n_hi})."
+                                + f"[Calibrate] refused: need >=5 anchor-fired and >=5 anchor-unfired turns "
+                                + f"carrying both {target_stream} and {anchor_stream} (have {n_rows} paired rows)."
                                 + Style.RESET_ALL
                             )
                         else:
-                            tuner.set("conversation_productive", v)
+                            tuner.set(target_trigger, v)
                             print(
                                 Fore.GREEN
-                                + f"[Calibrate] conversation_productive = {round(v, 4)} -- the sense cut between "
-                                + f"high-{anchor} and low-{anchor} turns ({len(pairs)} paired; probe is a minted "
-                                + "hypothesis, not a validated instrument)."
+                                + f"[Calibrate] {target_trigger} = {round(v, 4)} -- the {target_stream} cut "
+                                + f"between {anchor_stream}-fired and unfired turns "
+                                + f"({sum(1 for r in turn_log if target_stream in r and anchor_stream in r)} paired rows; "
+                                + "probes remain minted hypotheses)."
                                 + Style.RESET_ALL
                             )
                         continue
                     elif not user_input.startswith(":tune"):
-                        trig = tuner.triggers.get(cal_name)
+                        trig = tuner.triggers.get(cal_name) or tuner.triggers.get(f"probe_{cal_name}")
                         if trig is None:
                             print(Fore.YELLOW + f"[Calibrate] unknown name '{cal_name}'. Bare :calibrate lists them." + Style.RESET_ALL)
                             continue
+                        cal_name = trig.name
                         if len(trig.signals) < 10:
                             print(
                                 Fore.YELLOW
@@ -1786,6 +1846,7 @@ def main():
             turn_impacts = impact_state["pending"]
             impact_state["pending"] = []
             sweep_state["fires"] = []  # single-layer steers applied this turn
+            turn_row = {}              # this turn's stream values (paired calibration substrate)
             pending_memory_tool_result = None
             pending_orientation_tool_result = None
             pending_claimmap_tool_result = None
@@ -2281,6 +2342,7 @@ def main():
                     "score": float(turn_sense),
                     "threshold": float(tuner.get("conversation_productive", 0.0)),
                 }
+                turn_row["sense"] = float(turn_sense)
             # Minted probes score every turn: raw projection of the reply
             # state on each probe direction, centered against the probe's own
             # rolling history, paired with sense via the credit channel.
@@ -2294,6 +2356,7 @@ def main():
                     sig = raw - (sum(hist) / len(hist)) if hist else 0.0
                     hist.append(raw)
                     tuner.observe(f"probe_{pname}", sig)
+                    turn_row[f"probe_{pname}"] = float(sig)
                     if turn_sense is not None:
                         tuner.credit(f"probe_{pname}", sig, turn_sense)
 
@@ -2306,6 +2369,7 @@ def main():
                 if prev_unsettledness is not None:
                     intent_signal = prev_unsettledness - unsettled_now
                     tuner.observe("intent_settling", intent_signal)
+                    turn_row["intent_settling"] = float(intent_signal)
                     if turn_sense is not None:
                         tuner.credit("intent_settling", intent_signal, turn_sense)
                 prev_unsettledness = unsettled_now
@@ -2346,6 +2410,14 @@ def main():
                 impact_state["log"].extend(turn_impacts)
             if turn_sense is not None:
                 tuner.credit("words_had_impact", impact_signal, turn_sense)
+            turn_row["words_had_impact"] = float(impact_signal)
+            if turn_row:
+                turn_log.append(dict(turn_row))
+                try:
+                    with open(TURN_SIGNALS_PATH, "a", encoding="utf-8") as _tf:
+                        _tf.write(json.dumps(turn_row) + chr(10))
+                except OSError:
+                    pass
             # Layer isolation evidence: each single-layer steer this turn lands
             # on ITS layer in the steer map, labeled by the turn's outcome —
             # per-layer success accrues with no band confound.
