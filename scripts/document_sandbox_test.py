@@ -367,6 +367,23 @@ def test_impact_attribution_is_minimal_and_first_person():
     assert "Because I asked" in kept and "answer text" in kept
 
 
+def test_intent_relative_threshold_is_a_discriminant_cut():
+    from scripts.interactive_phenomenality import intent_relative_threshold
+
+    # Settling turns cohere around 0.4; non-settling around -0.1: bar lands
+    # between the group medians, so "productive" means "coheres like the
+    # turns that actually shaped intent".
+    pairs = [(0.2, 0.35), (0.1, 0.4), (0.3, 0.45), (0.05, 0.4), (0.15, 0.5),
+             (-0.1, -0.1), (0.0, -0.05), (-0.2, -0.15), (-0.05, -0.1), (0.0, 0.0)]
+    v = intent_relative_threshold(pairs)
+    assert abs(v - (0.4 + (-0.1)) / 2.0) < 1e-9    # midpoint of medians (0.4, -0.1)
+    assert intent_relative_threshold(pairs) == v    # deterministic
+    # Refuses without enough evidence on BOTH sides.
+    assert intent_relative_threshold(pairs[:6]) is None
+    assert intent_relative_threshold([(0.1, 0.3)] * 10) is None
+    assert intent_relative_threshold([]) is None
+
+
 def test_reply_note_lands_in_the_frame():
     from invariants.document_engine import reading_reply_note
 
@@ -396,6 +413,7 @@ TESTS = [
     test_resume_is_real_across_sessions,
     test_reply_mode_can_return_to_earlier_threads,
     test_impact_attribution_is_minimal_and_first_person,
+    test_intent_relative_threshold_is_a_discriminant_cut,
     test_reply_note_lands_in_the_frame,
 ]
 

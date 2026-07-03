@@ -468,6 +468,21 @@ def impact_note(cause_text):
     return f"Because I {cause_text}:"
 
 
+def intent_relative_threshold(pairs, min_n=5):
+    """Set the productive bar RELATIVE TO INTENT-SHAPING, not at an arbitrary
+    quantile: given (settling, sense) pairs -- settling > 0 means the turn
+    LOWERED ambiguity+disagreement versus the previous turn, i.e. it shaped
+    intent -- return the sense midpoint between the median of intent-shaping
+    turns and the median of non-shaping turns. That cut labels 'productive'
+    as 'coheres like the turns that actually settled an intent'. None until
+    both groups have min_n evidence. Deterministic: same pairs, same bar."""
+    settling = sorted(o for s, o in pairs if s > 0)
+    non = sorted(o for s, o in pairs if s <= 0)
+    if len(settling) < min_n or len(non) < min_n:
+        return None
+    return (settling[len(settling) // 2] + non[len(non) // 2]) / 2.0
+
+
 def _sync_steer_tunables(tuner, config):
     """Push the live tuner values into the engine's steering envelope and the
     agentic config, once per turn before any generation. Every steering surface
@@ -633,6 +648,12 @@ def main():
     tuner.register("synthesis_events", config.max_synthesis_events, kind="coefficient")
     tuner.register("synthesis_steps", config.max_synthesis_steps, kind="coefficient")
     tuner.register("plateau_epsilon", config.epsilon, kind="coefficient")
+    # Intent axis of the decomposed reward: signal = previous turn's
+    # (ambiguity + disagreement) minus this turn's. Fired (> 0) = this turn
+    # SETTLED intent. Credited with sense, so conversation_productive can be
+    # calibrated relative to intent-shaping (:tune conversation_productive
+    # auto intent) instead of an arbitrary quantile.
+    tuner.register("intent_settling", 0.0, kind="threshold", comparator=">=")
     # EOT Urgency: Tracks the model's internal probability of finishing its turn.
     tuner.register("eot_urgency", 0.05, kind="threshold", comparator="<=")
 
@@ -786,6 +807,7 @@ def main():
     doc_autoread = None         # {"remaining": n, "mode": "order"|"interleave"|"reply"} during :doc read
     last_assistant_response = ""
     recent_responses = deque(maxlen=4)  # reflection stream for reply-mode thread returns
+    prev_unsettledness = None  # ambiguity+disagreement of the previous turn (intent axis)
     MAX_AUTOREAD = 20           # per :doc read command; reading stays a deliberate act
     sandbox_enabled = False     # deliberate opt-in, like every intervention here
     session_context = []
@@ -1399,6 +1421,30 @@ def main():
                             )
                         print(Fore.CYAN + line + Style.RESET_ALL)
                 elif len(targs) >= 2 and targs[1].lower() == "auto":
+                    if targs[0] == "conversation_productive" and len(targs) >= 3 and targs[2].lower() == "intent":
+                        # Bar set RELATIVE TO INTENT-SHAPING: the sense cut that
+                        # separates turns which settled intent from turns which
+                        # did not (midpoint of the two group medians).
+                        trig = tuner.triggers.get("intent_settling")
+                        pairs = list(trig.outcomes) if trig is not None else []
+                        v = intent_relative_threshold(pairs)
+                        if v is None:
+                            n_set = sum(1 for sig, _ in pairs if sig > 0)
+                            print(
+                                Fore.YELLOW
+                                + f"[Tune] conversation_productive unchanged: need >=5 intent-settling and >=5 "
+                                + f"non-settling turns with sense (have {n_set} and {len(pairs) - n_set}). Talk more."
+                                + Style.RESET_ALL
+                            )
+                        else:
+                            tuner.set("conversation_productive", v)
+                            print(
+                                Fore.GREEN
+                                + f"[Tune] conversation_productive = {round(v, 4)} -- the sense cut between "
+                                + f"intent-settling and non-settling turns ({len(pairs)} paired turns)."
+                                + Style.RESET_ALL
+                            )
+                        continue
                     if targs[0] == "steer_cap_fraction":
                         # Data-informed, deterministic: exact percentile of the
                         # attempted push/residual ratios _cap_steer observed.
@@ -1999,6 +2045,19 @@ def main():
                     "score": float(turn_sense),
                     "threshold": float(tuner.get("conversation_productive", 0.0)),
                 }
+            # Intent axis: did this turn settle intent (lower
+            # ambiguity+disagreement than last turn)? Observed every turn the
+            # sensors fire; paired with sense via the credit channel.
+            phen_now = latest_phenomenality_scores(synthesis_records) or {}
+            if phen_now:
+                unsettled_now = float(phen_now.get("ambiguity", 0.0)) + float(phen_now.get("disagreement", 0.0))
+                if prev_unsettledness is not None:
+                    intent_signal = prev_unsettledness - unsettled_now
+                    tuner.observe("intent_settling", intent_signal)
+                    if turn_sense is not None:
+                        tuner.credit("intent_settling", intent_signal, turn_sense)
+                prev_unsettledness = unsettled_now
+
             # "Read until satisfied": a reading turn counts as settled when its
             # sense clears the conversation_productive bar (or needed no
             # deliberation at all); enough settled turns in a row end the
