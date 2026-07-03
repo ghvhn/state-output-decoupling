@@ -67,6 +67,7 @@ Knobs you'll actually touch:
 | `steer_layer_sweep` | 0 (off) | 1 = one least-tested layer per steer; per-layer outcomes accrue |
 | `conversation_productive` | 0.0 | sense threshold labeling turns productive |
 | `response_tokens` | 512 | reply token budget (cut-off suggestions reference it) |
+| `reading_settled_streak` | 2 | consecutive productive reading turns that end a 'satisfied' auto-read |
 | `eot_urgency` | 0.05 | P(end-of-turn) below this at the budget = "cut off mid-thought" |
 | `sandbox_success` | 0.5 | observation stream of real execution outcomes |
 | `words_had_impact` | 0.5 | observation stream of word-caused turns |
@@ -79,10 +80,15 @@ Knobs you'll actually touch:
   `{last_updated}` in the why are substituted per file.
 - **`:doc next`** — stage the following chunk (explicit advance).
 - **`:doc status`** — per-document unread counts, staged/auto-read state.
-- **`:doc read [n] [order|interleave|reply]`** — reading as dialogue (cap 20
-  turns): the framed chunk IS the user turn. `order` = document order,
-  non-adapting; `interleave` = least-read document speaks next; `reply` =
-  echo-following (deliberate use; caveat stated).
+- **`:doc read [n] [order|interleave|reply|updated] [satisfied]`** — reading
+  as dialogue (cap 20 turns): the framed chunk IS the user turn. `order` =
+  document order, non-adapting; `interleave` = least-read document speaks
+  next; `updated` (alias `mtime`/`chrono`) = chronological by file mtime —
+  the record in the order it was written; `reply` = echo-following
+  (deliberate use; caveat stated). `satisfied` (alias `settled`) stops early
+  once `reading_settled_streak` consecutive reading turns clear the
+  `conversation_productive` sense bar — no new oracle, and the remainder
+  stays unread for a later `:doc read`.
 - **`:doc inject`** — stage the ENTIRE library for one turn, budget-bounded
   and framed; refuses honestly when the library exceeds the budget.
 - **`:doc stop`** — interrupt auto-read.
