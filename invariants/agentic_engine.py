@@ -660,7 +660,15 @@ def get_agentic_handles(
                             # roster. Default OFF: an unbidden mid-run roster
                             # change would contaminate benchmark controls, and
                             # more branches cost VRAM/compute per routing event.
-                            if getattr(config, "emergent_experts_enabled", False):
+                            if (
+                                getattr(config, "emergent_experts_enabled", False)
+                                and delta_channel == "synthesis_delta"
+                            ):
+                                # Only OPTIMIZER-found corrections feed births:
+                                # the organic vector is one fixed direction and
+                                # would trivially cluster into a duplicate of a
+                                # channel that already exists. Births must be
+                                # genuinely new directions.
                                 config.recent_corrections.append(delta_to_apply.detach().clone().squeeze())
                                 if len(config.recent_corrections) >= 5:
                                     roster_cap = max(1, int(getattr(config, "max_committee_size", 6)))
@@ -674,6 +682,19 @@ def get_agentic_handles(
                                                 f"    [Agentic ToT] {len(new_experts)} emergent expert(s) minted "
                                                 "from recurring self-corrections."
                                             )
+                                            # Births persist: saved into models/
+                                            # where the VectorRegistry discovers
+                                            # them as SEEDS next session.
+                                            try:
+                                                models_dir = Path(__file__).parent / "models"
+                                                models_dir.mkdir(exist_ok=True)
+                                                for new_obj in new_experts:
+                                                    torch.save(
+                                                        new_obj.direction.detach().cpu(),
+                                                        models_dir / f"{new_obj.name}_{int(time.time())}.pt",
+                                                    )
+                                            except Exception as save_exc:
+                                                print(f"    [Agentic ToT] Expert persist skipped ({save_exc}).")
                                     config.recent_corrections.clear()
 
                             metadata = {
