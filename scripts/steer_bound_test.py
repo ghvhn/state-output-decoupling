@@ -561,6 +561,35 @@ def test_optimizer_gradient_path_bypasses_cap_and_telemetry():
     reset_steer_telemetry()
 
 
+def test_probe_minting_and_scoring_are_deterministic():
+    """Named-concept probes: contrastive states mint a per-layer direction;
+    scoring is the centered projection recipe (raw here; caller centers)."""
+    from invariants.engine import probe_direction, probe_score
+
+    torch.manual_seed(3)
+    L, T, D = 6, 4, 8
+    hs_a = torch.randn(L, T, D)
+    hs_b = torch.randn(L, T, D)
+    direction = probe_direction(hs_a, hs_b, [2, 3, 4])
+    assert set(direction) == {2, 3, 4}
+    for vec in direction.values():
+        assert abs(vec.norm().item() - 1.0) < 1e-5              # unit per layer
+    # Deterministic: same states, same direction.
+    again = probe_direction(hs_a, hs_b, [2, 3, 4])
+    assert all(torch.equal(direction[k], again[k]) for k in direction)
+    # Out-of-range layers skipped; identical framings -> no direction.
+    assert probe_direction(hs_a, hs_b, [99]) == {}
+    assert probe_direction(hs_a, hs_a, [2, 3]) == {}
+
+    # Scoring: the A-state scores higher along an A-minus-B direction than
+    # the B-state does, by construction.
+    score_a = probe_score(hs_a, direction)
+    score_b = probe_score(hs_b, direction)
+    assert score_a > score_b
+    assert probe_score(hs_a, {}) == 0.0
+    assert probe_score(hs_a, direction) == probe_score(hs_a, direction)  # deterministic
+
+
 def test_axis_drift_reads_whether_one_axis_persists():
     from invariants.engine import axis_drift, drift_at_layer
 
@@ -678,6 +707,7 @@ TESTS = [
     test_channel_ablation_switch_isolates_one_effect,
     test_isolation_report_is_a_pure_function_of_summaries,
     test_optimizer_gradient_path_bypasses_cap_and_telemetry,
+    test_probe_minting_and_scoring_are_deterministic,
     test_axis_drift_reads_whether_one_axis_persists,
     test_layer_sweep_rotates_and_attributes_per_layer,
 ]
