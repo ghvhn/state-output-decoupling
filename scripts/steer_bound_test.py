@@ -586,7 +586,7 @@ def test_axis_drift_reads_whether_one_axis_persists():
 
 def test_layer_sweep_rotates_and_attributes_per_layer():
     import tempfile
-    from invariants.engine import pick_sweep_layer
+    from invariants.engine import pick_sweep_layer, pick_sweep_layers
     from invariants.steer_map_store import SteerMapStore
 
     band = [12, 13, 14]
@@ -594,6 +594,14 @@ def test_layer_sweep_rotates_and_attributes_per_layer():
     assert pick_sweep_layer(band, {12: 1}) == 13                 # least-tested next
     assert pick_sweep_layer(band, {12: 1, 13: 1, 14: 1}) == 12   # even -> rotate from lowest
     assert pick_sweep_layer([], {}) is None
+
+    # Width > 1: a deterministic overlay of the k least-tested layers.
+    assert pick_sweep_layers(band, {}, width=2) == [12, 13]
+    assert pick_sweep_layers(band, {12: 2, 13: 1}, width=2) == [13, 14]
+    assert pick_sweep_layers(band, {}, width=99) == band          # bounded by the band
+    assert pick_sweep_layers(band, {}, width=0) == []             # 0 = sweep off
+    assert pick_sweep_layers(band, {12: 1, 13: 1, 14: 1}, width=2) == [12, 13]  # ties -> lowest
+    assert pick_sweep_layers(band, {}, width=2) == pick_sweep_layers(band, {}, width=2)  # deterministic
 
     with tempfile.TemporaryDirectory() as tmp:
         store = SteerMapStore(

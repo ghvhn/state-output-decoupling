@@ -69,7 +69,7 @@ Knobs you'll actually touch:
 | `steer_cap_fraction` | 0.5 | envelope: max push / residual norm |
 | `steer_band_lo/hi` | 0.40/0.70 | depth window for band steers |
 | `steer_fraction` | 0.25 | agentic delta/branch scale |
-| `steer_layer_sweep` | 0 (off) | 1 = one least-tested layer per steer; per-layer outcomes accrue |
+| `steer_layer_sweep` | 0 (off) | sweep WIDTH: 0 = full band, 1 = one least-tested layer (pure isolation), k = deterministic overlay of the k least-tested (outcomes score the group; sweep_width recorded per event) |
 | `conversation_productive` | 0.0 | sense threshold labeling turns productive |
 | `response_tokens` | 512 | reply token budget (cut-off suggestions reference it) |
 | `reading_settled_streak` | 2 | consecutive productive reading turns that end a 'satisfied' auto-read |
