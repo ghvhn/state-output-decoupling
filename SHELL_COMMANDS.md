@@ -44,6 +44,16 @@ its own first-person voice.
   distribution + clip rate; data-implied cap (refuses under 64 observations);
   synthesis-evidence band vs layer-steer band (transfer-free, per-layer
   table); channel-lift table (fired vs unfired outcomes per channel).
+- **`:calibrate <name> [pct|intent|band args]`** — the calibration front
+  door: request any knob's calibration BY NAME; the system evaluates the
+  request deterministically and refuses unsafe ones — circular strength/
+  budget knobs (they shape the distribution they'd calibrate to), binary
+  outcome streams (no percentile exists), vacuous caps (p100 never binds),
+  and under-evidenced bars (<10 observed signals, or the route's own floor).
+  Safe routes: observed thresholds by percentile, `steer_cap_fraction` from
+  push telemetry, `steer_band` from per-layer outcomes,
+  `conversation_productive intent` from the intent axis. Operator-only by
+  construction: the model's words can never loosen its own bounds.
 - **`:tune`** — every knob with value, fire rate, signal distribution, lift.
 - **`:tune <name> <value>`** — set a knob.
 - **`:tune <name> auto [percentile]`** — calibrate a threshold to its own
