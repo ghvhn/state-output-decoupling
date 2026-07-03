@@ -367,6 +367,33 @@ def test_impact_attribution_is_minimal_and_first_person():
     assert "Because I asked" in kept and "answer text" in kept
 
 
+def test_calibration_policy_refuses_what_should_not_self_calibrate():
+    from scripts.interactive_phenomenality import calibration_policy
+
+    # Observed thresholds: safe to percentile-calibrate.
+    for name in ("claimmap_tension", "memory_need", "conversation_productive",
+                 "eot_urgency", "intent_settling"):
+        route, _ = calibration_policy(name)
+        assert route == "threshold", name
+    # Dedicated data routes.
+    assert calibration_policy("steer_cap_fraction")[0] == "cap"
+    assert calibration_policy("steer_band")[0] == "band"
+    # Binary outcome streams: a percentile bar is meaningless.
+    for name in ("sandbox_success", "words_had_impact"):
+        route, reason = calibration_policy(name)
+        assert route == "reject" and "binary" in reason
+    # Strength/budget knobs: circular -- they shape the distribution they
+    # would calibrate to. The system refuses to approve its own settings.
+    for name in ("claimmap_alpha", "memory_alpha", "steer_fraction",
+                 "steer_layer_sweep", "response_tokens", "routing_events",
+                 "synthesis_steps", "plateau_epsilon", "steer_band_lo"):
+        route, reason = calibration_policy(name)
+        assert route == "reject" and "circular" in reason, name
+    # Unknown names default to threshold; the handler then requires a real
+    # registered trigger with >=10 observed signals before acting.
+    assert calibration_policy("some_future_signal")[0] == "threshold"
+
+
 def test_intent_relative_threshold_is_a_discriminant_cut():
     from scripts.interactive_phenomenality import intent_relative_threshold
 
@@ -413,6 +440,7 @@ TESTS = [
     test_resume_is_real_across_sessions,
     test_reply_mode_can_return_to_earlier_threads,
     test_impact_attribution_is_minimal_and_first_person,
+    test_calibration_policy_refuses_what_should_not_self_calibrate,
     test_intent_relative_threshold_is_a_discriminant_cut,
     test_reply_note_lands_in_the_frame,
 ]

@@ -468,6 +468,40 @@ def impact_note(cause_text):
     return f"Because I {cause_text}:"
 
 
+# Calibration safety policy: which names may be calibrated from data, and by
+# which route. Deterministic on purpose -- a safety gate must not be
+# persuadable, and since :calibrate is operator-only, the model's words can
+# never loosen its own bounds.
+CALIBRATION_BINARY = {"sandbox_success", "words_had_impact"}
+CALIBRATION_CIRCULAR = {
+    "claimmap_alpha", "memory_alpha", "steer_fraction", "steer_layer_sweep",
+    "response_tokens", "routing_events", "routing_loops", "routing_entropy",
+    "synthesis_events", "synthesis_steps", "plateau_epsilon",
+    "reading_settled_streak", "steer_band_lo", "steer_band_hi",
+}
+
+
+def calibration_policy(name):
+    """Evaluate a calibration request by name. Returns (route, reason):
+    route "cap" | "band" | "threshold" | "reject". Rejections are safety
+    judgments: binary streams have no percentile, and strength/budget knobs
+    shape the very distribution they would be calibrated to (circular --
+    the system would be approving its own settings)."""
+    if name == "steer_cap_fraction":
+        return "cap", ""
+    if name == "steer_band":
+        return "band", ""
+    if name in CALIBRATION_BINARY:
+        return "reject", "its signal is binary (0/1); a percentile bar has no meaning there"
+    if name in CALIBRATION_CIRCULAR:
+        return "reject", (
+            "this knob shapes the very distribution it would be calibrated to (circular). "
+            "Set it deliberately, or earn it from outcome evidence (:steer lift, "
+            ":calibrate steer_band, isolation runs)"
+        )
+    return "threshold", ""
+
+
 def intent_relative_threshold(pairs, min_n=5):
     """Set the productive bar RELATIVE TO INTENT-SHAPING, not at an arbitrary
     quantile: given (settling, sense) pairs -- settling > 0 means the turn
@@ -778,6 +812,9 @@ def main():
     print("          :claimmap <first text> || <second text>")
     print("          :steermap")
     print("          :steer  (envelope + observed push distribution + data-implied cap/band)")
+    print("          :calibrate <name> [pct|intent|band args]  (data-calibrate any knob BY NAME;")
+    print("                the system evaluates the request and refuses unsafe ones --")
+    print("                circular strength knobs, binary streams, vacuous p100 caps)")
     print("          :tune, :tune <name> <value>, :tune <name> auto [percentile]")
     print("          :tune steer_cap_fraction auto [pct]  (calibrate cap from observed pushes)")
     print("          :tune steer_band auto [min_events] [gold|conversation|any] [synthesis|layersteer]")
@@ -1405,6 +1442,86 @@ def main():
                             + Style.RESET_ALL
                         )
                 continue
+            if user_input.startswith(":calibrate"):
+                cargs = user_input[len(":calibrate"):].split()
+                if not cargs:
+                    print(Fore.CYAN + "[Calibrate] Usage: :calibrate <name> [percentile|intent|band args]." + Style.RESET_ALL)
+                    routes = {}
+                    for nm in sorted(set(list(tuner.triggers) + ["steer_cap_fraction", "steer_band"])):
+                        routes.setdefault(calibration_policy(nm)[0], []).append(nm)
+                    for route in ("threshold", "cap", "band", "reject"):
+                        if routes.get(route):
+                            label = {"threshold": "percentile of own signals", "cap": "observed push ratios",
+                                     "band": "per-layer outcomes", "reject": "REFUSED (circular/binary)"}[route]
+                            print(Fore.CYAN + f"  {label}: {', '.join(routes[route])}" + Style.RESET_ALL)
+                    continue
+                cal_name = cargs[0]
+                route, reason = calibration_policy(cal_name)
+                if route == "reject":
+                    print(Fore.YELLOW + f"[Calibrate] rejected for '{cal_name}': {reason}." + Style.RESET_ALL)
+                    continue
+                if route == "cap":
+                    cal_pct = None
+                    if len(cargs) >= 2:
+                        try:
+                            cal_pct = float(cargs[1])
+                        except ValueError:
+                            print(Fore.YELLOW + "[Calibrate] percentile must be a number." + Style.RESET_ALL)
+                            continue
+                    if cal_pct is not None and cal_pct >= 100:
+                        print(
+                            Fore.YELLOW
+                            + "[Calibrate] rejected: p100 admits every observed push -- the envelope "
+                            + "would stop binding in the observed regime."
+                            + Style.RESET_ALL
+                        )
+                        continue
+                    from invariants import engine as _engine
+                    v = _engine.calibrate_steer_cap_fraction(percentile=cal_pct)
+                    if v is None:
+                        st = _engine.steer_telemetry_stats()
+                        print(Fore.YELLOW + f"[Calibrate] refused: only {st['n']} observed pushes (need {_engine.STEER_CAP_MIN_N})." + Style.RESET_ALL)
+                    else:
+                        tuner.set("steer_cap_fraction", v)
+                        print(Fore.GREEN + f"[Calibrate] steer_cap_fraction = {round(v, 4)} from observed push ratios." + Style.RESET_ALL)
+                    continue
+                if route == "band":
+                    user_input = ":tune steer_band auto " + " ".join(cargs[1:])
+                    # fall through to the :tune handler below with the same args
+                if route == "threshold":
+                    if cal_name == "conversation_productive" and len(cargs) >= 2 and cargs[1].lower() == "intent":
+                        user_input = ":tune conversation_productive auto intent"
+                        # fall through to the shared intent route below
+                    elif not user_input.startswith(":tune"):
+                        trig = tuner.triggers.get(cal_name)
+                        if trig is None:
+                            print(Fore.YELLOW + f"[Calibrate] unknown name '{cal_name}'. Bare :calibrate lists them." + Style.RESET_ALL)
+                            continue
+                        if len(trig.signals) < 10:
+                            print(
+                                Fore.YELLOW
+                                + f"[Calibrate] refused: only {len(trig.signals)} observed signals for "
+                                + f"'{cal_name}' (need 10). A bar set from a handful of points is a guess."
+                                + Style.RESET_ALL
+                            )
+                            continue
+                        cal_pct = 50.0
+                        if len(cargs) >= 2:
+                            try:
+                                cal_pct = float(cargs[1])
+                            except ValueError:
+                                print(Fore.YELLOW + "[Calibrate] percentile must be a number." + Style.RESET_ALL)
+                                continue
+                        if not (0.0 <= cal_pct <= 100.0):
+                            print(Fore.YELLOW + "[Calibrate] rejected: percentile must be in [0, 100]." + Style.RESET_ALL)
+                            continue
+                        v = tuner.calibrate(cal_name, cal_pct)
+                        print(
+                            Fore.GREEN
+                            + f"[Calibrate] {cal_name} = {round(v, 4)} (p{cal_pct:g} of {len(trig.signals)} observed signals)."
+                            + Style.RESET_ALL
+                        )
+                        continue
             if user_input.startswith(":tune"):
                 targs = user_input[len(":tune"):].split()
                 if not targs:
@@ -1528,6 +1645,10 @@ def main():
                             + "(lo/hi move together), or set a value directly."
                             + Style.RESET_ALL
                         )
+                        continue
+                    route, reason = calibration_policy(targs[0])
+                    if route == "reject":
+                        print(Fore.YELLOW + f"[Tune] calibration rejected for '{targs[0]}': {reason}." + Style.RESET_ALL)
                         continue
                     pct = float(targs[2]) if len(targs) >= 3 else 80.0
                     v = tuner.calibrate(targs[0], pct)
