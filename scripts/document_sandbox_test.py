@@ -278,6 +278,46 @@ def test_updated_mode_reads_in_the_order_files_were_written():
         assert abs(session["mtime"] - os.path.getmtime(doc)) < 1.0
 
 
+def test_resume_is_real_across_sessions():
+    """Progress lives in the memory record, not the process: re-ingesting the
+    same content restores the read-set, so ':doc read' after a restart picks
+    up where the reading stopped."""
+    from invariants.document_engine import (
+        record_chunk_read,
+        restore_read_progress,
+        select_next_chunk,
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "long.md"
+        doc.write_text("\n\n".join(f"Part {i} " + ("x" * 300) for i in range(6)), encoding="utf-8")
+        memory = make_memory(tmp)
+
+        first = ingest_document(memory, doc, why="resume test", max_chars=400)
+        assert first["read"] == set() and first["chunk_count"] >= 3
+        # A session reads chunks 0 and 1, then the shell restarts.
+        record_chunk_read(memory, first, 0)
+        record_chunk_read(memory, first, 1)
+
+        # New session, same memory file on disk.
+        memory2 = MemoryEngine(path=Path(tmp) / "memory.jsonl", scope="doc_test")
+        resumed = ingest_document(memory2, doc, why="resume test", max_chars=400)
+        assert resumed["already_ingested"]
+        assert resumed["read"] == {0, 1}                      # progress restored
+        assert resumed["cursor"] == 1                          # ':doc next' -> chunk 2
+        pick = select_next_chunk([resumed], "", "order")
+        assert pick["chunk_index"] == 2                        # reading continues, not restarts
+
+        # Different content: no progress borrowed across shas.
+        other = Path(tmp) / "other.md"
+        other.write_text("Entirely different text.", encoding="utf-8")
+        fresh = ingest_document(memory2, other, why="")
+        assert fresh["read"] == set()
+
+        # Restore is bounded by the current chunk count (stale indices ignored).
+        assert restore_read_progress(memory2, first["sha256"], 1) == {0}
+
+
 def test_reply_mode_can_return_to_earlier_threads():
     from invariants.document_engine import reading_reply_note, select_next_chunk
 
@@ -353,6 +393,7 @@ TESTS = [
     test_reading_replies_to_thoughts_or_keeps_order,
     test_interleave_weaves_documents_on_their_own_course,
     test_updated_mode_reads_in_the_order_files_were_written,
+    test_resume_is_real_across_sessions,
     test_reply_mode_can_return_to_earlier_threads,
     test_impact_attribution_is_minimal_and_first_person,
     test_reply_note_lands_in_the_frame,

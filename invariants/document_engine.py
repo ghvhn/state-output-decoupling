@@ -113,6 +113,38 @@ def find_ingested_sha(memory, sha: str) -> bool:
     return False
 
 
+def record_chunk_read(memory, session: dict[str, Any], index: int) -> None:
+    """Persist that chunk `index` of this document was actually presented.
+    This is what makes resume real across sessions: progress lives in the
+    memory record (sha-keyed), not in the process."""
+    memory.append_event(
+        "document_chunk_read",
+        text=f"{session['source_name']} part {int(index) + 1}/{session['chunk_count']}",
+        tags=["document_read"],
+        provenance={
+            "sha256": session["sha256"],
+            "chunk_index": int(index),
+            "source_name": session["source_name"],
+        },
+    )
+
+
+def restore_read_progress(memory, sha: str, chunk_count: int) -> set[int]:
+    """Rebuild the read-set for a document from its document_chunk_read events.
+    Deterministic: same memory record, same progress."""
+    read: set[int] = set()
+    for record in getattr(memory, "records", []):
+        if record.kind != "event" or "document_chunk_read" not in (record.tags or []):
+            continue
+        prov = record.provenance or {}
+        if prov.get("sha256") != sha:
+            continue
+        index = prov.get("chunk_index")
+        if isinstance(index, int) and 0 <= index < chunk_count:
+            read.add(index)
+    return read
+
+
 def ingest_document(
     memory,
     path: str | Path,
@@ -154,6 +186,10 @@ def ingest_document(
                     "bytes": size,
                 },
             )
+    # Resume is real: prior reading of this exact content (sha-keyed) is
+    # restored from the memory record, so re-ingesting after a restart picks
+    # up where the reading stopped instead of starting over.
+    read = restore_read_progress(memory, sha, len(chunks))
     return {
         "source_name": path.name,
         "source_path": str(path.resolve()),
@@ -161,8 +197,8 @@ def ingest_document(
         "why": why,
         "chunks": chunks,
         "chunk_count": len(chunks),
-        "cursor": 0,
-        "read": set(),
+        "cursor": max(read) if read else 0,
+        "read": read,
         "mtime": path.stat().st_mtime,  # for chronological ("updated") reading order
         "already_ingested": already,
     }

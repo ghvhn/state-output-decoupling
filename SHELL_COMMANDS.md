@@ -79,6 +79,11 @@ Knobs you'll actually touch:
   Accepts a directory (walks .md/.txt) or a glob; `{filename}` and
   `{last_updated}` in the why are substituted per file.
 - **`:doc next`** — stage the following chunk (explicit advance).
+- **Resume is automatic and cross-session**: every presented chunk is
+  persisted (`document_chunk_read`, sha-keyed), so re-ingesting the same
+  content after a restart restores progress — the ingest line reports
+  "k/n already read", staging starts at the first unread chunk, and
+  `:doc read` continues instead of restarting.
 - **`:doc status`** — per-document unread counts, staged/auto-read state.
 - **`:doc read [n] [order|interleave|reply|updated] [satisfied]`** — reading
   as dialogue (cap 20 turns): the framed chunk IS the user turn. `order` =
