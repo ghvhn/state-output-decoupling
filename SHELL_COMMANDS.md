@@ -50,6 +50,11 @@ its own first-person voice.
   observed distribution.
 - **`:tune steer_cap_fraction auto [pct]`** — cap from observed push ratios
   (default p95).
+- **`:tune conversation_productive auto intent`** — set the productive bar
+  RELATIVE TO INTENT-SHAPING: the sense cut between turns that settled
+  intent (lowered ambiguity+disagreement vs the prior turn) and turns that
+  did not. The plain `auto 50` quantile remains available; `intent` anchors
+  the bar to the decomposed reward's intent axis instead.
 - **`:tune steer_band auto [min_events] [gold|conversation|any] [synthesis|layersteer]`**
   — band from per-layer outcomes, by evidence lane and kind.
 
@@ -74,6 +79,7 @@ Knobs you'll actually touch:
 | `synthesis_events` | 1 | test-time synthesis events allowed per reply |
 | `synthesis_steps` | 60 | optimizer steps per synthesis event |
 | `plateau_epsilon` | 0.05 | plateau-velocity trigger that starts a synthesis |
+| `intent_settling` | 0.0 | observed stream: prev minus current ambiguity+disagreement (>0 = intent shaped) |
 | `eot_urgency` | 0.05 | P(end-of-turn) below this at the budget = "cut off mid-thought" |
 | `sandbox_success` | 0.5 | observation stream of real execution outcomes |
 | `words_had_impact` | 0.5 | observation stream of word-caused turns |
