@@ -163,6 +163,7 @@ def ingest_document(
         "chunk_count": len(chunks),
         "cursor": 0,
         "read": set(),
+        "mtime": path.stat().st_mtime,  # for chronological ("updated") reading order
         "already_ingested": already,
     }
 
@@ -238,6 +239,15 @@ def select_next_chunk(
             key=lambda pair: (len(sessions[pair[0]].get("read") or ()), pair[0], pair[1]),
         )
         return {"session_index": si, "chunk_index": ci, "mode": "interleave", "overlap": []}
+    if mode == "updated":
+        # Chronological: least-recently-written document first (its own file
+        # mtime), chunks in order within it. Reading the record in the order
+        # it was written. Deterministic; mtime ties break to ingestion order.
+        si, ci = min(
+            unread,
+            key=lambda pair: (float(sessions[pair[0]].get("mtime", 0.0)), pair[0], pair[1]),
+        )
+        return {"session_index": si, "chunk_index": ci, "mode": "updated", "overlap": []}
     has_signal = (last_thought or "").strip() or (earlier_thoughts or "").strip()
     if mode != "reply" or not has_signal:
         si, ci = unread[0]
@@ -286,4 +296,6 @@ def reading_reply_note(pick: dict[str, Any]) -> str:
         return "Nothing unread matched what I said, so it continues in order."
     if pick.get("mode") == "interleave":
         return "The reading weaves between documents on its own course, not to match me."
+    if pick.get("mode") == "updated":
+        return "I'm reading these in the order they were last written; the text doesn't adapt to me."
     return "I'm reading it in order; the text doesn't adapt to me."

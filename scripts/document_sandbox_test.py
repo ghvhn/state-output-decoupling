@@ -240,6 +240,44 @@ def test_interleave_weaves_documents_on_their_own_course():
     assert "not to match me" in note
 
 
+def test_updated_mode_reads_in_the_order_files_were_written():
+    from invariants.document_engine import reading_reply_note, select_next_chunk
+
+    newer = _session("written_later.md", ["L0", "L1"])
+    older = _session("written_first.md", ["F0"])
+    newer["mtime"], older["mtime"] = 2000.0, 1000.0
+    library = [newer, older]  # ingestion order deliberately NOT chronological
+
+    sequence = []
+    for _ in range(3):
+        pick = select_next_chunk(library, "ignored words", "updated")
+        assert pick["mode"] == "updated" and pick["overlap"] == []
+        library[pick["session_index"]]["read"].add(pick["chunk_index"])
+        sequence.append((pick["session_index"], pick["chunk_index"]))
+    # Oldest file first regardless of ingestion order, chunks in order within.
+    assert sequence == [(1, 0), (0, 0), (0, 1)]
+    assert select_next_chunk(library, "", "updated") is None
+
+    # mtime tie -> ingestion order (deterministic).
+    a, b = _session("a.md", ["A"]), _session("b.md", ["B"])
+    a["mtime"] = b["mtime"] = 500.0
+    pick = select_next_chunk([a, b], "", "updated")
+    assert (pick["session_index"], pick["chunk_index"]) == (0, 0)
+
+    note = reading_reply_note({"mode": "updated", "overlap": []})
+    assert "order they were last written" in note and "doesn't adapt to me" in note
+
+    # ingest records the file's real mtime for this ordering.
+    import os
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        doc = Path(tmp) / "t.md"
+        doc.write_text("Some text.", encoding="utf-8")
+        memory = make_memory(tmp)
+        session = ingest_document(memory, doc, why="")
+        assert abs(session["mtime"] - os.path.getmtime(doc)) < 1.0
+
+
 def test_reply_mode_can_return_to_earlier_threads():
     from invariants.document_engine import reading_reply_note, select_next_chunk
 
@@ -314,6 +352,7 @@ TESTS = [
     test_python_block_extraction_takes_the_last_fence,
     test_reading_replies_to_thoughts_or_keeps_order,
     test_interleave_weaves_documents_on_their_own_course,
+    test_updated_mode_reads_in_the_order_files_were_written,
     test_reply_mode_can_return_to_earlier_threads,
     test_impact_attribution_is_minimal_and_first_person,
     test_reply_note_lands_in_the_frame,
