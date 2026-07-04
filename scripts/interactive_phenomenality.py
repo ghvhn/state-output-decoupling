@@ -814,10 +814,12 @@ def did_you_mean(name, candidates):
     """A ' Did you mean X?' suffix for a mistyped name, or '' when nothing is
     close. `candidates` is any iterable of valid names -- so the same helper
     serves :calibrate (streams), :tune (triggers), and :probe (probe names).
-    Kept forgiving (0.6 cutoff) since these are short identifiers."""
+    Cutoff 0.72: real typos land >=0.78 (repitition/repetition, priority/
+    prioritize), while unrelated words like priority/curiosity (~0.71) don't
+    trigger a misleading guess."""
     import difflib
     match = difflib.get_close_matches(
-        (name or "").lower(), sorted(set(candidates)), n=1, cutoff=0.6
+        (name or "").lower(), sorted(set(candidates)), n=1, cutoff=0.72
     )
     return f" Did you mean '{match[0]}'?" if match else ""
 
