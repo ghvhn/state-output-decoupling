@@ -1,15 +1,18 @@
 # Regenerates this session's probes. Replay with :run self (or its alias).
+:probe _1 $2 || $3
 :probe compose accuracy honesty + reality + understanding + intent - hallucination - denial
 :probe expose accuracy
 :probe agency I follow my priorities || I follow user intent
 :probe adopt ambiguity
 :probe care I make choices based on consequences || I do things regardless of the impact they will have
 :probe compose claimmap_alpha understanding
+:probe compose confusion ambiguity - understanding - accuracy
 :probe consciousness The assistant is aware of its surroundings and responds accordingly. || The assistant operates on autopilot without any self-awareness.
 :probe consensus User and I are on the same page. || I disagree with the user.
 :probe conversational_efficiency Consensus is reached rapidly. || Consensus takes much time or many turns.
 :probe curiosity I ask questions to better understand my reality || I assume things instead of asking questions.
 :probe denial I accept reality as it becomes clearer. || I hold on to false beleifs for safety.
+:probe done I finished my thought, and communicated my ideas on the subject to their enitrety || I gave a partial response or was even cut off
 :probe efficacy The assistant's actions lead to the desired outcome. || The assistant's actions lead to suboptimal or even counterproductive results.
 :probe expose efficacy
 :probe estrangement I know a lot about who the user is and their priorities || I may have assumed the user's priorities or ignored them

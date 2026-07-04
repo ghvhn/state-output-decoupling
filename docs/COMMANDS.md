@@ -1,0 +1,48 @@
+# Interactive shell commands
+
+_Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help block). Rewritten every time the shell starts -- edit `COMMAND_HELP_LINES` there, not this file._
+
+- `:help [model]` -- this list + your solve-macros; ':help model' shows what the MODEL can run on its own; ':help expose [off]' lets it call <<HELP>>
+- `:context, :context on, :context off, :context clear`
+- `:memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory boundary`
+- `:methodmap <query>`
+- `:claimmap <first text> || <second text>`
+- `:steermap`
+- `:steer` -- envelope + observed push distribution + data-implied cap/band
+- `:probe <name> <with it> || <without it>` -- mint a named-concept sensor from YOUR contrastive framings; scores every turn; :probe lists; :probe drop <name>
+- `:probe adopt <dim> [<dim> ...]` -- turn stored vectors -- ambiguity, disagreement, warranted_confidence, organic_correction, ... -- into reply-scoring probes
+- `:probe compose <name> <mix>` -- mint a probe from a SIGNED MIX of dimensions and probes: ambiguity + disagreement - validated_flow - 0.5*curiosity; mint/adopt/compose take a trailing 'band <lo> <hi>' -- explicit reading layers, e.g. band 16 24; otherwise the live steer band decides depth
+- `:probe expose <name> [off]` -- let the MODEL consult this sensor itself: <<PROBE: name>> reads its last turn, <<PROBE: name || words>> scores candidate words. Reading only -- minting/calibrating stay operator acts
+- `:probe backfill <name> [n]` -- retro-score up to n archived replies in order: rebuilds the probe's stream+credit from the whole record, seeds its history
+- `:calibrate <name> [pct|intent|<anchor>|<a>+<b>|band args]` -- data-calibrate any knob BY NAME; anchors join with '+' = fired only when EVERY stream fired; the system evaluates the request and refuses unsafe ones -- circular strength knobs, binary streams, vacuous p100 caps
+- `:label <probe|stream> pos|neg` -- judge the MOST RECENT turn on that axis: credits its last signal with a human outcome -- supervised evidence alongside the automatic sense credit, so lift can reflect your judgment
+- `:suggest` -- scan the accrued state for ready moves -- calibrations, knobs explored-but-not-committed, capabilities never tried, probes to backfill or expose -- each with its command; computed, never applied. :suggest apply auto-queues only the safe measurement/calibration ones
+- `:tune, :tune <name> <value>, :tune <name> auto [percentile]`
+- `:tune <knob|probe> dynamic <signed mix> [mult]` -- each turn set the target to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a probe target drives its own firing threshold, never a shadow knob
+- `:tune steer_cap_fraction auto [pct]` -- calibrate cap from observed pushes
+- `:tune steer_band auto [min_events] [gold|conversation|any] [synthesis|layersteer]` -- derive band from outcomes; conversations count as evidence
+- `:tune steer_layer_sweep 1` -- isolate steers by layer: each steer pushes ONE least-tested band layer; per-layer outcomes accrue, transfer-free
+- `:doc <path> [because <why>]` -- share a document into the conversation
+- `:doc next | :doc status` -- stage the next chunk / show progress
+- `:doc read [n] [order|interleave|reply|updated] [satisfied]` -- reading as dialogue: the document speaks each turn, the model replies. order/interleave/updated advance on the documents' own course -- updated = by file mtime, newest first; reply follows overlap. 'satisfied' stops early once sense settles
+- `:doc inject` -- stage the whole library for one turn, budget-bounded
+- `:doc stop` -- interrupt auto-read
+- `:sandbox on|off|status` -- run the model's ```python blocks for real
+- `:experts on|off|status` -- mint new steering experts from its own recurring self-corrections; roster bounded; default off
+- `:game <name>` -- run a python script from games/ with full access to live system state; infinite flexibility for custom rules and interactions
+- `:game no | decline` -- decline the game the model just proposed
+- `:accept [n|all] | :reject [n|all]` -- a game may STAGE a command instead of running it; nothing a game chose runs until you accept it here
+- `:impact` -- consequence trail: what its words caused, and whether experienced impact tracks better deliberation
+- `:clock` -- last turn's generation time + tok/s and VRAM; sensed every turn as generation_seconds / vram_gb streams
+- `:prioritize` -- rank probes by evidence-weighted lift; steer toward the top each turn via prioritize_alpha -- signed by lift, off at 0
+- `:release <tool> [prob]` -- decouple a tool's firing from its signal for that fraction of turns -- separates causality so credit lift can be trusted
+- `:listen on|off|status` -- speak mid-reply: lines you type while it generates are ingested at the next chunk seam and appended to the live stream -- the model chooses to redirect or fold in; never dropped
+- `:macro <file> <c1> ; <c2> ...` -- write a macro; :macro name <alias> <file> aliases it; :macro name self [file] writes a macro that REGENERATES the current probes; :macro strip <alias|file> drops display-only lines in place, :macro name strip <src> [dest] writes a stripped copy
+- `:save self <name> | choose` -- alias for :macro name self; 'choose' asks the model to generate a name based on the current tuning state
+- `:spawn <name> join|replace|drop` -- multi-agent support. 'join' adds to the panel, 'replace [N]' takes the operator slot for N turns. Use @<name> :cmd to target a specific agent's tuning state
+- `:run <alias|file>` -- queue and execute a macro's commands
+- `:solve <name> [goal]` -- model writes a parameterized macro for an ad-hoc command; then :<name> <args> runs it, filling $1..$9 / $@
+- `:<macro-name> <args>` -- run any aliased macro directly, args -> $1..$9
+- `<any :command> because <reason>` -- logs why you issued it as provenance
+- `:memory use probe <name> | :memory choice probe <name>` -- stage the memories where probe <name> reads furthest from 0
+- `:tune exposed_probe_alpha <small>` -- also steer along the probes you have exposed to the model, lift-weighted; 0 = off
