@@ -1370,7 +1370,9 @@ COMMAND_HELP_LINES = [
     "                Use @<name> :cmd to target a specific agent's tuning state)",
     "          :run <alias|file>            (queue and execute a macro's commands)",
     "          :solve <name> [goal]         (model writes a parameterized macro for an",
-    "                ad-hoc command; then :<name> <args> runs it, filling $1..$9 / $@)",
+    "                ad-hoc command; it is PROPOSED, then :accept adopts it (or :reject",
+    "                drops it); after that :<name> <args> runs it, filling $1..$9 / $@.",
+    "                Context staged with :memory use is folded into the request)",
     "          :<macro-name> <args>         (run any aliased macro directly, args -> $1..$9)",
     "          <any :command> because <reason>   (logs why you issued it as provenance)",
     "          :memory use probe <name> | :memory choice probe <name>",
@@ -2832,7 +2834,6 @@ def main():
                     print(Fore.YELLOW + "[Solve] Usage: :solve <command_name> [what it should do]" + Style.RESET_ALL)
                     continue
                 sname = re.sub(r"[^a-z0-9_]", "_", sparts[0].lower())[:40].strip("_")
-                name_from_model = False  # set when choose/auto lets the MODEL name it
                 rest = sparts[1].strip() if len(sparts) > 1 else ""
                 if "--" in rest:
                     args_part, goal_part = rest.split("--", 1)
@@ -2866,7 +2867,6 @@ def main():
                     sname = "choose"
 
                 if sname == "choose":
-                    name_from_model = True
                     print(Fore.CYAN + "[Solve] Asking model for a command name..." + Style.RESET_ALL)
                     nm = generate_agentic_text(
                         model,
@@ -2956,6 +2956,21 @@ def main():
                         "Available macros include:\n" + "\n".join(f"  {m}" for m in existing_macros) + "\n\n"
                     )
 
+                # Context the operator staged with ':memory use' is folded into the
+                # solve prompt so the macro reflects what they told it (consumed
+                # here so it isn't also replayed to the next model turn).
+                staged_ctx = ""
+                if pending_memory_tool_result:
+                    _ctx = pending_memory_tool_result.strip()
+                    if len(_ctx) > 2000:
+                        _ctx = _ctx[:2000] + " ...[truncated]"
+                    staged_ctx = (
+                        "The operator staged this context for you; let it shape the macro:\n"
+                        + _ctx + "\n\n"
+                    )
+                    pending_memory_tool_result = None
+                    print(Fore.CYAN + "[Solve] Folding in the memory you staged with :memory use." + Style.RESET_ALL)
+
                 prompt = (
                     "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
                     "You write macros for an interactive cognition shell. A macro is a list of ':' "
@@ -2967,6 +2982,7 @@ def main():
                     "You should seamlessly pass these through to the underlying commands if the user provides them, "
                     "unless a parameter is explicitly restricted from doing so.\n\n"
                     f"{macro_hints_str}"
+                    f"{staged_ctx}"
                     f"Write a macro named '{sname}' that does: {goal}\n"
                     "Output ONLY the command lines, nothing else.<|eot_id|>"
                     "<|start_header_id|>assistant<|end_header_id|>\n\n"
@@ -3002,34 +3018,18 @@ def main():
                         + Style.RESET_ALL
                     )
                 dest = os.path.join(ROOT, "invariants", "out", "macros", f"{sname}.txt")
-                # choose/auto let the MODEL name the command, so the proposal is
-                # staged and NOT written/aliased until the operator :accepts it.
-                if name_from_model:
-                    pending_solve_proposal = {
-                        "name": sname, "goal": goal, "clean_names": clean_names,
-                        "cmd_lines": cmd_lines, "dest": dest,
-                    }
-                    print(Fore.YELLOW + Style.BRIGHT + f"[Solve] Proposed ':{sname}' ({len(cmd_lines)} command(s)) -- NOT adopted yet:" + Style.RESET_ALL)
-                    for ln in cmd_lines:
-                        print(Fore.CYAN + f"  {ln}" + Style.RESET_ALL)
-                    print(Fore.YELLOW + "         Type :accept to adopt it as :" + sname + ", or :reject to discard." + Style.RESET_ALL)
-                    continue
-                try:
-                    os.makedirs(os.path.dirname(dest), exist_ok=True)
-                    with open(dest, "w", encoding="utf-8") as wf:
-                        wf.write(f"# :solve macro '{sname}' -- {goal}\n")
-                        if clean_names:
-                            wf.write(f"# args: {', '.join(clean_names)}\n")
-                        for ln in cmd_lines:
-                            wf.write(ln + "\n")
-                    macro_aliases[sname] = dest
-                    _save_macro_aliases()
-                except Exception as e:
-                    print(Fore.RED + f"[Solve] Could not save macro: {e}" + Style.RESET_ALL)
-                    continue
-                print(Fore.GREEN + f"[Solve] Created ':{sname}' ({len(cmd_lines)} command(s)) -> {dest}. Run it with :{sname} <args>." + Style.RESET_ALL)
+                # Every :solve output is STAGED, not written/aliased, until the
+                # operator :accepts it -- so any macro (named or model-chosen) can
+                # be reviewed and :rejected first.
+                warn_note = " -- see the warning above" if unknown_cmds else ""
+                pending_solve_proposal = {
+                    "name": sname, "goal": goal, "clean_names": clean_names,
+                    "cmd_lines": cmd_lines, "dest": dest,
+                }
+                print(Fore.YELLOW + Style.BRIGHT + f"[Solve] Proposed ':{sname}' ({len(cmd_lines)} command(s)) -- NOT adopted yet{warn_note}:" + Style.RESET_ALL)
                 for ln in cmd_lines:
                     print(Fore.CYAN + f"  {ln}" + Style.RESET_ALL)
+                print(Fore.YELLOW + "         Type :accept to adopt it as :" + sname + ", or :reject to discard." + Style.RESET_ALL)
                 continue
 
             # Direct parameterized-macro invocation: ':<name> args' runs a known

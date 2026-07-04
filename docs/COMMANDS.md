@@ -43,7 +43,7 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:save self <name> | choose` -- alias for :macro name self; 'choose' asks the model to generate a name based on the current tuning state
 - `:spawn <name> join|replace|drop` -- multi-agent support. 'join' adds to the panel, 'replace [N]' takes the operator slot for N turns. Use @<name> :cmd to target a specific agent's tuning state
 - `:run <alias|file>` -- queue and execute a macro's commands
-- `:solve <name> [goal]` -- model writes a parameterized macro for an ad-hoc command; then :<name> <args> runs it, filling $1..$9 / $@
+- `:solve <name> [goal]` -- model writes a parameterized macro for an ad-hoc command; it is PROPOSED, then :accept adopts it (or :reject drops it); after that :<name> <args> runs it, filling $1..$9 / $@. Context staged with :memory use is folded into the request
 - `:<macro-name> <args>` -- run any aliased macro directly, args -> $1..$9
 - `<any :command> because <reason>` -- logs why you issued it as provenance
 - `:memory use probe <name> | :memory choice probe <name>` -- stage the memories where probe <name> reads furthest from 0
