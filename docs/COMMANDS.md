@@ -16,6 +16,7 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:probe backfill <name> [n]` -- retro-score up to n archived replies in order: rebuilds the probe's stream+credit from the whole record, seeds its history
 - `:probe define <name>` -- share its initial breakdown -- the WITH/WITHOUT framings it was minted from; name accepts choose/auto
 - `:probe explain <name>` -- the MODEL explains the probe in its own words: what it senses and when it reads high vs low; name accepts choose/auto
+- `:probe match <probe> <knob> | auto | drive [mult] | validate | check | off` -- tie a probe to its same-concept knob: drive = servo the knob from the probe each turn; validate = correlate knob value vs reading (check to read it); auto pairs every same-named probe+knob
 - `:calibrate <name> [pct|intent|<anchor>|<a>+<b>|band args]` -- data-calibrate any knob BY NAME; anchors join with '+' = fired only when EVERY stream fired; the system evaluates the request and refuses unsafe ones -- circular strength knobs, binary streams, vacuous p100 caps
 - `:label <probe|stream> pos|neg` -- judge the MOST RECENT turn on that axis: credits its last signal with a human outcome -- supervised evidence alongside the automatic sense credit, so lift can reflect your judgment
 - `:suggest` -- scan the accrued state for ready moves -- calibrations, knobs explored-but-not-committed, capabilities never tried, probes to backfill or expose -- each with its command; computed, never applied. :suggest apply auto-queues only the safe measurement/calibration ones
