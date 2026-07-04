@@ -77,6 +77,8 @@ CLAIMMAP_TOOL_PATTERN = re.compile(r"<<\s*CLAIMMAP\s*:\s*(.*?)\s*>>", re.IGNOREC
 METHODMAP_TOOL_HEADER = "[MethodMap Tool Result]"
 METHODMAP_TOOL_PATTERN = re.compile(r"<<\s*METHODMAP\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
 DOC_TOOL_PATTERN = re.compile(r"<<\s*DOC\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
+HELP_TOOL_PATTERN = re.compile(r"<<\s*HELP\s*>>", re.IGNORECASE)
+HELP_TOOL_HEADER = "[Help Tool Result]"
 CONCRETE_TASK_PATTERN = re.compile(
     r"\b(calculate|solve|answer|total|cost|profit|salary|percent|percentage|"
     r"distance|time|rate|equation|benchmark|gsm8k|\d)\b",
@@ -128,6 +130,7 @@ def build_prompt(
     document_tool_result=None,
     probe_tool_result=None,
     game_tool_result=None,
+    help_tool_result=None,
     session_context=None,
     active_u_name=None,
 ):
@@ -156,6 +159,7 @@ def build_prompt(
             document_tool_result,
             probe_tool_result,
             game_tool_result,
+            help_tool_result,
         )
         if block
     ]
@@ -306,6 +310,12 @@ def extract_game_expose_hide(response):
 def extract_game_end(response):
     return bool(GAME_END_PATTERN.search(response or ""))
 
+def extract_help_request(response):
+    return bool(HELP_TOOL_PATTERN.search(response or ""))
+
+def remove_help_tags(response):
+    return HELP_TOOL_PATTERN.sub("", response or "").strip()
+
 def remove_probe_tool_calls(response):
     return PROBE_TOOL_PATTERN.sub("", response or "").strip()
 
@@ -318,7 +328,7 @@ def remove_game_tags(response):
     return GAME_END_PATTERN.sub("", response).strip()
 
 def remove_tool_calls(response):
-    return remove_methodmap_tool_calls(remove_claimmap_tool_calls(remove_memory_tool_calls(remove_doc_tool_calls(remove_game_tags(remove_probe_tool_calls(response))))))
+    return remove_help_tags(remove_methodmap_tool_calls(remove_claimmap_tool_calls(remove_memory_tool_calls(remove_doc_tool_calls(remove_game_tags(remove_probe_tool_calls(response)))))))
 
 
 def format_methodmap_tool_result(memory, query, *, max_records=6):
@@ -355,7 +365,7 @@ def is_tool_only_response(response):
     if not text:
         return False
     return bool(
-        (extract_memory_query(text) or extract_claimmap_payload(text) or extract_methodmap_query(text) or extract_doc_query(text) or extract_probe_query(text))
+        (extract_memory_query(text) or extract_claimmap_payload(text) or extract_methodmap_query(text) or extract_doc_query(text) or extract_probe_query(text) or extract_help_request(text))
         and not remove_tool_calls(text).strip()
     )
 
@@ -1254,7 +1264,7 @@ KNOWN_COMMANDS = (
     ":context", ":memory", ":methodmap", ":claimmap", ":steermap", ":steer",
     ":probe", ":label", ":calibrate", ":suggest", ":tune", ":doc", ":sandbox",
     ":experts", ":impact", ":clock", ":prioritize", ":release", ":listen",
-    ":timestamps", ":history", ":queue",
+    ":timestamps", ":history", ":queue", ":accept", ":reject", ":help",
 )
 
 # Bare command words that are BUILT IN -- a macro alias by one of these names is
@@ -1262,8 +1272,217 @@ KNOWN_COMMANDS = (
 # macro alias runs directly as ':<alias> args'.
 BUILTIN_COMMANDS = {c[1:] for c in KNOWN_COMMANDS} | {
     "macro", "run", "game", "solve", "refresh", "place", "consider",
-    "exit", "quit", "timestamps", "listen", "history",
+    "exit", "quit", "timestamps", "listen", "history", "accept", "reject", "help",
 }
+
+# Single source of truth for the command reference: the shell prints these lines
+# verbatim at startup AND renders them to docs/COMMANDS.md, so the two never drift.
+# A 10-space indent begins a command entry; a 16-space indent continues the prior
+# entry's description. Edit here to change both the terminal help and the doc.
+COMMAND_HELP_LINES = [
+    "Commands: :help [model]           (this list + your solve-macros; ':help model' shows what",
+    "                the MODEL can run on its own; ':help expose [off]' lets it call <<HELP>>)",
+    "          :context, :context on, :context off, :context clear",
+    "          :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory boundary",
+    "          :methodmap <query>",
+    "          :claimmap <first text> || <second text>",
+    "          :steermap",
+    "          :steer  (envelope + observed push distribution + data-implied cap/band)",
+    "          :probe <name> <with it> || <without it>  (mint a named-concept sensor from",
+    "                YOUR contrastive framings; scores every turn; :probe lists; :probe drop <name>)",
+    "          :probe adopt <dim> [<dim> ...]  (turn stored vectors -- ambiguity, disagreement,",
+    "                warranted_confidence, organic_correction, ... -- into reply-scoring probes)",
+    "          :probe compose <name> <mix>  (mint a probe from a SIGNED MIX of dimensions and",
+    "                probes: ambiguity + disagreement - validated_flow - 0.5*curiosity)",
+    "                (mint/adopt/compose take a trailing 'band <lo> <hi>' -- explicit reading",
+    "                layers, e.g. band 16 24; otherwise the live steer band decides depth)",
+    "          :probe expose <name> [off]  (let the MODEL consult this sensor itself:",
+    "                <<PROBE: name>> reads its last turn, <<PROBE: name || words>> scores",
+    "                candidate words. Reading only -- minting/calibrating stay operator acts)",
+    "          :probe backfill <name> [n]  (retro-score up to n archived replies in order:",
+    "                rebuilds the probe's stream+credit from the whole record, seeds its history)",
+    "          :calibrate <name> [pct|intent|<anchor>|<a>+<b>|band args]  (data-calibrate any knob",
+    "                BY NAME; anchors join with '+' = fired only when EVERY stream fired;",
+    "                the system evaluates the request and refuses unsafe ones --",
+    "                circular strength knobs, binary streams, vacuous p100 caps)",
+    "          :label <probe|stream> pos|neg  (judge the MOST RECENT turn on that axis:",
+    "                credits its last signal with a human outcome -- supervised evidence",
+    "                alongside the automatic sense credit, so lift can reflect your judgment)",
+    "          :suggest  (scan the accrued state for ready moves -- calibrations, knobs",
+    "                explored-but-not-committed, capabilities never tried, probes to backfill",
+    "                or expose -- each with its command; computed, never applied. :suggest apply",
+    "                auto-queues only the safe measurement/calibration ones)",
+    "          :tune, :tune <name> <value>, :tune <name> auto [percentile]",
+    "          :tune <knob|probe> dynamic <signed mix> [mult]  (each turn set the target",
+    "                to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a",
+    "                probe target drives its own firing threshold, never a shadow knob)",
+    "          :tune steer_cap_fraction auto [pct]  (calibrate cap from observed pushes)",
+    "          :tune steer_band auto [min_events] [gold|conversation|any] [synthesis|layersteer]",
+    "                (derive band from outcomes; conversations count as evidence)",
+    "          :tune steer_layer_sweep 1    (isolate steers by layer: each steer pushes",
+    "                ONE least-tested band layer; per-layer outcomes accrue, transfer-free)",
+    "          :doc <path> [because <why>]  (share a document into the conversation)",
+    "          :doc next | :doc status      (stage the next chunk / show progress)",
+    "          :doc read [n] [order|interleave|reply|updated] [satisfied]",
+    "                (reading as dialogue: the document speaks each turn, the model",
+    "                replies. order/interleave/updated advance on the documents' own",
+    "                course -- updated = by file mtime, newest first; reply follows",
+    "                overlap. 'satisfied' stops early once sense settles)",
+    "          :doc inject                  (stage the whole library for one turn, budget-bounded)",
+    "          :doc stop                    (interrupt auto-read)",
+    "          :sandbox on|off|status       (run the model's ```python blocks for real)",
+    "          :experts on|off|status       (mint new steering experts from its own",
+    "                recurring self-corrections; roster bounded; default off)",
+    "          :game <name>                 (run a python script from games/ with full access to",
+    "                live system state; infinite flexibility for custom rules and interactions)",
+    "          :game no | decline           (decline the game the model just proposed)",
+    "          :accept [n|all] | :reject [n|all]  (a game may STAGE a command instead of",
+    "                running it; nothing a game chose runs until you accept it here)",
+    "          :impact                      (consequence trail: what its words caused,",
+    "                and whether experienced impact tracks better deliberation)",
+    "          :clock                       (last turn's generation time + tok/s and VRAM;",
+    "                sensed every turn as generation_seconds / vram_gb streams)",
+    "          :prioritize                  (rank probes by evidence-weighted lift; steer toward",
+    "                the top each turn via prioritize_alpha -- signed by lift, off at 0)",
+    "          :release <tool> [prob]       (decouple a tool's firing from its signal for that",
+    "                fraction of turns -- separates causality so credit lift can be trusted)",
+    "          :listen on|off|status        (speak mid-reply: lines you type while it",
+    "                generates are ingested at the next chunk seam and appended to the",
+    "                live stream -- the model chooses to redirect or fold in; never dropped)",
+    "          :macro <file> <c1> ; <c2> ...  (write a macro; :macro name <alias> <file>",
+    "                aliases it; :macro name self [file] writes a macro that REGENERATES",
+    "                the current probes; :macro strip <alias|file> drops display-only",
+    "                lines in place, :macro name strip <src> [dest] writes a stripped copy)",
+    "          :save self <name> | choose   (alias for :macro name self; 'choose' asks",
+    "                the model to generate a name based on the current tuning state)",
+    "          :spawn <name> join|replace|drop  (multi-agent support. 'join' adds to",
+    "                the panel, 'replace [N]' takes the operator slot for N turns.",
+    "                Use @<name> :cmd to target a specific agent's tuning state)",
+    "          :run <alias|file>            (queue and execute a macro's commands)",
+    "          :solve <name> [goal]         (model writes a parameterized macro for an",
+    "                ad-hoc command; then :<name> <args> runs it, filling $1..$9 / $@)",
+    "          :<macro-name> <args>         (run any aliased macro directly, args -> $1..$9)",
+    "          <any :command> because <reason>   (logs why you issued it as provenance)",
+    "          :memory use probe <name> | :memory choice probe <name>",
+    "                (stage the memories where probe <name> reads furthest from 0)",
+    "          :tune exposed_probe_alpha <small>  (also steer along the probes you have",
+    "                exposed to the model, lift-weighted; 0 = off)",
+]
+
+
+def render_commands_md(lines=COMMAND_HELP_LINES):
+    """Render the in-shell command help into a Markdown reference. A 10-space
+    indent (or the leading 'Commands:' line) starts an entry; deeper indents
+    continue the previous entry's description. Kept deliberately lossless: the
+    exact wording the shell prints becomes the doc, so nothing drifts."""
+    out = [
+        "# Interactive shell commands",
+        "",
+        "_Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help "
+        "block). Rewritten every time the shell starts -- edit `COMMAND_HELP_LINES` "
+        "there, not this file._",
+        "",
+    ]
+    entries = []  # each: [signature_line, [continuation_lines]]
+    for raw in lines:
+        if raw.startswith("Commands:"):
+            entries.append([raw[len("Commands:"):].strip(), []])
+            continue
+        text = raw.strip()
+        if not text:
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if indent <= 12:
+            entries.append([text, []])
+        elif entries:
+            entries[-1][1].append(text)
+    for sig_line, cont in entries:
+        m = re.search(r"\s{2,}\(", sig_line)
+        if m:
+            sig = sig_line[:m.start()].strip()
+            desc_parts = [sig_line[m.start():].strip()] + cont
+        else:
+            sig, desc_parts = sig_line, list(cont)
+        desc = " ".join(p for p in desc_parts if p).strip()
+        if desc.startswith("(") and desc.endswith(")"):
+            desc = desc[1:-1].strip()
+        desc = desc.replace(") (", "; ")  # merge adjacent parenthetical groups
+        out.append(f"- `{sig}` -- {desc}" if desc else f"- `{sig}`")
+    out.append("")
+    return "\n".join(out)
+
+
+def write_commands_md(path=None, lines=COMMAND_HELP_LINES):
+    """Write the Markdown command reference to docs/COMMANDS.md (best-effort)."""
+    if path is None:
+        path = os.path.join(ROOT, "docs", "COMMANDS.md")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(render_commands_md(lines))
+    return path
+
+
+def list_solve_macros(macros_dir=None):
+    """Scan the solve-macro directory and return [(name, desc, args)] for each
+    saved macro (invariants/out/macros/*.txt). desc/args come from the leading
+    '# :solve macro ...' / '# args:' comments the solve writer leaves."""
+    if macros_dir is None:
+        macros_dir = os.path.join(ROOT, "invariants", "out", "macros")
+    out = []
+    if not os.path.isdir(macros_dir):
+        return out
+    for fn in sorted(os.listdir(macros_dir)):
+        if not fn.endswith(".txt"):
+            continue
+        name, desc, args = fn[:-4], "", ""
+        try:
+            with open(os.path.join(macros_dir, fn), encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("# :solve macro") and "--" in line:
+                        desc = line.split("--", 1)[1].strip()
+                    elif line.startswith("# args:"):
+                        args = line.split(":", 1)[1].strip()
+                    elif line.startswith(":"):
+                        break
+        except Exception:
+            pass
+        out.append((name, desc, args))
+    return out
+
+
+def build_model_help_text(solve_macros=None):
+    """Model-facing help: what the model may run ITSELF (its <<...>> tools) vs.
+    the operator's ':' commands, which it can only reach by proposing a game."""
+    if solve_macros is None:
+        solve_macros = list_solve_macros()
+    lines = [
+        HELP_TOOL_HEADER,
+        "You can do these YOURSELF -- emit the tag mid-reply and it runs, no operator approval:",
+        "  <<MEMORY: query>>          search long-term memory",
+        "  <<METHODMAP: query>>       retrieve sanitized methodology maps",
+        "  <<DOC: query>>             read from documents shared into this session",
+        "  <<CLAIMMAP: A || B>>       weigh two framings against each other",
+        "  <<PROBE: name>>            read one of your exposed sensors on your last turn",
+        "  <<PROBE: name || words>>   score candidate words on that sensor",
+        "  <<HELP>>                   show this help",
+        "",
+        "Games are the ONE place you reach commands. You may:",
+        "  <<GAME_PROPOSE: name>>     propose a game -- the operator accepts or declines it",
+        "  <<GAME_ACCEPT: name>>      accept a game the operator proposed",
+        "  <<GAME_DECLINE: name>>     decline a game -- the ONLY thing you can refuse yourself",
+        "  <<GAME_END>>               end the active game",
+        "  <<GAME_EXPOSE: a,b>> / <<GAME_HIDE: a,b>>   apply probe state inside a game",
+        "",
+        "The ':' commands are the OPERATOR's -- you cannot run them. A game may STAGE one, but",
+        "nothing runs until the operator types :accept. Your only lever on them is to propose a",
+        "game. Operator commands (for reference): "
+        + ", ".join(sorted(c for c in ({k for k in BUILTIN_COMMANDS}))) + ".",
+    ]
+    if solve_macros:
+        lines.append("Operator solve-macros (also operator-run): "
+                     + ", ".join(f":{n}" for n, _d, _a in solve_macros) + ".")
+    return "\n".join(lines)
 
 
 def calibratable_names(tuner):
@@ -1965,89 +2184,14 @@ def main():
     print("Self-concept orientation is vector-map based and logged as a tool/controller trace.")
     print(f"Steer-map traces are stored at {steer_map.events_path}.")
     print(f"Imported {imported_methodologies} sanitized methodology memories from cognitive cache.")
-    print("Commands: :context, :context on, :context off, :context clear")
-    print("          :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory boundary")
-    print("          :methodmap <query>")
-    print("          :claimmap <first text> || <second text>")
-    print("          :steermap")
-    print("          :steer  (envelope + observed push distribution + data-implied cap/band)")
-    print("          :probe <name> <with it> || <without it>  (mint a named-concept sensor from")
-    print("                YOUR contrastive framings; scores every turn; :probe lists; :probe drop <name>)")
-    print("          :probe adopt <dim> [<dim> ...]  (turn stored vectors -- ambiguity, disagreement,")
-    print("                warranted_confidence, organic_correction, ... -- into reply-scoring probes)")
-    print("          :probe compose <name> <mix>  (mint a probe from a SIGNED MIX of dimensions and")
-    print("                probes: ambiguity + disagreement - validated_flow - 0.5*curiosity)")
-    print("                (mint/adopt/compose take a trailing 'band <lo> <hi>' -- explicit reading")
-    print("                layers, e.g. band 16 24; otherwise the live steer band decides depth)")
-    print("          :probe expose <name> [off]  (let the MODEL consult this sensor itself:")
-    print("                <<PROBE: name>> reads its last turn, <<PROBE: name || words>> scores")
-    print("                candidate words. Reading only -- minting/calibrating stay operator acts)")
-    print("          :probe backfill <name> [n]  (retro-score up to n archived replies in order:")
-    print("                rebuilds the probe's stream+credit from the whole record, seeds its history)")
-    print("          :calibrate <name> [pct|intent|<anchor>|<a>+<b>|band args]  (data-calibrate any knob")
-    print("                BY NAME; anchors join with '+' = fired only when EVERY stream fired;")
-    print("                the system evaluates the request and refuses unsafe ones --")
-    print("                circular strength knobs, binary streams, vacuous p100 caps)")
-    print("          :label <probe|stream> pos|neg  (judge the MOST RECENT turn on that axis:")
-    print("                credits its last signal with a human outcome -- supervised evidence")
-    print("                alongside the automatic sense credit, so lift can reflect your judgment)")
-    print("          :suggest  (scan the accrued state for ready moves -- calibrations, knobs")
-    print("                explored-but-not-committed, capabilities never tried, probes to backfill")
-    print("                or expose -- each with its command; computed, never applied. :suggest apply")
-    print("                auto-queues only the safe measurement/calibration ones)")
-    print("          :tune, :tune <name> <value>, :tune <name> auto [percentile]")
-    print("          :tune <knob|probe> dynamic <signed mix> [mult]  (each turn set the target")
-    print("                to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a")
-    print("                probe target drives its own firing threshold, never a shadow knob)")
-    print("          :tune steer_cap_fraction auto [pct]  (calibrate cap from observed pushes)")
-    print("          :tune steer_band auto [min_events] [gold|conversation|any] [synthesis|layersteer]")
-    print("                (derive band from outcomes; conversations count as evidence)")
-    print("          :tune steer_layer_sweep 1    (isolate steers by layer: each steer pushes")
-    print("                ONE least-tested band layer; per-layer outcomes accrue, transfer-free)")
-    print("          :doc <path> [because <why>]  (share a document into the conversation)")
-    print("          :doc next | :doc status      (stage the next chunk / show progress)")
-    print("          :doc read [n] [order|interleave|reply|updated] [satisfied]")
-    print("                (reading as dialogue: the document speaks each turn, the model")
-    print("                replies. order/interleave/updated advance on the documents' own")
-    print("                course -- updated = by file mtime, newest first; reply follows")
-    print("                overlap. 'satisfied' stops early once sense settles)")
-    print("          :doc inject                  (stage the whole library for one turn, budget-bounded)")
-    print("          :doc stop                    (interrupt auto-read)")
-    print("          :sandbox on|off|status       (run the model's ```python blocks for real)")
-    print("          :experts on|off|status       (mint new steering experts from its own")
-    print("                recurring self-corrections; roster bounded; default off)")
-    print("          :game <name>                 (run a python script from games/ with full access to")
-    print("                live system state; infinite flexibility for custom rules and interactions)")
-    print("          :impact                      (consequence trail: what its words caused,")
-    print("                and whether experienced impact tracks better deliberation)")
-    print("          :clock                       (last turn's generation time + tok/s and VRAM;")
-    print("                sensed every turn as generation_seconds / vram_gb streams)")
-    print("          :prioritize                  (rank probes by evidence-weighted lift; steer toward")
-    print("                the top each turn via prioritize_alpha -- signed by lift, off at 0)")
-    print("          :release <tool> [prob]       (decouple a tool's firing from its signal for that")
-    print("                fraction of turns -- separates causality so credit lift can be trusted)")
-    print("          :listen on|off|status        (speak mid-reply: lines you type while it")
-    print("                generates are ingested at the next chunk seam and appended to the")
-    print("                live stream -- the model chooses to redirect or fold in; never dropped)")
-    print("          :macro <file> <c1> ; <c2> ...  (write a macro; :macro name <alias> <file>")
-    print("                aliases it; :macro name self [file] writes a macro that REGENERATES")
-    print("                the current probes; :macro strip <alias|file> drops display-only")
-    print("                lines in place, :macro name strip <src> [dest] writes a stripped copy)")
-    print("          :save self <name> | choose   (alias for :macro name self; 'choose' asks")
-    print("                the model to generate a name based on the current tuning state)")
-    print("          :spawn <name> join|replace|drop  (multi-agent support. 'join' adds to")
-    print("                the panel, 'replace [N]' takes the operator slot for N turns.")
-    print("                Use @<name> :cmd to target a specific agent's tuning state)")
-    print("          :run <alias|file>            (queue and execute a macro's commands)")
-    print("          :solve <name> [goal]         (model writes a parameterized macro for an")
-    print("                ad-hoc command; then :<name> <args> runs it, filling $1..$9 / $@)")
-    print("          :<macro-name> <args>         (run any aliased macro directly, args -> $1..$9)")
-    print("          <any :command> because <reason>   (logs why you issued it as provenance)")
-    print("          :memory use probe <name> | :memory choice probe <name>")
-    print("                (stage the memories where probe <name> reads furthest from 0)")
-    print("          :tune exposed_probe_alpha <small>  (also steer along the probes you have")
-    print("                exposed to the model, lift-weighted; 0 = off)")
+    for _hline in COMMAND_HELP_LINES:
+        print(_hline)
     print("Type 'exit' or 'quit' to leave.\n" + Style.RESET_ALL)
+    try:
+        _md_path = write_commands_md()
+        print(Fore.CYAN + f"(command reference refreshed at {os.path.relpath(_md_path, ROOT)})" + Style.RESET_ALL)
+    except Exception as _md_err:
+        print(Fore.YELLOW + f"[Docs] Could not refresh COMMANDS.md: {_md_err}" + Style.RESET_ALL)
 
     pending_memory_tool_result = None
     pending_orientation_tool_result = None
@@ -2063,6 +2207,45 @@ def main():
     user_proposed_game_args = None
     active_game = None
     active_game_state = {}
+    # Commands a game CHOOSES to run don't execute on their own: they stage here
+    # and wait for an explicit operator :accept (or :reject). Tools stay free;
+    # this gate is only for real :commands a game would adopt into the queue.
+    pending_accept_commands = []
+    pending_solve_proposal = None   # a :solve choose/auto macro awaiting :accept
+    pending_help_tool_result = None # model asked for <<HELP>>; served next turn
+    help_exposed = False            # when on, the model is told it may call <<HELP>>
+
+    def _stage_for_accept(cmd, why="a game"):
+        pending_accept_commands.append(cmd)
+        idx = len(pending_accept_commands)
+        print(Fore.YELLOW + Style.BRIGHT
+              + f"[Accept] {why} wants to run a command -- staged #{idx}, NOT run: {cmd}"
+              + Style.RESET_ALL)
+        print(Fore.YELLOW
+              + "         Type :accept to run it (or :accept all), :reject to drop it (or :reject all)."
+              + Style.RESET_ALL)
+
+    def _run_game_ref(name, args=None):
+        """Injected into game scripts as run_game(name, args): load and run
+        another game by name, so games can reference/compose each other. Shares
+        the live active_game_state and probes with the caller."""
+        gp = os.path.join(ROOT, "games", f"{name}.py")
+        if not os.path.isfile(gp):
+            print(Fore.YELLOW + f"[Game] referenced game '{name}' not found in games/." + Style.RESET_ALL)
+            return False
+        sub_cfg = load_game_config(os.path.join(ROOT, "games", f"{name}_rules.json"))
+        with open(gp, "r", encoding="utf-8") as _gf:
+            code = _gf.read()
+        g = globals().copy()
+        g["GAME_RULES"] = sub_cfg["rules"]
+        g["GAME_CONFIG"] = sub_cfg
+        g["game_args"] = list(args or [])
+        g["active_game_state"] = active_game_state
+        g["probes"] = probes
+        g["run_game"] = _run_game_ref
+        exec(code, g)
+        return True
+
     doc_session = None          # current document: chunks + cursor + why
     doc_library = []            # every ingested document this session (for inter-ordering)
     doc_autoread = None         # {"remaining": n, "mode": "order"|"interleave"|"reply"} during :doc read
@@ -2639,7 +2822,7 @@ def main():
                     print(Fore.YELLOW + "[Solve] Usage: :solve <command_name> [what it should do]" + Style.RESET_ALL)
                     continue
                 sname = re.sub(r"[^a-z0-9_]", "_", sparts[0].lower())[:40].strip("_")
-                
+                name_from_model = False  # set when choose/auto lets the MODEL name it
                 rest = sparts[1].strip() if len(sparts) > 1 else ""
                 if "--" in rest:
                     args_part, goal_part = rest.split("--", 1)
@@ -2656,6 +2839,14 @@ def main():
                         arg_names.insert(0, tokens.pop())
                     goal = " ".join(tokens) or sname.replace("_", " ")
 
+                if sname == "auto" and not arg_names and goal == "auto":
+                    print(Fore.YELLOW + "[Solve] Usage: :solve auto <+/- reference probes to steer toward>" + Style.RESET_ALL)
+                    continue
+
+                if sname == "choose" and goal == "choose":
+                    print(Fore.YELLOW + "[Solve] You must describe what the macro should do for the model to choose a name (e.g. ':solve choose drop all probes')." + Style.RESET_ALL)
+                    continue
+
                 if sname == "auto":
                     refs = " ".join(arg_names) if arg_names else goal
                     if refs == "auto":
@@ -2665,6 +2856,7 @@ def main():
                     sname = "choose"
 
                 if sname == "choose":
+                    name_from_model = True
                     print(Fore.CYAN + "[Solve] Asking model for a command name..." + Style.RESET_ALL)
                     nm = generate_agentic_text(
                         model,
@@ -2780,6 +2972,18 @@ def main():
                     print(Fore.YELLOW + f"[Solve] The model produced no commands. Raw output:\n{(sug or '').strip()[:400]}" + Style.RESET_ALL)
                     continue
                 dest = os.path.join(ROOT, "invariants", "out", "macros", f"{sname}.txt")
+                # choose/auto let the MODEL name the command, so the proposal is
+                # staged and NOT written/aliased until the operator :accepts it.
+                if name_from_model:
+                    pending_solve_proposal = {
+                        "name": sname, "goal": goal, "clean_names": clean_names,
+                        "cmd_lines": cmd_lines, "dest": dest,
+                    }
+                    print(Fore.YELLOW + Style.BRIGHT + f"[Solve] Proposed ':{sname}' ({len(cmd_lines)} command(s)) -- NOT adopted yet:" + Style.RESET_ALL)
+                    for ln in cmd_lines:
+                        print(Fore.CYAN + f"  {ln}" + Style.RESET_ALL)
+                    print(Fore.YELLOW + "         Type :accept to adopt it as :" + sname + ", or :reject to discard." + Style.RESET_ALL)
+                    continue
                 try:
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
                     with open(dest, "w", encoding="utf-8") as wf:
@@ -3523,6 +3727,80 @@ def main():
                 print(Fore.YELLOW + "[System] (Macro files are re-read on every :run, so edits to them need no refresh.)" + Style.RESET_ALL)
                 continue
 
+            _cmdword = user_input.strip().split()[0].lower() if user_input.strip() else ""
+            if _cmdword == ":help":
+                harg = user_input.strip()[len(":help"):].strip().lower()
+                if harg.startswith("expose"):
+                    help_exposed = not harg.endswith("off")
+                    print(Fore.GREEN + f"[Help] Model help {'EXPOSED -- it may now emit <<HELP>>' if help_exposed else 'hidden from the model'}." + Style.RESET_ALL)
+                    continue
+                if harg == "model":
+                    print(Fore.CYAN + build_model_help_text(list_solve_macros()) + Style.RESET_ALL)
+                    continue
+                for _l in COMMAND_HELP_LINES:
+                    print(Fore.CYAN + _l + Style.RESET_ALL)
+                sm = list_solve_macros()
+                if sm:
+                    print(Fore.CYAN + "Solve-macros (:<name> <args>):" + Style.RESET_ALL)
+                    for _n, _d, _a in sm:
+                        _argnote = f"  [args: {_a}]" if _a else ""
+                        print(Fore.CYAN + f"          :{_n}{(' -- ' + _d) if _d else ''}{_argnote}" + Style.RESET_ALL)
+                else:
+                    print(Fore.CYAN + "(no solve-macros yet -- make one with :solve choose <goal>)" + Style.RESET_ALL)
+                print(Fore.CYAN + "':help model' shows what the MODEL can run itself; ':help expose' lets it call <<HELP>>." + Style.RESET_ALL)
+                continue
+            if _cmdword in (":accept", ":reject"):
+                parts = user_input.strip().split()
+                verb = parts[0].lower()
+                sel = parts[1].lower() if len(parts) > 1 else "all"
+                # A staged :solve choose/auto macro takes precedence: adopt (write +
+                # alias) or discard it before touching any staged prize commands.
+                if pending_solve_proposal is not None:
+                    p = pending_solve_proposal
+                    pending_solve_proposal = None
+                    if verb == ":reject":
+                        print(Fore.YELLOW + f"[Reject] Discarded proposed macro ':{p['name']}'." + Style.RESET_ALL)
+                        continue
+                    try:
+                        os.makedirs(os.path.dirname(p["dest"]), exist_ok=True)
+                        with open(p["dest"], "w", encoding="utf-8") as wf:
+                            wf.write(f"# :solve macro '{p['name']}' -- {p['goal']}\n")
+                            if p["clean_names"]:
+                                wf.write(f"# args: {', '.join(p['clean_names'])}\n")
+                            for ln in p["cmd_lines"]:
+                                wf.write(ln + "\n")
+                        macro_aliases[p["name"]] = p["dest"]
+                        _save_macro_aliases()
+                        print(Fore.GREEN + f"[Accept] Adopted ':{p['name']}' ({len(p['cmd_lines'])} command(s)). Run it with :{p['name']} <args>." + Style.RESET_ALL)
+                    except Exception as e:
+                        print(Fore.RED + f"[Accept] Could not save macro: {e}" + Style.RESET_ALL)
+                    continue
+                if not pending_accept_commands:
+                    print(Fore.CYAN + "[Accept] Nothing is staged for acceptance." + Style.RESET_ALL)
+                    continue
+                if sel == "all":
+                    picks = list(range(len(pending_accept_commands)))
+                else:
+                    try:
+                        i = int(sel) - 1
+                        if not (0 <= i < len(pending_accept_commands)):
+                            raise IndexError
+                        picks = [i]
+                    except (ValueError, IndexError):
+                        print(Fore.YELLOW + f"[{verb[1:].capitalize()}] No staged command #{sel}. {len(pending_accept_commands)} staged -- use :{verb[1:]} <n> or :{verb[1:]} all." + Style.RESET_ALL)
+                        continue
+                chosen = [pending_accept_commands[i] for i in picks]
+                for i in sorted(picks, reverse=True):
+                    del pending_accept_commands[i]
+                if verb == ":accept":
+                    input_queue.extend(chosen)
+                    print(Fore.GREEN + Style.BRIGHT + f"[Accept] Adopted {len(chosen)} command(s) into the queue: {'; '.join(chosen)}" + Style.RESET_ALL)
+                else:
+                    print(Fore.YELLOW + f"[Reject] Dropped {len(chosen)} staged command(s): {'; '.join(chosen)}" + Style.RESET_ALL)
+                if pending_accept_commands:
+                    print(Fore.CYAN + f"[Accept] {len(pending_accept_commands)} command(s) still staged." + Style.RESET_ALL)
+                continue
+
             if user_input.startswith(":game ") or user_input.startswith(":game,") or user_input.strip() == ":game":
                 body = user_input[len(":game"):].strip()
                 if body.startswith(","):
@@ -3533,6 +3811,58 @@ def main():
                 _nm = re.split(r"[\s,]+", body, maxsplit=1)
                 gname = _nm[0].strip()
                 rest = _nm[1].strip().lstrip(",").strip() if len(_nm) > 1 else ""
+                # Operator declines the game the model just proposed (the symmetric
+                # counterpart to accepting it with ':game <name>').
+                if gname.lower() in ("no", "decline", "reject", "dismiss") and model_proposed_game:
+                    declined = model_proposed_game
+                    model_proposed_game = None
+                    pending_game_tool_result = None
+                    print(Fore.YELLOW + f"[Game] Declined the model's proposal to play '{declined}'." + Style.RESET_ALL)
+                    memory.append_event("game_proposal_declined", tags=["game", "self_concept"], provenance={"game": declined})
+                    continue
+
+                # :game auto [+trait ...] [-trait ...] -- design a conversational
+                # game whose whole goal is to increase the named trait(s)/probe(s),
+                # then PROPOSE it (operator accepts with ':game <name>'/':game start',
+                # declines with ':game no'). e.g. ':game auto +consciousness'.
+                if gname.lower() == "auto":
+                    _atoks = rest.split()
+                    plus = [t.lstrip("+") for t in _atoks if t.startswith("+")]
+                    minus = [t.lstrip("-") for t in _atoks if t.startswith("-")]
+                    bare = [t for t in _atoks if not t.startswith(("+", "-"))]
+                    focus = ", ".join(plus) if plus else (bare[0] if bare else "the model's cognition")
+                    base = plus[0] if plus else (bare[0] if bare else "trait")
+                    auto_name = re.sub(r"[^a-z0-9_]", "_", f"improve_{base}".lower())[:40].strip("_") or "improve_trait"
+                    _n, _i = auto_name, 2
+                    while os.path.isfile(os.path.join(ROOT, "games", f"{_n}_rules.json")) or os.path.isfile(os.path.join(ROOT, "games", f"{_n}.py")):
+                        _n, _i = f"{auto_name}_{_i}", _i + 1
+                    auto_name = _n
+                    auto_rules_path = os.path.join(ROOT, "games", f"{auto_name}_rules.json")
+                    gcfg2 = load_game_config(auto_rules_path)
+                    gcfg2["win"] = f"{focus} is measurably higher than when the game began (its probe reads further from 0 / it is more present in the replies)."
+                    gcfg2["loss"] = f"{focus} stalls or declines over several turns."
+                    gcfg2["rules"]["goal"] = f"Each turn, make one deliberate move to increase {focus}; name the move and why it should raise {focus}."
+                    if minus:
+                        gcfg2["rules"]["avoid"] = f"reduce {', '.join(minus)} while doing so."
+                    try:
+                        premise = generate_agentic_text(
+                            model,
+                            instruction=f"In one vivid sentence, describe a short cooperative game whose whole point is for you to increase your own {focus}. Reply with ONLY that sentence.",
+                            config=config, max_new_tokens=60, chatty_log=False, pre_formatted=False,
+                        )
+                        if premise and premise.strip():
+                            gcfg2["rules"]["premise"] = premise.strip().splitlines()[0][:300]
+                    except Exception:
+                        pass
+                    save_game_config(auto_rules_path, gcfg2)
+                    model_proposed_game = auto_name
+                    print(Fore.GREEN + Style.BRIGHT + f"[Game] Auto-designed '{auto_name}' to improve {focus}." + Style.RESET_ALL)
+                    if gcfg2["rules"].get("premise"):
+                        print(Fore.CYAN + f"       premise: {gcfg2['rules']['premise']}" + Style.RESET_ALL)
+                    print(Fore.CYAN + f"       win: {gcfg2['win']}" + Style.RESET_ALL)
+                    print(Fore.CYAN + f"       Accept with ':game {auto_name}' (or ':game start'); decline with ':game no'." + Style.RESET_ALL)
+                    continue
+
                 gpath = os.path.join(ROOT, "games", f"{gname}.py")
                 rules_path = os.path.join(ROOT, "games", f"{gname}_rules.json")
                 gcfg = load_game_config(rules_path)
@@ -3596,18 +3926,18 @@ def main():
                     if not won:
                         print(Fore.CYAN + f"[Game] Draw: nothing hit (of {len(gcfg['prizes'])} prize(s))." + Style.RESET_ALL)
                     for opt, cmd in won:
-                        print(Fore.MAGENTA + Style.BRIGHT + f"[Game] Prize won: {opt}!" + Style.RESET_ALL + (Fore.MAGENTA + f" running '{cmd}'" + Style.RESET_ALL if cmd else ""))
+                        print(Fore.MAGENTA + Style.BRIGHT + f"[Game] Prize won: {opt}!" + Style.RESET_ALL)
                         if cmd:
-                            input_queue.append(cmd)
+                            _stage_for_accept(cmd, why=f"prize '{opt}'")
                     continue
 
                 # --- end / stop / quit: award prizes, then end the active game ---
                 if key in ("end", "stop", "quit") or gname.lower() in ("end", "stop", "quit"):
                     if active_game:
                         for opt, cmd in draw_prizes(gcfg["prizes"]):
-                            print(Fore.MAGENTA + Style.BRIGHT + f"[Game] End prize: {opt}!" + Style.RESET_ALL + (f" running '{cmd}'" if cmd else ""))
+                            print(Fore.MAGENTA + Style.BRIGHT + f"[Game] End prize: {opt}!" + Style.RESET_ALL)
                             if cmd:
-                                input_queue.append(cmd)
+                                _stage_for_accept(cmd, why=f"end prize '{opt}'")
                         save_game_config(rules_path, gcfg)
                         print(Fore.CYAN + f"[Game] Ended active game: {active_game}." + Style.RESET_ALL)
                         active_game = None
@@ -3671,6 +4001,8 @@ def main():
                             exec_globals["GAME_CONFIG"] = gcfg           # full config: rules/win/loss/prizes
                             exec_globals["game_args"] = rest.split()
                             exec_globals["active_game_state"] = active_game_state
+                            exec_globals["probes"] = probes              # games read/act on live probes
+                            exec_globals["run_game"] = _run_game_ref     # games can reference each other
                             exec(gcode, exec_globals)
                         except Exception as e:
                             import traceback
@@ -5067,6 +5399,9 @@ def main():
             if active_game and not game_tool_result:
                 sys_prompt = active_game_state.get("system_prompt", "The operator expects you to play it with them. To end the game, output <<GAME_END>>.")
                 game_tool_result = f"[Game Active: {active_game}] A game is currently active. {sys_prompt}"
+            help_tool_result = pending_help_tool_result
+            if help_exposed and not help_tool_result:
+                help_tool_result = "[Help available] You may emit <<HELP>> at any time to see what you can run yourself vs. what only the operator can run."
             # Consequences of the model's LAST words arrive as THIS turn's
             # context; the same-turn tag requests below add to the list.
             turn_impacts = impact_state["pending"]
@@ -5081,6 +5416,7 @@ def main():
             pending_document_tool_result = None
             pending_sandbox_tool_result = None
             pending_game_tool_result = None
+            pending_help_tool_result = None
             prompt = build_prompt(
                 user_input,
                 memory_tool_result=memory_tool_result,
@@ -5090,6 +5426,7 @@ def main():
                 sandbox_tool_result=sandbox_tool_result,
                 document_tool_result=document_tool_result,
                 game_tool_result=game_tool_result,
+                help_tool_result=help_tool_result,
                 session_context=session_context if session_context_enabled else None,
                 active_u_name=_last_replace_name if ('_last_replace_name' in locals() and _last_replace_name) else "operator",
             )
@@ -5320,6 +5657,9 @@ def main():
             model_game_decline = extract_game_decline(response)
             model_game_end = extract_game_end(response)
             model_game_exposed, model_game_hidden = extract_game_expose_hide(response)
+            if extract_help_request(response):
+                pending_help_tool_result = build_model_help_text(list_solve_macros())
+                print(Fore.CYAN + "[Help] The model asked for help; serving the tool/command reference next turn." + Style.RESET_ALL)
 
             if model_game_exposed or model_game_hidden:
                 print(Fore.MAGENTA + Style.BRIGHT + "\n[Game State Changed]" + Style.RESET_ALL)
@@ -5358,7 +5698,14 @@ def main():
                         try:
                             with open(gpath, "r", encoding="utf-8") as _gf:
                                 gcode = _gf.read()
+                            _acfg = load_game_config(os.path.join(ROOT, "games", f"{active_game}_rules.json"))
                             exec_globals = globals().copy()
+                            exec_globals["GAME_RULES"] = _acfg["rules"]
+                            exec_globals["GAME_CONFIG"] = _acfg
+                            exec_globals["game_args"] = list(user_proposed_game_args or [])
+                            exec_globals["active_game_state"] = active_game_state
+                            exec_globals["probes"] = probes
+                            exec_globals["run_game"] = _run_game_ref
                             exec(gcode, exec_globals)
                         except Exception as e:
                             import traceback
@@ -5382,8 +5729,7 @@ def main():
                     print(Fore.CYAN + f"\n[Game] The model ended the active game: {active_game}." + Style.RESET_ALL)
                     prize = active_game_state.get("prize_command")
                     if prize:
-                        print(Fore.GREEN + f"[Game] Awarding prize! Queuing command: {prize}" + Style.RESET_ALL)
-                        input_queue.insert(0, prize)
+                        _stage_for_accept(prize, why=f"'{active_game}' prize")
                     active_game = None
                     active_game_state = {}
             model_memory_tool_result = None
