@@ -27,3 +27,6 @@ scratch_*.py
 
 # Benchmark Outputs
 invariants/out/
+
+# Temporary caches
+*.tmp

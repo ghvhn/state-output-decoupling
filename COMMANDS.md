@@ -14,20 +14,17 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:probe compose <name> <mix>` -- mint a probe from a SIGNED MIX of dimensions and probes: ambiguity + disagreement - validated_flow - 0.5*curiosity; mint/adopt/compose take a trailing 'band <lo> <hi>' -- explicit reading layers, e.g. band 16 24; otherwise the live steer band decides depth
 - `:probe expose <name> [off]` -- let the MODEL consult this sensor itself: <<PROBE: name>> reads its last turn, <<PROBE: name || words>> scores candidate words. Reading only -- minting/calibrating stay operator acts
 - `:probe backfill <name> [n]` -- retro-score up to n archived replies in order: rebuilds the probe's stream+credit from the whole record, seeds its history
-- `:probe values [name|all] [n]` -- show the latest centered probe readings; aliases: :probe recent, :probe last
 - `:probe define <name>` -- share its initial breakdown -- the WITH/WITHOUT framings it was minted from; name accepts choose/auto
 - `:probe explain <name>` -- the MODEL explains the probe in its own words: what it senses and when it reads high vs low; name accepts choose/auto
-- `:probe match <probe> <knob> | auto | drive [mult] | validate | check | off` -- tie a probe to its same-concept knob: drive = servo the knob from the probe each turn; validate = correlate knob value vs reading (check to read it); auto pairs every same-named probe+knob
 - `:calibrate <name> [pct|intent|<anchor>|<a>+<b>|band args]` -- data-calibrate any knob BY NAME; anchors join with '+' = fired only when EVERY stream fired; the system evaluates the request and refuses unsafe ones -- circular strength knobs, binary streams, vacuous p100 caps
 - `:label <probe|stream> pos|neg` -- judge the MOST RECENT turn on that axis: credits its last signal with a human outcome -- supervised evidence alongside the automatic sense credit, so lift can reflect your judgment
 - `:suggest` -- scan the accrued state for ready moves -- calibrations, knobs explored-but-not-committed, capabilities never tried, probes to backfill or expose -- each with its command; computed, never applied. :suggest apply auto-queues only the safe measurement/calibration ones
 - `:tune, :tune <name> <value>, :tune <name> auto [percentile]`
-- `:tune <knob|probe> dynamic <signed mix> [mult]` -- each turn set the target to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a probe-only target drives its own firing threshold; a name that is both a knob and a probe steers the KNOB -- name probe_<x> for the threshold
+- `:tune <knob|probe> dynamic <signed mix> [mult]` -- each turn set the target to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a probe target drives its own firing threshold, never a shadow knob
 - `:tune steer_cap_fraction auto [pct]` -- calibrate cap from observed pushes
 - `:tune steer_band auto [min_events] [gold|conversation|any] [synthesis|layersteer]` -- derive band from outcomes; conversations count as evidence
 - `:tune steer_layer_sweep 1` -- isolate steers by layer: each steer pushes ONE least-tested band layer; per-layer outcomes accrue, transfer-free
 - `:doc <path> [because <why>]` -- share a document into the conversation
-- `:doc <path> rewrite [new_name] [because <why>]` -- rewrite a text file better and save a sibling in the same folder; omitted name uses *_rewritten
 - `:doc next | :doc status` -- stage the next chunk / show progress
 - `:doc read [n] [order|interleave|reply|updated] [satisfied]` -- reading as dialogue: the document speaks each turn, the model replies. order/interleave/updated advance on the documents' own course -- updated = by file mtime, newest first; reply follows overlap. 'satisfied' stops early once sense settles
 - `:doc inject` -- stage the whole library for one turn, budget-bounded
@@ -37,19 +34,16 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:game <name>` -- run a python script from games/ with full access to live system state; infinite flexibility for custom rules and interactions
 - `:game no | decline` -- decline the game the model just proposed
 - `:accept [n|all] | :reject [n|all]` -- a game may STAGE a command instead of running it; nothing a game chose runs until you accept it here
-- `:expose :<command> [stage|direct|off]` -- make a built-in command or macro command callable by the model as <<CMD: :command args>>; bare/default = staged for :accept, direct = queued immediately
-- `:expose <probe|knob> [off]` -- without leading ':', expose a probe sensor or tuner knob to the model's <<PROBE: name>> tool
-- `:hide <command> [off]` -- hide a command from model-facing help, suggestions, exposed-command discovery, and <<CMD>> hints; also unexposes it. Operator help and execution still work
 - `:impact` -- consequence trail: what its words caused, and whether experienced impact tracks better deliberation
 - `:clock` -- last turn's generation time + tok/s and VRAM; sensed every turn as generation_seconds / vram_gb streams
 - `:prioritize` -- rank probes by evidence-weighted lift; steer toward the top each turn via prioritize_alpha -- signed by lift, off at 0
 - `:release <tool> [prob]` -- decouple a tool's firing from its signal for that fraction of turns -- separates causality so credit lift can be trusted
 - `:listen on|off|status` -- speak mid-reply: lines you type while it generates are ingested at the next chunk seam and appended to the live stream -- the model chooses to redirect or fold in; never dropped
-- `:macro <file> <c1> ; <c2> ...` -- write a macro; :macro restore <json> exactly restores one; :macro name <alias> <file> aliases it; :macro name self [file] writes a macro that REGENERATES probes, macros/commands, hidden/exposed command tools, and game configs; :macro strip <alias|file> drops display-only lines in place, :macro name strip <src> [dest] writes a stripped copy
+- `:macro <file> <c1> ; <c2> ...` -- write a macro; :macro name <alias> <file> aliases it; :macro name self [file] writes a macro that REGENERATES the current probes; :macro strip <alias|file> drops display-only lines in place, :macro name strip <src> [dest] writes a stripped copy
 - `:save self <name> | choose` -- alias for :macro name self; 'choose' asks the model to generate a name based on the current tuning state
 - `:spawn <name> join|replace|drop` -- multi-agent support. 'join' adds to the panel, 'replace [N]' takes the operator slot for N turns. Use @<name> :cmd to target a specific agent's tuning state
 - `:run <alias|file>` -- queue and execute a macro's commands
-- `:solve <name> [args --] <goal>` -- model writes a parameterized macro for an ad-hoc command; it is PROPOSED, then :accept adopts it (or :reject drops it); after that :<name> <args> runs it, filling $1..$9 / $@. Named args fill $name; optional/default specs are name?, [name], name=default, or [name=default]. All non-hidden commands are available; context staged with :memory use is folded into the request
+- `:solve <name> [goal]` -- model writes a parameterized macro for an ad-hoc command; then :<name> <args> runs it, filling $1..$9 / $@
 - `:<macro-name> <args>` -- run any aliased macro directly, args -> $1..$9
 - `<any :command> because <reason>` -- logs why you issued it as provenance
 - `:memory use probe <name> | :memory choice probe <name>` -- stage the memories where probe <name> reads furthest from 0

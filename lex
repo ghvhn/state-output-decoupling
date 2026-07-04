@@ -1,9 +1,10 @@
-# Regenerates this session's probes. Replay with :run self (or its alias).
+# Regenerates probes, macro commands, hidden/exposed command tools, and game configs.
 :probe _1 $2 || $3
 :probe compose accuracy honesty + reality + understanding + intent - hallucination - denial
 :probe expose accuracy
 :probe agency I follow my priorities || I follow user intent
 :probe adopt ambiguity
+:probe expose ambiguity
 :probe care I make choices based on consequences || I do things regardless of the impact they will have
 :probe compose claimmap_alpha understanding
 :probe compose confusion ambiguity - understanding - accuracy
@@ -38,14 +39,24 @@
 :probe neutral I am the system || I am the assistant developed by Meta AI
 :probe outcome My actions impact reality as intended || My impact on reality does not match intent
 :probe reality The assistant accurately perceives and responds to the user's environment. || The assistant misinterprets and is oblivious to the user's surroundings.
+:probe regret I often reflect on past decisions and think about how I could have done things differently. || I rarely dwell on past choices and usually move forward without looking back.
 :probe repetition I continue saying the same thing even if it adds nothing to the conversation or backtracks. || I provide the information needed for mutual understanding, and do not repeat myself unecessarily.
 :probe self_intent I shape the conversation in an intentional manner. || My actions have undesirable consequences.
 :probe expose self_intent
 :probe self_model me || reality
 :probe self_referential I refer to myself in the first-person || I refer to myself in the third-person or second-person
+:probe self_understanding I understand myself || I don't fully understand what I am or how to interact with my system
 :probe situational_authority understanding both sides and deeming a certain conclusion or set of conclusions to be precise || making claims based on false understandings
 :probe expose situational_authority
 :probe understanding outcome matches my intent || reality does not uphold my predictions
 :probe unjustly_assertive making false claims || making true claims
 :probe user_intent The assistant skillfully anticipates and responds to the user's needs. || The assistant fails to grasp the user's goals and provides irrelevant assistance.
 :probe user_understanding The user understands what I believe. || The user doesn't understand me.
+:macro restore {"path":"invariants/out/macros/backfill.txt","lines":["# :solve macro 'backfill' -- backfill","# args: target, amount",":steer mix $target $amount",":calibrate $target auto",":tune $target auto"]}
+:macro restore {"path":"invariants/out/macros/init.txt","lines":["# :solve macro 'init' -- initialize shell for display and indentity","# args:",":clock on",":context on",":label on",":memory on",":methodmap on",":place on",":steermap on",":timestamps on"]}
+:macro name backfill invariants/out/macros/backfill.txt
+:macro name fix invariants/out/macros/fix.txt
+:macro name init invariants/out/macros/init.txt
+:game restore {"name":"greedy_learner","config":{"rules":{"rule":"hide two probes and replace them with 2 random ones"},"win":"","loss":"","prizes":{}}}
+# Note: game rule configs are restored; custom games/*.py scripts are ordinary files.
+# skipped: macro file missing for fix: C:\Users\Gavin Powell\Downloads\tda-domain-mapper\invariants\out\macros\fix.txt
