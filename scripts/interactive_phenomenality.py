@@ -573,14 +573,28 @@ STREAM_ALIASES = {"intent": "intent_settling", "impact": "words_had_impact",
                   "productive": "sense", "sense": "sense"}
 
 
+def _is_shadow_trigger(name, tuner):
+    """True when a bare trigger `name` is a never-fed threshold (0 signals) yet
+    a real probe_<name> exists -- i.e. a stray :tune-created shadow that has no
+    turn-row column and should NOT win resolution over the actual probe."""
+    t = tuner.triggers.get(name)
+    return (
+        t is not None
+        and f"probe_{name}" in tuner.triggers
+        and t.kind == "threshold"
+        and not t.signals
+    )
+
+
 def resolve_stream(name, tuner):
     """A nameable stream: alias, registered trigger, bare probe name, or bare
     phenomenality sensor name (probe wins when both exist -- reply-state over
-    reasoning-state; say phen_<name> to force the sensor)."""
+    reasoning-state; say phen_<name> to force the sensor). A never-fed bare
+    threshold shadowing a probe is skipped."""
     name = (name or "").lower()
     if name in STREAM_ALIASES:
         return STREAM_ALIASES[name]
-    if name in tuner.triggers:
+    if name in tuner.triggers and not _is_shadow_trigger(name, tuner):
         return name
     if f"probe_{name}" in tuner.triggers:
         return f"probe_{name}"
@@ -663,7 +677,7 @@ def resolve_target(cal_name, tuner):
     vs the intent->intent_settling alias) calibrates itself, not the alias."""
     if cal_name == "conversation_productive":
         return "conversation_productive", "sense"
-    if cal_name in tuner.triggers:
+    if cal_name in tuner.triggers and not _is_shadow_trigger(cal_name, tuner):
         return cal_name, cal_name
     if f"probe_{cal_name}" in tuner.triggers:
         return f"probe_{cal_name}", f"probe_{cal_name}"
@@ -3382,11 +3396,16 @@ def main():
                     else:
                         print(Fore.GREEN + f"[Tune] {targs[0]} calibrated toward p{pct:g} = {round(v, 4)}" + Style.RESET_ALL)
                 elif len(targs) >= 2:
-                    try:
-                        v = tuner.set(targs[0], float(targs[1]))
-                        print(Fore.GREEN + f"[Tune] {targs[0]} = {round(v, 4)}" + Style.RESET_ALL)
-                    except ValueError:
-                        print(Fore.RED + "[Tune] Value must be a number." + Style.RESET_ALL)
+                    # Setting a brand-new name that collides with a probe would
+                    # create a junk knob shadowing it -- refuse and redirect.
+                    if targs[0] not in tuner.triggers and f"probe_{targs[0]}" in tuner.triggers:
+                        print(Fore.YELLOW + f"[Tune] '{targs[0]}' is a probe, not a knob -- :tune would create a shadow. Use :label {targs[0]} pos|neg or :calibrate {targs[0]} <anchor>." + Style.RESET_ALL)
+                    else:
+                        try:
+                            v = tuner.set(targs[0], float(targs[1]))
+                            print(Fore.GREEN + f"[Tune] {targs[0]} = {round(v, 4)}" + Style.RESET_ALL)
+                        except ValueError:
+                            print(Fore.RED + "[Tune] Value must be a number." + Style.RESET_ALL)
                 else:
                     print(Fore.YELLOW + "[Tune] Usage: :tune | :tune <name> <value> | :tune <name> auto [percentile]" + Style.RESET_ALL)
                 continue
