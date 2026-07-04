@@ -1325,8 +1325,8 @@ COMMAND_HELP_LINES = [
     "          :tune, :tune <name> <value>, :tune <name> auto [percentile]",
     "          :tune <knob|probe> dynamic <signed mix> [mult]  (each turn set the target",
     "                to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a",
-    "                probe target drives its own firing threshold, never a shadow knob.",
-    "                knob:<name> / probe:<name> disambiguate a name that is both)",
+    "                probe-only target drives its own firing threshold; a name that is both",
+    "                a knob and a probe steers the KNOB -- name probe_<x> for the threshold)",
     "          :tune steer_cap_fraction auto [pct]  (calibrate cap from observed pushes)",
     "          :tune steer_band auto [min_events] [gold|conversation|any] [synthesis|layersteer]",
     "                (derive band from outcomes; conversations count as evidence)",
@@ -5195,16 +5195,6 @@ def main():
                         dyn_idx = -1
                     if dyn_idx > 0 and dyn_idx < len(parts) - 1:
                         target = parts[0]
-                        # Disambiguate a name that is BOTH a knob and a probe:
-                        # 'knob:x' forces the knob x, 'probe:x' forces probe_x's
-                        # threshold. Bare 'x' keeps the default (probe wins when
-                        # probe_x exists) -- which is why ':tune memory_alpha dynamic'
-                        # binds the probe threshold, not the memory_alpha knob.
-                        force_target = None
-                        if target.lower().startswith("knob:"):
-                            force_target, target = "knob", target[5:]
-                        elif target.lower().startswith("probe:"):
-                            force_target, target = "probe", target[6:]
                         rest = parts[dyn_idx + 1:]
                         # Peel a trailing standalone multiplier (number|auto|pNN) off
                         # the end; whatever remains is the mix expression.
@@ -5216,14 +5206,20 @@ def main():
                         if perr:
                             print(Fore.RED + f"[Tune] Could not parse dynamic expression near '{perr}'." + Style.RESET_ALL)
                             continue
-                        # A probe target drives its OWN threshold (probe_<name>) -- no
-                        # shadow. A real knob is driven directly. knob:/probe: force it.
-                        if force_target == "knob":
+                        # Resolve by CHECKING, not forcing (mirrors the static :tune
+                        # path): an exact-name trigger -- a real knob -- wins; a name
+                        # that is ONLY a probe drives probe_<name>'s threshold. When a
+                        # name is both (e.g. memory_alpha knob vs probe_memory_alpha),
+                        # the knob wins and the overlap is surfaced; name 'probe_<x>'
+                        # outright to drive the probe threshold instead.
+                        if target in tuner.triggers:
                             bind_key = target
-                        elif force_target == "probe":
+                            if f"probe_{target}" in tuner.triggers:
+                                print(Fore.CYAN + f"[Tune] '{target}' names both a knob and a probe -- steering the KNOB (use 'probe_{target}' for the probe threshold)." + Style.RESET_ALL)
+                        elif f"probe_{target}" in tuner.triggers:
                             bind_key = f"probe_{target}"
                         else:
-                            bind_key = f"probe_{target}" if f"probe_{target}" in tuner.triggers else target
+                            bind_key = target
                         single = terms[0][1] if len(terms) == 1 else None
                         if mult_str is None:
                             mult_str = "auto" if single else "1.0"

@@ -20,7 +20,7 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:label <probe|stream> pos|neg` -- judge the MOST RECENT turn on that axis: credits its last signal with a human outcome -- supervised evidence alongside the automatic sense credit, so lift can reflect your judgment
 - `:suggest` -- scan the accrued state for ready moves -- calibrations, knobs explored-but-not-committed, capabilities never tried, probes to backfill or expose -- each with its command; computed, never applied. :suggest apply auto-queues only the safe measurement/calibration ones
 - `:tune, :tune <name> <value>, :tune <name> auto [percentile]`
-- `:tune <knob|probe> dynamic <signed mix> [mult]` -- each turn set the target to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a probe target drives its own firing threshold, never a shadow knob. knob:<name> / probe:<name> disambiguate a name that is both
+- `:tune <knob|probe> dynamic <signed mix> [mult]` -- each turn set the target to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a probe-only target drives its own firing threshold; a name that is both a knob and a probe steers the KNOB -- name probe_<x> for the threshold
 - `:tune steer_cap_fraction auto [pct]` -- calibrate cap from observed pushes
 - `:tune steer_band auto [min_events] [gold|conversation|any] [synthesis|layersteer]` -- derive band from outcomes; conversations count as evidence
 - `:tune steer_layer_sweep 1` -- isolate steers by layer: each steer pushes ONE least-tested band layer; per-layer outcomes accrue, transfer-free
