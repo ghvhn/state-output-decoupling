@@ -399,11 +399,34 @@ def get_agentic_handles(
                         logits_parallel = M.model.lm_head(h_norm_parallel)
                         entropies = _entropy_from_logits(logits_parallel).squeeze(1) # [N]
                         
-                    # 5. Selection
-                    best_idx = torch.argmin(entropies).item() if num_branches > 0 else 0
+                    # 5. Selection -- by branch entropy, nudged toward PROVEN
+                    # experts. With expert_proof_weight == 0 (default) this is
+                    # exactly argmin(entropy). Otherwise each branch's entropy
+                    # is discounted by its expert's accrued route success rate,
+                    # centered on the overall mean so an UNPROVEN expert (no
+                    # score) stays neutral -- proven experts earn a head start,
+                    # nothing is penalized on no evidence.
+                    entropy_best_idx = torch.argmin(entropies).item() if num_branches > 0 else 0
+                    proof_weight = float(getattr(config, "expert_proof_weight", 0.0) or 0.0)
+                    proof_scores = getattr(config, "expert_proof_scores", None) or {}
+                    proof_bonus = {}
+                    if num_branches > 0 and proof_weight > 0.0 and proof_scores:
+                        proof_mean = proof_scores.get("__mean__")
+                        if proof_mean is None:
+                            _vals = [v for k, v in proof_scores.items() if not str(k).startswith("__")]
+                            proof_mean = (sum(_vals) / len(_vals)) if _vals else 0.0
+                        adjusted = entropies.clone()
+                        for bi, name in enumerate(state["branch_names"]):
+                            pr = proof_scores.get(name)
+                            centered = (float(pr) - float(proof_mean)) if pr is not None else 0.0
+                            proof_bonus[name] = centered
+                            adjusted[bi] = entropies[bi] - proof_weight * centered
+                        best_idx = torch.argmin(adjusted).item()
+                    else:
+                        best_idx = entropy_best_idx
                     best_entropy = entropies[best_idx].item()
                     winner_name = state["branch_names"][best_idx]
-                    
+
                     if "synthesis_recorder" in state and state["synthesis_recorder"] is not None:
                         state["synthesis_recorder"].append({
                             "type": "routing_trace",
@@ -412,7 +435,14 @@ def get_agentic_handles(
                                 name: entropies[i].item() for i, name in enumerate(state["branch_names"])
                             },
                             "winner": winner_name,
-                            "best_entropy": best_entropy
+                            "best_entropy": best_entropy,
+                            # Proven-expert routing audit: what entropy alone
+                            # would have picked, and the per-expert nudge -- so
+                            # "did proof override entropy, and did it help?" is
+                            # answerable from the trace.
+                            "entropy_winner": state["branch_names"][entropy_best_idx],
+                            "proof_weight": proof_weight,
+                            "proof_bonus": dict(proof_bonus),
                         })
                     
                     ent_str = ", ".join([f"{name[:3]}: {entropies[i]:.2f}" for i, name in enumerate(state["branch_names"])])
@@ -1015,6 +1045,13 @@ def generate_agentic_text(
                     # scores the engine surfaced) so tools fire from STATE, not from
                     # a text tag. Detectors read state["last_phenomenality"] etc.
                     mid_chunk_hook(generated_text, state)
+                    if hasattr(mid_chunk_hook, "injected_text") and mid_chunk_hook.injected_text:
+                        inj_str = mid_chunk_hook.injected_text
+                        mid_chunk_hook.injected_text = ""
+                        inj_ids = M.tok.encode(inj_str, add_special_tokens=False, return_tensors="pt").to(out.device)
+                        out = torch.cat([out, inj_ids], dim=1)
+                        current_inputs = {"input_ids": out, "attention_mask": torch.ones(out.shape, dtype=torch.long, device=out.device)}
+                        generated_text = M.tok.decode(out[0, original_plen:], skip_special_tokens=True)
                 except Exception as _hook_exc:
                     print(f"    [ToolSense] mid-chunk hook error: {_hook_exc}", flush=True)
             tool_call = next(

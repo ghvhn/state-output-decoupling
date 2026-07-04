@@ -38,6 +38,17 @@ class ToolSense:
         self.tools: list[Tool] = []
         self._handles: list = []
         self._fired: set[str] = set()  # fire each tool at most once per generation
+        self.injected_text: str = ""
+        # Optional (text, state) -> str, wired by the shell to drain any lines
+        # the operator typed mid-generation. Runs every seam; its return is
+        # appended to the live stream (the model then redirects or folds in).
+        self.input_drain = None
+        # RELEASE-DEPENDENCY: {tool_name: probability}. When set, that fraction
+        # of fire decisions is DECOUPLED from the signal (a coin flip), so the
+        # trigger and the action decorrelate -- the only way credit lift can
+        # separate "the trigger caused a good turn" from "acting helped anyway".
+        self.release_probs: dict[str, float] = {}
+        self.release_total = 0  # decoupled decisions this session (observability)
 
     def register(self, tool: Tool):
         self.tools.append(tool)
@@ -48,6 +59,16 @@ class ToolSense:
         if tool.comparator == "<=":
             return signal <= threshold
         return signal >= threshold
+
+    def _decide(self, tool: Tool, signal: float) -> tuple[bool, bool]:
+        """(fire, decoupled). Normally fire == signal crosses the bar. If this
+        tool is released, `prob` of the time the decision is a coin flip
+        independent of the signal -- reported so the fire can be labeled."""
+        import random
+        prob = float(self.release_probs.get(tool.name, 0.0) or 0.0)
+        if prob > 0.0 and random.random() < prob:
+            return (random.random() < 0.5, True)
+        return (self._crosses(tool, signal), False)
 
     def __call__(self, text: str, state: Optional[dict] = None):
         """Run every detector on the text-so-far AND the live activation state;
@@ -64,10 +85,22 @@ class ToolSense:
                 signal, payload = tool.detect(text)
             if payload is None:
                 continue
-            if self._crosses(tool, signal):
+            fire, decoupled = self._decide(tool, signal)
+            if decoupled:
+                self.release_total += 1
+            if fire:
                 handles = tool.act(payload, self.model) or []
                 self._handles.extend(handles)
                 self._fired.add(tool.name)
+        # Always-ingest operator input: drain last so a fresh interjection lands
+        # on top of any tool result this seam produced.
+        if self.input_drain is not None:
+            try:
+                drained = self.input_drain(text, state)
+            except Exception:
+                drained = ""
+            if drained:
+                self.injected_text = (self.injected_text or "") + drained
 
     def cleanup(self):
         """Remove any steering registered this generation and reset per-gen state.
@@ -79,3 +112,4 @@ class ToolSense:
                 pass
         self._handles = []
         self._fired = set()
+        self.injected_text = ""

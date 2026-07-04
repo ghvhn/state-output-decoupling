@@ -41,6 +41,9 @@ class Trigger:
         # a fire. Lets the tuner see whether firing correlated with good outcomes
         # before any threshold is drifted toward them.
         self.outcomes = deque(maxlen=history)
+        # How many times a calibration has moved this value -- so the first one
+        # adopts the computed target fully and later ones AUGMENT (blend).
+        self.calibrations = 0
 
     def _fires(self, signal):
         if self.comparator == "<=":
@@ -56,14 +59,28 @@ class Trigger:
             self.fired += 1
         return fired
 
-    def calibrate(self, percentile):
+    def apply_calibration(self, target, gain=1.0):
+        """Move the value toward a freshly computed target. The FIRST
+        calibration adopts it fully (blending with an unearned default is
+        meaningless); after that a calibration AUGMENTS -- it moves `gain` of
+        the way, so no single data snapshot overwrites accrued tuning and
+        repeated calibrations act as a smoothing EMA. gain >= 1 = overwrite."""
+        target = float(target)
+        if self.calibrations == 0 or float(gain) >= 1.0:
+            self.value = target
+        else:
+            g = min(max(float(gain), 0.0), 1.0)
+            self.value = self.value + g * (target - self.value)
+        self.calibrations += 1
+        return self.value
+
+    def calibrate(self, percentile, gain=1.0):
         if not self.signals:
             return self.value
         data = sorted(self.signals)
         pct = min(max(float(percentile), 0.0), 100.0)
         idx = int(round((pct / 100.0) * (len(data) - 1)))
-        self.value = data[idx]
-        return self.value
+        return self.apply_calibration(data[idx], gain)
 
     def credit(self, signal, outcome):
         """Record the productivity (outcome in [0,1]) that followed a fire at
@@ -114,6 +131,7 @@ class Trigger:
             "comparator": self.comparator,
             "observed": self.observed,
             "fired": self.fired,
+            "calibrations": self.calibrations,
             "signals": list(self.signals),
             "outcomes": list(self.outcomes),
         }
@@ -123,6 +141,7 @@ class Trigger:
         t = cls(name, d.get("value", 0.0), d.get("kind", "threshold"), d.get("comparator", ">="))
         t.observed = int(d.get("observed", 0))
         t.fired = int(d.get("fired", 0))
+        t.calibrations = int(d.get("calibrations", 0))
         for s in d.get("signals", []):
             t.signals.append(float(s))
         for pair in d.get("outcomes", []):
@@ -171,16 +190,27 @@ class TriggerTuner:
         return t.value if t is not None else default
 
     def set(self, name, value):
+        """Direct, authoritative set (manual :tune) -- overwrite, no blending."""
         t = self.triggers.get(name) or self.register(name, value)
         t.value = float(value)
         self.save()
         return t.value
 
-    def calibrate(self, name, percentile):
+    def set_calibrated(self, name, target, gain=1.0):
+        """Augmenting set for a CALIBRATION result (paired cut, intent, ...):
+        the first calibration adopts the target, later ones move `gain` of the
+        way toward it. Returns (new_value, prior_value)."""
+        t = self.triggers.get(name) or self.register(name, target)
+        prior = t.value
+        new = t.apply_calibration(target, gain)
+        self.save()
+        return new, prior
+
+    def calibrate(self, name, percentile, gain=1.0):
         t = self.triggers.get(name)
         if t is None:
             return None
-        v = t.calibrate(percentile)
+        v = t.calibrate(percentile, gain)
         self.save()
         return v
 
