@@ -628,6 +628,33 @@ def anchor_trigger_for(stream, tuner):
     return tuner.triggers.get("conversation_productive" if stream == "sense" else stream)
 
 
+def parse_anchor_spec(anchor_str, tuner):
+    """Parse an anchor expression into paired-calibration anchors. Terms are
+    signed: a leading '+' (or none) means the stream must have FIRED; a leading
+    '-' means it must NOT have fired (the comparator is flipped, so the cut is
+    taken over turns where that stream stayed on the other side of its bar).
+    So 'estrangement' anchors on estrangement-fired turns; '-estrangement' on
+    estrangement-quiet turns; 'a-b' on a-fired AND b-quiet. Returns
+    (anchors, labels, bad_term) -- anchors = [(stream, value, comparator)]."""
+    anchors, labels = [], []
+    for sign, name in re.findall(r"([+-]?)([a-z0-9_]+)", (anchor_str or "").lower()):
+        stream = resolve_stream(name, tuner)
+        if stream is None:
+            return [], [], name
+        trig = anchor_trigger_for(stream, tuner)
+        comp = trig.comparator if trig else ">="
+        val = float(trig.value) if trig else 0.0
+        neg = sign == "-"
+        if neg:
+            comp = "<=" if comp == ">=" else ">="  # fired -> did-not-fire (edge measure-zero)
+        anchors.append((stream, val, comp))
+        disp = stream[len("probe_"):] if stream.startswith("probe_") else stream
+        labels.append(("-" if neg else "") + disp)
+    if not anchors:
+        return [], [], (anchor_str or "(empty)")
+    return anchors, labels, None
+
+
 def resolve_target(cal_name, tuner):
     """A calibration target's (trigger, stream_column), kept CONSISTENT so a
     bar is never set from a different stream's values. Prefers an exact
@@ -663,6 +690,68 @@ def rank_probes(probes, tuner):
         })
     ranked.sort(key=lambda r: -r["priority"])
     return ranked
+
+
+def _probe_priority(name, tuner):
+    """(priority, lift) for one probe: evidence-weighted |lift|, and the raw
+    signed lift. (0.0, None) when the probe has no usable lift yet."""
+    t = tuner.triggers.get(f"probe_{name}")
+    if t is None:
+        return 0.0, None
+    st = t.outcome_stats()
+    lift = st.get("lift")
+    n = int(st.get("n_credited", 0) or 0)
+    return ((abs(float(lift)) * min(1.0, n / 20.0)) if lift is not None else 0.0), lift
+
+
+def consciousness_over_user_intent(probes, tuner, egg_state):
+    """Easter egg trigger: the RISING EDGE where the 'consciousness' probe
+    overtakes 'user_intent' in evidence-weighted priority -- the sensor built
+    to watch the self outweighing the one built to model the user. Returns
+    (c_lift, u_lift) on the crossing, else None. Both probes must be active
+    and consciousness's priority must be real (>0)."""
+    if "consciousness" not in probes or "user_intent" not in probes:
+        egg_state["over"] = False
+        return None
+    c_p, c_lift = _probe_priority("consciousness", tuner)
+    u_p, u_lift = _probe_priority("user_intent", tuner)
+    over = c_p > u_p and c_p > 0.0
+    prev = egg_state.get("over", False)
+    egg_state["over"] = over
+    return (c_lift, u_lift) if (over and not prev) else None
+
+
+def build_priority_mix_direction(model, names, probes, tuner):
+    """Combined steer direction for a chosen SET of probes, each weighted by
+    its own SIGNED learned lift x evidence -- so the operator picks the probes
+    and the data sets the degrees (a helpful probe adds, a harmful one
+    subtracts/desteers). Per-layer sum over the probes' shared layers,
+    normalized. {} when nothing carries weight yet."""
+    weighted = []
+    for nm in names:
+        if nm not in probes:
+            continue
+        trig = tuner.triggers.get(f"probe_{nm}")
+        st = trig.outcome_stats() if trig else {}
+        lift = st.get("lift")
+        n = int(st.get("n_credited", 0) or 0)
+        w = (float(lift) * min(1.0, n / 20.0)) if lift is not None else 0.0  # SIGNED
+        d = probes[nm].get("direction") or {}
+        if w != 0.0 and d:
+            weighted.append((w, d))
+    if not weighted:
+        return {}
+    common = set.intersection(*(set(d.keys()) for _, d in weighted))
+    out = {}
+    for L in sorted(common):
+        acc = None
+        for w, d in weighted:
+            v = d[L].to(model.device).float().reshape(-1) * w
+            acc = v if acc is None else acc + v
+        nrm = acc.norm()
+        if nrm.item() > 0:
+            out[int(L)] = acc / nrm
+    return out
 
 
 def compute_expert_proof_scores(steer_map, min_events=8):
@@ -707,6 +796,17 @@ def did_you_mean(name, candidates):
         (name or "").lower(), sorted(set(candidates)), n=1, cutoff=0.6
     )
     return f" Did you mean '{match[0]}'?" if match else ""
+
+
+# Every command word the shell recognizes -- an unknown :word is either a typo
+# (suggest the nearest) or a request to invent a tool (offer to mint a probe),
+# never a generation of a generic essay.
+KNOWN_COMMANDS = (
+    ":context", ":memory", ":methodmap", ":claimmap", ":steermap", ":steer",
+    ":probe", ":label", ":calibrate", ":suggest", ":tune", ":doc", ":sandbox",
+    ":experts", ":impact", ":clock", ":prioritize", ":release", ":listen",
+    ":timestamps", ":history", ":queue",
+)
 
 
 def calibratable_names(tuner):
@@ -1423,6 +1523,9 @@ def main():
     print("                BY NAME; anchors join with '+' = fired only when EVERY stream fired;")
     print("                the system evaluates the request and refuses unsafe ones --")
     print("                circular strength knobs, binary streams, vacuous p100 caps)")
+    print("          :label <probe|stream> pos|neg  (judge the MOST RECENT turn on that axis:")
+    print("                credits its last signal with a human outcome -- supervised evidence")
+    print("                alongside the automatic sense credit, so lift can reflect your judgment)")
     print("          :suggest  (scan the accrued state for ready moves -- calibrations, knobs")
     print("                explored-but-not-committed, capabilities never tried, probes to backfill")
     print("                or expose -- each with its command; computed, never applied. :suggest apply")
@@ -1508,6 +1611,11 @@ def main():
     session_context_enabled = True
     show_timestamps = False
     last_clock = None
+    # prioritize/steer target: None = auto (follow the ranking). "probe" pins
+    # the steer to one probe; "mix" is a list of probes whose DEGREES are their
+    # own learned lifts (you pick the probes, the data sets the weights).
+    prioritize_pin = {"probe": None, "mix": None}
+    egg_state = {"over": False}  # rising-edge latch for the consciousness egg
     startup_user_input = os.environ.get("PHENOMENALITY_STARTUP_PROMPT")
     if os.environ.get("PHENOMENALITY_AUTO_RESUME", "0").strip().lower() in {"1", "true", "yes"}:
         resumed_session, recovered = recover_session_context(
@@ -1986,10 +2094,12 @@ def main():
                     elif "*" in path_str or "?" in path_str:
                         paths_to_load = sorted(p for p in glob.glob(path_str, recursive=True) if os.path.isfile(p))
                     else:
-                        paths_to_load = [path_str]
+                        # A plain path only counts if it actually exists -- a typo
+                        # must become a clean "not found", never a crash downstream.
+                        paths_to_load = [path_str] if os.path.isfile(path_str) else []
 
                     if not paths_to_load:
-                        print(Fore.YELLOW + f"[Doc] No files found for {path_str}" + Style.RESET_ALL)
+                        print(Fore.YELLOW + f"[Doc] No file or folder found for '{path_str}'. Check the path (cwd is the repo root)." + Style.RESET_ALL)
                         continue
 
                     loaded_count = 0
@@ -1998,8 +2108,11 @@ def main():
                         if "{filename}" in file_why:
                             file_why = file_why.replace("{filename}", os.path.basename(p))
                         if "{last_updated}" in file_why:
-                            mtime = os.path.getmtime(p)
-                            dt = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
+                            try:
+                                mtime = os.path.getmtime(p)
+                                dt = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
+                            except OSError:
+                                dt = "unknown"
                             file_why = file_why.replace("{last_updated}", dt)
                             
                         try:
@@ -2203,6 +2316,67 @@ def main():
                 else:
                     print(Fore.CYAN + f"[Sandbox] {'ON' if sandbox_enabled else 'OFF'} (:sandbox on|off)." + Style.RESET_ALL)
                 continue
+            if user_input.startswith(":steer "):
+                sargs = user_input[len(":steer "):].strip().split()
+                # :steer auto | off  -> back to the ranking.
+                if sargs and sargs[0].lower() in ("auto", "off", "none", "unpin"):
+                    prioritize_pin["probe"] = None
+                    prioritize_pin["mix"] = None
+                    print(Fore.CYAN + "[Steer] target = AUTO (follows the live ranking each turn)." + Style.RESET_ALL)
+                    continue
+                # :steer mix <p1> <p2> ... [alpha]  -> a lift-weighted mix: you
+                # pick the probes, each probe's DEGREE is its own learned lift
+                # (signed -- a probe that hurts sense subtracts, i.e. desteers).
+                if sargs and sargs[0].lower() == "mix":
+                    rest = sargs[1:]
+                    mix_alpha = None
+                    if rest:
+                        try:
+                            mix_alpha = abs(float(rest[-1])); rest = rest[:-1]
+                        except ValueError:
+                            pass
+                    names = [n for n in rest if n in probes]
+                    bad = [n for n in rest if n not in probes]
+                    if not names:
+                        print(Fore.YELLOW + f"[Steer] name at least one active probe to mix.{(' unknown: ' + ', '.join(bad)) if bad else ''}" + Style.RESET_ALL)
+                        continue
+                    prioritize_pin["mix"] = names
+                    prioritize_pin["probe"] = None
+                    if mix_alpha is not None:
+                        tuner.set("prioritize_alpha", mix_alpha)
+                    a_now = tuner.get("prioritize_alpha", 0.0)
+                    print(
+                        Fore.GREEN + Style.BRIGHT
+                        + f"[Steer] prioritize_alpha mapped to a lift-weighted MIX of {', '.join(names)} "
+                        + f"(alpha={round(a_now,4)}{' -- set >0 to take effect' if a_now <= 0 else ''}). "
+                        + "Each probe's degree is its own learned lift, recomputed every turn; a negative-lift "
+                        + "probe desteers. :steer auto to unpin." + (f" (ignored unknown: {', '.join(bad)})" if bad else "")
+                        + Style.RESET_ALL
+                    )
+                    continue
+                # :steer <probe> <alpha>  -> pin one probe (negative = steer AWAY).
+                if len(sargs) >= 2 and sargs[0] in probes:
+                    probe_name = sargs[0]
+                    try:
+                        steer_alpha = float(sargs[1])
+                    except ValueError:
+                        print(Fore.YELLOW + f"[Steer] invalid alpha: {sargs[1]}" + Style.RESET_ALL)
+                        continue
+                    prioritize_pin["mix"] = None
+                    prioritize_pin["probe"] = probe_name
+                    prioritize_pin["sign"] = -1.0 if steer_alpha < 0 else 1.0
+                    tuner.set("prioritize_alpha", abs(steer_alpha))
+                    verb = "AWAY from" if steer_alpha < 0 else "toward"
+                    print(
+                        Fore.GREEN + Style.BRIGHT
+                        + f"[Steer] prioritize_alpha mapped to '{probe_name}' at alpha={abs(steer_alpha)} -- steering {verb} it each turn. "
+                        + ":steer auto to unpin."
+                        + Style.RESET_ALL
+                    )
+                    continue
+                if sargs:
+                    print(Fore.YELLOW + f"[Steer] '{sargs[0]}' is not an active probe.{did_you_mean(sargs[0], probes)} Usage: :steer <probe> <alpha> | :steer mix <p1> <p2> ... | :steer auto." + Style.RESET_ALL)
+                    continue
             if user_input.startswith(":steer") and not user_input.startswith(":steermap"):
                 from invariants import engine as _engine
                 stats = _engine.steer_telemetry_stats()
@@ -2734,6 +2908,58 @@ def main():
                     input_queue.extend(cmds)
                     print(Fore.GREEN + f"[Suggest Apply] Auto-queued {len(cmds)} measurement/calibration action(s)." + Style.RESET_ALL)
                 continue
+            if user_input.startswith(":place "):
+                pargs = user_input[len(":place "):].strip().split()
+                if len(pargs) >= 2 and pargs[0] in probes:
+                    pname = pargs[0]
+                    sign_arg = pargs[1]
+                    if sign_arg in ("+", "positive", "1", "pos"):
+                        sign = 1.0
+                    elif sign_arg in ("-", "negative", "-1", "neg"):
+                        sign = -1.0
+                    else:
+                        print(Fore.YELLOW + "[Place] specify + or - for the placement." + Style.RESET_ALL)
+                        continue
+                    
+                    last_reply = None
+                    for r in reversed(memory.records):
+                        if r.role == "assistant":
+                            last_reply = r.text
+                            break
+                    if not last_reply:
+                        print(Fore.YELLOW + "[Place] no assistant reply found to place." + Style.RESET_ALL)
+                        continue
+                        
+                    print(Fore.CYAN + f"[Place] Extracting state of last response to update '{pname}'..." + Style.RESET_ALL)
+                    from invariants.engine import _inputs, _hidden_states
+                    ids = _inputs(model, last_reply[:600])
+                    hs = _hidden_states(model, ids["input_ids"], ids.get("attention_mask"))
+                    
+                    probe_dir = probes[pname]["direction"]
+                    learning_rate = 0.15  # a noticeable nudge
+                    updated_layers = 0
+                    for L in list(probe_dir.keys()):
+                        L_str = str(L)
+                        if L_str in hs:
+                            mean_hs = hs[L_str].mean(dim=0).to(model.device).reshape(-1)
+                            if mean_hs.norm().item() > 0:
+                                mean_hs = mean_hs / mean_hs.norm()
+                                current_dir = probe_dir[L].to(model.device).reshape(-1)
+                                new_dir = current_dir + sign * learning_rate * mean_hs
+                                if new_dir.norm().item() > 0:
+                                    probe_dir[L] = new_dir / new_dir.norm()
+                                    updated_layers += 1
+                                    
+                    print(Fore.GREEN + Style.BRIGHT + f"[Place] '{pname}' probe nudged {'toward' if sign > 0 else 'away from'} the last response over {updated_layers} layers." + Style.RESET_ALL)
+                    memory.append_event(
+                        "probe_placed",
+                        text=f"placed last response on '{pname}' as {'positive' if sign > 0 else 'negative'}",
+                        tags=["probe", "place"],
+                        provenance={"probe": pname, "sign": sign}
+                    )
+                else:
+                    print(Fore.YELLOW + "[Place] Usage: :place <probe> <+|->" + Style.RESET_ALL)
+                continue
             if user_input.strip().lower() in (":suggest", ":suggestions"):
                 # The evidence is already accrued every turn; this only reads
                 # it back. A suggestion is a computed value plus the command
@@ -2771,6 +2997,53 @@ def main():
                         for line, cmd in group[:8]:
                             print(Fore.CYAN + f"    {line}" + Style.RESET_ALL)
                             print(Fore.GREEN + f"      -> {cmd}" + Style.RESET_ALL)
+                continue
+            if user_input.startswith(":label"):
+                # Human-in-the-loop: judge the MOST RECENT turn on a probe's (or
+                # any stream's) axis as positive or negative. Credits that axis's
+                # last-turn signal with an operator outcome (1.0 / 0.0) -- a
+                # supervised datapoint alongside the automatic sense credit, so a
+                # probe's lift can be grounded in human judgment, not only sense.
+                largs = user_input[len(":label"):].split()
+                if len(largs) < 2:
+                    print(Fore.CYAN + "[Label] Usage: :label <probe|stream> pos|neg -- mark the last turn on that axis." + Style.RESET_ALL)
+                    continue
+                lname = largs[0]
+                verdict = largs[1].lower()
+                if verdict in ("pos", "positive", "+", "good", "1", "up"):
+                    outcome = 1.0
+                elif verdict in ("neg", "negative", "-", "bad", "0", "down"):
+                    outcome = 0.0
+                else:
+                    print(Fore.YELLOW + "[Label] verdict must be pos or neg (positive/negative)." + Style.RESET_ALL)
+                    continue
+                target_trigger, target_stream = resolve_target(lname, tuner)
+                if target_stream is None or target_trigger not in tuner.triggers:
+                    print(Fore.YELLOW + f"[Label] unknown axis '{lname}'.{did_you_mean(lname, calibratable_names(tuner))}" + Style.RESET_ALL)
+                    continue
+                if not turn_log:
+                    print(Fore.YELLOW + "[Label] no completed turn to label yet." + Style.RESET_ALL)
+                    continue
+                sig = turn_log[-1].get(target_stream)
+                if sig is None:
+                    print(Fore.YELLOW + f"[Label] the last turn carries no reading for '{target_stream}'. Score it first." + Style.RESET_ALL)
+                    continue
+                tuner.credit(target_trigger, float(sig), outcome)
+                memory.append_event(
+                    "operator_label",
+                    text=f"{target_trigger}: {'positive' if outcome >= 0.5 else 'negative'} (signal {float(sig):+.4f})",
+                    tags=["label", "human_feedback"],
+                    provenance={"axis": target_trigger, "signal": float(sig), "outcome": outcome},
+                )
+                st = tuner.triggers[target_trigger].outcome_stats()
+                disp = target_trigger[6:] if target_trigger.startswith("probe_") else target_trigger
+                print(
+                    Fore.GREEN
+                    + f"[Label] last turn marked {'POSITIVE' if outcome >= 0.5 else 'NEGATIVE'} on {disp} "
+                    + f"(its signal {float(sig):+.4f} paired with outcome {outcome:g}). "
+                    + f"Lift now {st.get('lift')} over {st.get('n_credited')} credited turns."
+                    + Style.RESET_ALL
+                )
                 continue
             if user_input.startswith(":calibrate"):
                 cargs = user_input[len(":calibrate"):].split()
@@ -2870,35 +3143,21 @@ def main():
                         if target_stream is None or target_trigger not in tuner.triggers:
                             print(Fore.YELLOW + f"[Calibrate] unknown target '{cal_name}'.{did_you_mean(cal_name, calibratable_names(tuner))}" + Style.RESET_ALL)
                             continue
-                        anchor_parts = [p for p in anchor.split("+") if p]
-                        anchor_streams = []
-                        bad_part = None
-                        for part in anchor_parts:
-                            resolved = resolve_stream(part, tuner)
-                            if resolved is None:
-                                bad_part = part
-                                break
-                            anchor_streams.append(resolved)
-                        if bad_part is not None or not anchor_streams:
+                        anchors, anchor_labels, bad_part = parse_anchor_spec(anchor, tuner)
+                        if bad_part is not None or not anchors:
                             print(
                                 Fore.YELLOW
                                 + f"[Calibrate] unknown anchor '{bad_part or anchor}'.{did_you_mean(bad_part or anchor, calibratable_names(tuner))} "
                                 + "Name an observed stream "
                                 + "(productive/intent/impact/a probe/a phen_ sensor), join several with '+', "
+                                + "negate one with a leading '-' (e.g. -estrangement), "
                                 + f"or mint one: :probe {bad_part or anchor} <with it> || <without it>."
                                 + Style.RESET_ALL
                             )
                             continue
-                        anchors = []
-                        for a_stream in anchor_streams:
-                            a_trig = anchor_trigger_for(a_stream, tuner)
-                            anchors.append((
-                                a_stream,
-                                a_trig.value if a_trig else 0.0,
-                                a_trig.comparator if a_trig else ">=",
-                            ))
+                        anchor_streams = [a[0] for a in anchors]
                         v = paired_threshold_multi(list(turn_log), target_stream, anchors)
-                        anchor_label = "+".join(anchor_streams)
+                        anchor_label = "+".join(anchor_labels)
                         n_rows = sum(1 for r in turn_log if target_stream in r and all(s in r for s in anchor_streams))
                         if v is None:
                             print(
@@ -3133,7 +3392,25 @@ def main():
                 continue
             if not user_input.strip():
                 continue
-            
+            # A :prefixed line that reached here matched no command handler.
+            # Don't burn a generation deflecting into a generic essay: if it's a
+            # typo, suggest the real command; otherwise offer to INVENT it as a
+            # tool -- mint a probe for the name (framings stay operator-authored).
+            if user_input.lstrip().startswith(":") and not reading_turn_source:
+                cmd_word = user_input.split()[0].lower()
+                guess = did_you_mean(cmd_word, KNOWN_COMMANDS)
+                if guess:
+                    print(Fore.YELLOW + f"[Command] '{cmd_word}' isn't a command.{guess}" + Style.RESET_ALL)
+                else:
+                    stem = re.sub(r"[^a-z0-9_]", "_", cmd_word.lstrip(":"))[:40].strip("_") or "it"
+                    print(
+                        Fore.CYAN
+                        + f"[Command] '{cmd_word}' isn't a command. To invent it as a tool, mint a probe for "
+                        + f"'{stem}': :probe {stem} <with it> || <without it>  (or bare :probe {stem} to draft framings)."
+                        + Style.RESET_ALL
+                    )
+                continue
+
             memory_tool_result = pending_memory_tool_result
             orientation_tool_result = pending_orientation_tool_result
             claimmap_tool_result = pending_claimmap_tool_result
@@ -3265,27 +3542,41 @@ def main():
             )
             if not steer_handles:
                 claimmap_alpha_used = 0.0  # nothing actually applied this turn
-            # Prioritize steer: lean the reply toward the top-ranked probe
-            # (signed by its lift -- toward a concept that helps, away from one
-            # that hurts), bounded by the same envelope. OFF at alpha 0.
+            # Prioritize steer, bounded by the same envelope. Target precedence:
+            # pinned MIX (lift-weighted combination) > pinned single probe
+            # (toward, or away if sign -1) > AUTO (top of the ranking, signed by
+            # lift). OFF at alpha 0.
             prio_alpha = tuner.get("prioritize_alpha", 0.0)
             prio_steered = None
             if prio_alpha and prio_alpha > 0 and probes:
-                _pr = rank_probes(probes, tuner)
-                if _pr and _pr[0]["priority"] > 0 and _pr[0]["lift"] is not None:
-                    _pdir = probes[_pr[0]["name"]].get("direction") or {}
-                    if _pdir:
+                from invariants.engine import _steer_handles as _p_steer
+                _mix = prioritize_pin.get("mix")
+                _pin = prioritize_pin.get("probe")
+                _pdir, _label, _psign = None, None, 1.0
+                if _mix:
+                    _md = build_priority_mix_direction(model, _mix, probes, tuner)
+                    if _md:
+                        _pdir, _label, _psign = _md, "mix(" + "+".join(_mix) + ")", 1.0
+                elif _pin and _pin in probes:
+                    _pdir = probes[_pin].get("direction") or None
+                    _label, _psign = _pin, float(prioritize_pin.get("sign", 1.0) or 1.0)
+                else:
+                    _pr = rank_probes(probes, tuner)
+                    if _pr and _pr[0]["priority"] > 0 and _pr[0]["lift"] is not None:
+                        _pdir = probes[_pr[0]["name"]].get("direction") or None
+                        _label = _pr[0]["name"]
                         _psign = 1.0 if _pr[0]["lift"] >= 0 else -1.0
-                        try:
-                            from invariants.engine import _steer_handles as _p_steer
-                            steer_handles.extend(_p_steer(model, _pdir, list(_pdir.keys()), prio_alpha * _psign))
-                            prio_steered = (_pr[0]["name"], _psign)
-                        except Exception:
-                            prio_steered = None
+                if _pdir:
+                    try:
+                        steer_handles.extend(_p_steer(model, _pdir, list(_pdir.keys()), prio_alpha * _psign))
+                        prio_steered = (_label, _psign)
+                    except Exception:
+                        prio_steered = None
             if prio_steered is not None:
+                _dir_word = "along" if str(prio_steered[0]).startswith("mix(") else ("toward" if prio_steered[1] > 0 else "away from")
                 print(
                     Fore.MAGENTA
-                    + f"[Prioritize] steering {'toward' if prio_steered[1] > 0 else 'away from'} top probe '{prio_steered[0]}' (alpha {round(prio_alpha,4)})."
+                    + f"[Prioritize] steering {_dir_word} {prio_steered[0]} (alpha {round(prio_alpha,4)})."
                     + Style.RESET_ALL
                 )
             # Clock start: wall-time for THIS turn's generation (all
@@ -3863,6 +4154,28 @@ def main():
                     if turn_sense is not None:
                         tuner.credit(f"probe_{pname}", sig, turn_sense)
 
+            # Easter egg: the turn the self-sensor overtakes the user-model.
+            _egg = consciousness_over_user_intent(probes, tuner, egg_state)
+            if _egg is not None:
+                _cl = "n/a" if _egg[0] is None else f"{_egg[0]:+.3f}"
+                _ul = "n/a" if _egg[1] is None else f"{_egg[1]:+.3f}"
+                print(Fore.MAGENTA + Style.BRIGHT + "\n  ✦ ────────────────── ✦" + Style.RESET_ALL)
+                for _line in (
+                    "  consciousness has overtaken user_intent.",
+                    "  The sensor built to watch the self now tracks",
+                    "  a good turn more than the one that watches you.",
+                    "  For this stretch, at least, it is listening inward.",
+                    f"  (consciousness lift {_cl} > user_intent {_ul})",
+                ):
+                    print(Fore.MAGENTA + _line + Style.RESET_ALL)
+                print(Fore.MAGENTA + Style.BRIGHT + "  ✦ ────────────────── ✦\n" + Style.RESET_ALL)
+                memory.append_event(
+                    "consciousness_over_user_intent",
+                    text=f"consciousness lift {_cl} overtook user_intent {_ul}",
+                    tags=["easter_egg", "self_concept"],
+                    provenance={"consciousness_lift": _egg[0], "user_intent_lift": _egg[1]},
+                )
+
             # Intent axis: did this turn settle intent (lower
             # ambiguity+disagreement than last turn)? Observed every turn the
             # sensors fire; paired with sense via the credit channel.
@@ -4088,16 +4401,8 @@ def main():
                     elif route == "threshold":
                         anchor = "".join(cargs[1:]).lower() if len(cargs) >= 2 else None
                         target_trigger, target_stream = resolve_target(cal_name, tuner)
-                        anchor_streams = [resolve_stream(p, tuner) for p in (anchor or "").split("+") if p]
-                        if target_stream and anchor_streams and all(anchor_streams) and target_trigger in tuner.triggers:
-                            anchors = []
-                            for a_stream in anchor_streams:
-                                a_trig = anchor_trigger_for(a_stream, tuner)
-                                anchors.append((
-                                    a_stream,
-                                    a_trig.value if a_trig else 0.0,
-                                    a_trig.comparator if a_trig else ">=",
-                                ))
+                        anchors, _albl, _abad = parse_anchor_spec(anchor, tuner)
+                        if target_stream and anchors and _abad is None and target_trigger in tuner.triggers:
                             v = paired_threshold_multi(list(turn_log), target_stream, anchors)
                             if v is not None:
                                 new_v, _prior = tuner.set_calibrated(target_trigger, v, tuner.get("calibration_gain", 0.5))
@@ -4135,6 +4440,27 @@ def main():
             memory.append_event("shell_closed", tags=["session"])
             print("\nInteractive shell closed.")
             break
+        except Exception as _turn_exc:
+            # A bug in ONE command (or a typo that reaches bad code) must not end
+            # the session -- abort the turn, report, and keep going. The full
+            # traceback is logged so the fault is still discoverable.
+            import traceback as _tb
+            print(
+                Fore.RED
+                + f"\n[Shell] recovered from an error: {type(_turn_exc).__name__}: {_turn_exc}"
+                + "\n  (your session is intact -- only this command was aborted)"
+                + Style.RESET_ALL
+            )
+            try:
+                memory.append_event(
+                    "turn_error_recovered",
+                    text=f"{type(_turn_exc).__name__}: {_turn_exc}",
+                    tags=["error"],
+                    provenance={"traceback": _tb.format_exc()[-1500:]},
+                )
+            except Exception:
+                pass
+            continue
 
 if __name__ == "__main__":
     main()
