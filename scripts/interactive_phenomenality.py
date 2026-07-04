@@ -684,6 +684,16 @@ def resolve_target(cal_name, tuner):
     return f"probe_{cal_name}", resolve_stream(cal_name, tuner)
 
 
+def resolve_calibrate_trigger(cal_name, tuner):
+    """The Trigger object a bare `:calibrate <name>` should target: the exact
+    trigger unless it's a never-fed shadow, in which case the probe of that
+    name (shadow-aware version of `get(name) or get(probe_name)`)."""
+    bare = tuner.triggers.get(cal_name)
+    if bare is not None and not _is_shadow_trigger(cal_name, tuner):
+        return bare
+    return tuner.triggers.get(f"probe_{cal_name}") or bare
+
+
 def rank_probes(probes, tuner):
     """Rank active probes by PRIORITY = |sense-lift| x evidence-weight (turns
     credited, saturating at 20). A probe that both tracks sense strongly AND
@@ -1601,7 +1611,18 @@ def main():
                     tuner.register(f"probe_{pname}", 0.0, kind="threshold", comparator=">=")
     except Exception:
         pass
-    
+
+    # Purge stray shadow triggers: never-fed bare thresholds that duplicate a
+    # probe (an accidental `:tune <probe-name> <value>` registers one, and it
+    # then shadows the real probe in every direct trigger lookup). The probe is
+    # the real one; removing the shadow fixes all code paths at once.
+    _shadows = [n for n in list(tuner.triggers) if _is_shadow_trigger(n, tuner)]
+    if _shadows:
+        for _sh in _shadows:
+            del tuner.triggers[_sh]
+        tuner.save()
+        print(Fore.CYAN + f"[System] Cleared {len(_shadows)} stray shadow trigger(s): {', '.join(_shadows)}." + Style.RESET_ALL)
+
     queued_calibrations = []
     last_refused_calibration = None
     
@@ -3196,7 +3217,7 @@ def main():
                             )
                         continue
                     elif not user_input.startswith(":tune"):
-                        trig = tuner.triggers.get(cal_name) or tuner.triggers.get(f"probe_{cal_name}")
+                        trig = resolve_calibrate_trigger(cal_name, tuner)
                         if trig is None:
                             print(Fore.YELLOW + f"[Calibrate] unknown name '{cal_name}'.{did_you_mean(cal_name, calibratable_names(tuner))} Bare :calibrate lists them." + Style.RESET_ALL)
                             continue
@@ -4440,7 +4461,7 @@ def main():
                                 print(Fore.GREEN + f"[Queue] SUCCESS: steer_cap_fraction = {round(v, 4)}" + Style.RESET_ALL)
                                 success = True
                     else:
-                        trig = tuner.triggers.get(cal_name) or tuner.triggers.get(f"probe_{cal_name}")
+                        trig = resolve_calibrate_trigger(cal_name, tuner)
                         if trig and len(trig.signals) >= 10:
                             cal_pct = 50.0
                             if len(cargs) >= 2:
