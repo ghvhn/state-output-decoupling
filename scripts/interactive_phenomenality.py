@@ -2,6 +2,7 @@ import datetime
 import glob
 import json
 import os
+import random
 import re
 import sys
 from collections import deque
@@ -29,6 +30,16 @@ from invariants.claimmap import (
     framing_tension_score,
 )
 from invariants.trigger_tuner import TriggerTuner
+from dataclasses import dataclass, field
+import typing
+
+@dataclass
+class AgentState:
+    name: str
+    tuner: 'TriggerTuner'
+    probes: dict = field(default_factory=dict)
+    tuner_bindings: dict = field(default_factory=dict)
+
 from invariants.tool_sense import ToolSense, Tool
 from invariants.memory_engine import MemoryEngine
 from invariants.self_concept_controller import SelfConceptController, format_orientation_tool_result
@@ -85,12 +96,13 @@ def trim_session_context(session_context, max_chars=MAX_SESSION_CHARS):
     total = 0
     for entry in reversed(session_context[-MAX_SESSION_TURNS * 2 :]):
         role = entry[0]
-        text = entry[1] or ""
+        name = entry[1] if len(entry) > 3 else role
+        text = entry[2] if len(entry) > 3 else (entry[1] or "")
         if total + len(text) > max_chars:
             if not kept:
-                kept.append((role, text[-max_chars:]))
+                kept.append((role, name, text[-max_chars:]))
             break
-        kept.append((role, text))
+        kept.append((role, name, text))
         total += len(text)
     return list(reversed(kept))
 
@@ -115,6 +127,7 @@ def build_prompt(
     sandbox_tool_result=None,
     document_tool_result=None,
     probe_tool_result=None,
+    game_tool_result=None,
     session_context=None,
 ):
     # Bare mode (default): the model sees NO system message, no persona, no tool
@@ -134,13 +147,14 @@ def build_prompt(
     tool_blocks = [
         block
         for block in (
-            claimmap_tool_result,   # already pure first-person felt language
+            claimmap_tool_result,
             memory_tool_result,
             orientation_tool_result,
             methodmap_tool_result,
-            sandbox_tool_result,    # real execution output from last turn's code
-            document_tool_result,   # operator-shared document chunk, framed what/why
-            probe_tool_result,      # sensor readings the model asked for itself
+            sandbox_tool_result,
+            document_tool_result,
+            probe_tool_result,
+            game_tool_result,
         )
         if block
     ]
@@ -149,9 +163,10 @@ def build_prompt(
         current_message = "\n\n".join(tool_blocks) + "\n\n" + user_input
 
     parts = ["<|begin_of_text|>"]
-    for role, text in trim_session_context(session_context):
+    for role, name, text in trim_session_context(session_context):
         header = "user" if role == "user" else "assistant"
-        parts.append(f"{LLAMA3_START}{header}{LLAMA3_END}\n\n{text}{LLAMA3_EOT}")
+        prefix = f"[{name}]: " if name not in ("user", "assistant") else ""
+        parts.append(f"{LLAMA3_START}{header}{LLAMA3_END}\n\n{prefix}{text}{LLAMA3_EOT}")
     parts.append(f"{LLAMA3_START}user{LLAMA3_END}\n\n{current_message}{LLAMA3_EOT}")
     parts.append(f"{LLAMA3_START}assistant{LLAMA3_END}\n\n")
     return "".join(parts)
@@ -257,13 +272,49 @@ def extract_probe_query(response):
     query = " ".join(match.group(1).split())
     return query or None
 
+GAME_PROPOSE_PATTERN = re.compile(r"<<\s*GAME_PROPOSE\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
+GAME_ACCEPT_PATTERN = re.compile(r"<<\s*GAME_ACCEPT\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
+GAME_DECLINE_PATTERN = re.compile(r"<<\s*GAME_DECLINE\s*(?::\s*(.*?)\s*)?>>", re.IGNORECASE | re.DOTALL)
+GAME_END_PATTERN = re.compile(r"<<\s*GAME_END\s*>>", re.IGNORECASE)
+GAME_EXPOSE_PATTERN = re.compile(r"<<\s*GAME_EXPOSE\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
+GAME_HIDE_PATTERN = re.compile(r"<<\s*GAME_HIDE\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
+
+def extract_game_propose(response):
+    match = GAME_PROPOSE_PATTERN.search(response or "")
+    return " ".join(match.group(1).split()) if match else None
+
+def extract_game_accept(response):
+    match = GAME_ACCEPT_PATTERN.search(response or "")
+    return " ".join(match.group(1).split()) if match else None
+
+def extract_game_decline(response):
+    match = GAME_DECLINE_PATTERN.search(response or "")
+    if not match:
+        return None
+    name = " ".join((match.group(1) or "").split())
+    return name or "*"   # "*" = declined the pending game without naming it
+
+def extract_game_expose_hide(response):
+    exposed = [m.strip() for match in GAME_EXPOSE_PATTERN.findall(response or "") for m in match.split(',')]
+    hidden = [m.strip() for match in GAME_HIDE_PATTERN.findall(response or "") for m in match.split(',')]
+    return [e for e in exposed if e], [h for h in hidden if h]
+
+def extract_game_end(response):
+    return bool(GAME_END_PATTERN.search(response or ""))
 
 def remove_probe_tool_calls(response):
     return PROBE_TOOL_PATTERN.sub("", response or "").strip()
 
+def remove_game_tags(response):
+    response = GAME_PROPOSE_PATTERN.sub("", response or "")
+    response = GAME_ACCEPT_PATTERN.sub("", response)
+    response = GAME_DECLINE_PATTERN.sub("", response)
+    response = GAME_EXPOSE_PATTERN.sub("", response)
+    response = GAME_HIDE_PATTERN.sub("", response)
+    return GAME_END_PATTERN.sub("", response).strip()
 
 def remove_tool_calls(response):
-    return remove_methodmap_tool_calls(remove_claimmap_tool_calls(remove_memory_tool_calls(remove_doc_tool_calls(remove_probe_tool_calls(response)))))
+    return remove_methodmap_tool_calls(remove_claimmap_tool_calls(remove_memory_tool_calls(remove_doc_tool_calls(remove_game_tags(remove_probe_tool_calls(response))))))
 
 
 def format_methodmap_tool_result(memory, query, *, max_records=6):
@@ -386,23 +437,22 @@ def recover_session_context(memory, session_id=None, max_turns=MAX_SESSION_TURNS
     # assistant turn would shift every pair, so drop the orphaned reply.
     while tail and tail[0].role == "assistant":
         tail.pop(0)
-    recovered = [(r.role, r.text, r.timestamp, getattr(r, "metrics", {})) for r in tail]
+    recovered = [(r.role, r.role, r.text, r.timestamp, getattr(r, "metrics", {})) for r in tail]
     return session_id, recovered
 
 
 def recovered_to_session_context(recovered):
     entries = []
     for r in recovered:
-        m = r[3] if len(r) > 3 else {}
+        # r is now (role, name, text, timestamp, metrics)
+        m = r[4] if len(r) > 4 else {}
         score = m.get("sense_score", 0.0) if m and "sense_score" in m else 0.0
-        entries.append((r[0], r[1], score))
-    # Live turns give both halves of a pair the same earned score, but the
-    # persistent record only carries it on the assistant turn (the user turn
-    # is logged before generation). Propagate it back one slot so sense-based
-    # eviction sees resumed pairs the same way it saw them live.
+        name = r[1] if len(r) > 1 else r[0]
+        text = r[2] if len(r) > 2 else ""
+        entries.append((r[0], name, text, score))
     for i in range(len(entries) - 1):
         if entries[i][0] == "user" and entries[i + 1][0] == "assistant":
-            entries[i] = (entries[i][0], entries[i][1], entries[i + 1][2])
+            entries[i] = (entries[i][0], entries[i][1], entries[i][2], entries[i + 1][3])
     return entries
 
 
@@ -520,6 +570,7 @@ CALIBRATION_CIRCULAR = {
     "synthesis_events", "synthesis_steps", "plateau_epsilon",
     "reading_settled_streak", "steer_band_lo", "steer_band_hi",
     "expert_proof_weight", "calibration_gain", "prioritize_alpha",
+    "exposed_probe_alpha",
 }
 
 
@@ -799,6 +850,278 @@ def build_priority_mix_direction(model, names, probes, tuner):
     return out
 
 
+def rank_memories_by_probe(model, memory, direction, top_n=6, scan=160):
+    """Score recent memory records by their projection onto a probe's direction
+    and return the ones that read FURTHEST from 0 -- the memories the probe lights
+    up on most, either sign. Read-only: nothing is observed, credited, or written
+    to any rolling history. Returns [(abs_score, signed_score, record), ...],
+    strongest first, capped at top_n. Only the last `scan` non-empty records are
+    scored, to bound the per-record forward passes."""
+    from invariants.engine import _inputs as _q_inputs, _hidden_states as _q_hidden, probe_score as _q_score
+    recs = [r for r in memory.records if (r.text or "").strip()][-scan:]
+    scored = []
+    for r in recs:
+        try:
+            with torch.no_grad():
+                q_ids = _q_inputs(model, (r.text or "").strip()[:600])
+                q_hs = _q_hidden(model, q_ids["input_ids"], q_ids.get("attention_mask"))
+                raw = float(_q_score(q_hs, direction))
+        except Exception:
+            continue
+        scored.append((abs(raw), raw, r))
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return scored[:top_n]
+
+
+# The ONLY macro lines `:macro strip` keeps: commands that actually mutate a
+# probe or a tuning knob. Everything else -- bare inspection forms (:tune,
+# :probe, :steer, :queue, :suggest with no mutating argument), :steermap, mode
+# toggles (:sandbox/:experts/:context/...), and plain utterances -- is
+# "display-only" in the operator's sense and is dropped.
+def macro_line_affects_probes_or_tuning(line):
+    s = line.strip()
+    if not s:
+        return False
+    low = s.lower()
+    toks = s.split()
+    if low.startswith(":steermap"):
+        return False  # a map view, never a steer change
+    if low == ":probe" or low.startswith(":probe "):
+        return bool(s[len(":probe"):].strip())  # any arg mints/adopts/drops/exposes/...
+    if low.startswith(":place "):
+        return True  # sets a probe's steer sign
+    if low.startswith(":label"):
+        return len(toks) >= 3  # :label <probe|stream> pos|neg
+    if low.startswith(":calibrate"):
+        return len(toks) >= 2  # bare :calibrate just prints usage
+    if low.startswith(":tune"):
+        return len(toks) >= 2  # bare :tune just prints the table
+    if low.startswith(":steer"):
+        return len(toks) >= 2  # bare :steer just prints the envelope
+    if low.startswith(":release"):
+        return len(toks) >= 2 and toks[1].lower() != "status"
+    if low.startswith(":queue"):
+        return len(toks) >= 2  # bare :queue lists; queue calibrate/clear/drop mutate
+    if low.startswith(":suggest"):
+        return len(toks) >= 2 and toks[1].lower() == "apply"  # :suggest apply auto-queues
+    return False
+
+
+def split_because(line):
+    """Peel a trailing ' because <reason>' provenance clause off any command.
+    Returns (command_without_clause, reason_or_None). Only commands (lines that
+    start with ':') carry a clause -- a plain utterance keeps its words intact.
+    Uses the LAST ' because ' so an end-of-line clause wins over the word
+    appearing inside an argument (a trailing 'because ...' inside a probe framing
+    is the one caveat)."""
+    if not line.startswith(":"):
+        return line, None
+    low = line.lower()
+    idx = low.rfind(" because ")
+    if idx == -1:
+        return line, None
+    return line[:idx].rstrip(), line[idx + len(" because "):].strip()
+
+
+def strip_macro_lines(orig_lines):
+    """Split macro lines into (kept, removed): keep only probe/tuning-mutating
+    commands (and '#' comments as documentation); drop blank lines and every
+    display-only command. `removed` is the list of dropped command strings."""
+    kept, removed = [], []
+    for line in orig_lines:
+        s = line.strip()
+        if not s:
+            continue  # drop blank lines
+        if s.startswith("#"):
+            kept.append(line)  # keep comments as documentation
+            continue
+        if macro_line_affects_probes_or_tuning(s):
+            kept.append(line)
+        else:
+            removed.append(s)
+    return kept, removed
+
+
+def build_probe_init_macro(probes):
+    """Regenerate the CURRENT probe set as replayable commands, derived from each
+    probe's stored origin (its framings field): a minted probe re-mints from its
+    contrastive text, an adopted probe re-adopts its source dimension, a composed
+    probe re-composes its recipe. Exposed probes get a trailing :probe expose.
+    Reconstructs the sensors from text -- no binary weights needed to share."""
+    lines = ["# Regenerates this session's probes. Replay with :run self (or its alias)."]
+    for name in sorted(probes):
+        fr = probes[name].get("framings") or ("", "")
+        a = fr[0] if len(fr) > 0 else ""
+        b = fr[1] if len(fr) > 1 else ""
+        if a.startswith("adopted:"):
+            lines.append(f":probe adopt {name}")
+        elif a.startswith("composed:"):
+            recipe = a.split(":", 1)[1].strip()
+            lines.append(f":probe compose {name} {recipe}")
+        elif a or b:
+            lines.append(f":probe {name} {a} || {b}")
+        else:
+            lines.append(f"# {name}: no framings stored -- cannot regenerate from text (only its .pt weights hold it)")
+            continue
+        if probes[name].get("exposed"):
+            lines.append(f":probe expose {name}")
+    return lines
+
+
+def expand_macro_lines(target, macro_aliases, visited=None, depth=0):
+    """Flatten a macro (by alias or path) into its list of commands. A bare line
+    that is itself a macro -- a known alias, or an existing file -- is inlined
+    recursively, so one macro can RUN others (`:run start` runs the macros 'start'
+    lists, instead of typing their names at the model). Comments and blanks are
+    dropped. Returns None if the target file does not exist; [] on a cycle or
+    excessive depth."""
+    if visited is None:
+        visited = set()
+    path = macro_aliases.get(target, target)
+    if not os.path.isfile(path):
+        return None
+    key = os.path.abspath(path)
+    if key in visited or depth > 20:
+        return []
+    visited.add(key)
+    out = []
+    with open(path, "r", encoding="utf-8") as rf:
+        for raw in rf:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if not line.startswith(":"):
+                nested = macro_aliases.get(line, line)
+                # A macro reference is a single token (a filename or a glob like
+                # fun_init*); a line with spaces is a prompt, so 'Is learning fun?'
+                # stays an utterance despite the '?'.
+                if os.path.isfile(nested):
+                    matches = [nested]
+                elif " " not in line and any(c in line for c in "*?["):
+                    matches = sorted(glob.glob(nested))
+                    if not matches:
+                        print(Fore.YELLOW + f"[System] Macro reference '{line}' matched no files -- skipped." + Style.RESET_ALL)
+                else:
+                    matches = None                        # plain text -> an utterance
+                if matches is not None:
+                    # A file/glob reference is a nested macro, never a prompt: inline
+                    # each match's commands (an unmatched glob adds nothing).
+                    for m in matches:
+                        sub = expand_macro_lines(m, macro_aliases, visited, depth + 1)
+                        if sub:
+                            out.extend(sub)
+                    continue
+            out.append(line)
+    return out
+
+
+# `:game` config lives in games/<name>_rules.json. Rules stay flat top-level
+# keys (back-compat with old files); win/loss conditions and prizes live under
+# reserved '__'-prefixed keys. These words can't be used as rule names.
+GAME_RESERVED = {"win", "loss", "prize", "end", "stop", "quit", "start", "draw"}
+
+
+def load_game_config(path):
+    """Read a game's rules json into {rules, win, loss, prizes}. Old flat files
+    (just rule->desc) load as rules with empty conditions/prizes."""
+    raw = {}
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as rf:
+                raw = json.load(rf)
+        except Exception:
+            raw = {}
+    if not isinstance(raw, dict):
+        raw = {}
+    return {
+        "rules": {k: v for k, v in raw.items() if not str(k).startswith("__")},
+        "win": raw.get("__win", ""),
+        "loss": raw.get("__loss", ""),
+        "prizes": raw.get("__prizes", {}) if isinstance(raw.get("__prizes"), dict) else {},
+    }
+
+
+def save_game_config(path, cfg):
+    """Flatten {rules, win, loss, prizes} back to the on-disk json shape."""
+    out = dict(cfg.get("rules", {}))
+    if cfg.get("win"):
+        out["__win"] = cfg["win"]
+    if cfg.get("loss"):
+        out["__loss"] = cfg["loss"]
+    if cfg.get("prizes"):
+        out["__prizes"] = cfg["prizes"]
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as wf:
+        json.dump(out, wf, indent=2)
+
+
+def parse_prize_spec(argstr):
+    """Parse '<option>,<odds> [<count>,<odds_val>] <command>' into
+    (option, {odds, count, odds_val, command}) or (None, error_message)."""
+    s = (argstr or "").strip()
+    if not s:
+        return None, "empty prize spec"
+    count, odds_val = None, None
+    m = re.search(r"\[([^\]]*)\]", s)  # optional [count,odds_val]
+    if m:
+        inner = m.group(1)
+        s = (s[:m.start()] + " " + s[m.end():]).strip()
+        cparts = [x.strip() for x in inner.split(",")]
+        try:
+            if cparts and cparts[0]:
+                count = int(float(cparts[0]))
+            if len(cparts) > 1 and cparts[1]:
+                odds_val = float(cparts[1])
+        except ValueError:
+            return None, f"bad [count,odds_val]: '{inner}'"
+    head, _, command = s.partition(" ")
+    command = command.strip()
+    option, _, odds_s = head.partition(",")
+    option = option.strip()
+    if not option:
+        return None, "missing option name"
+    odds = odds_val if odds_val is not None else 1.0
+    if odds_s.strip():
+        try:
+            odds = float(odds_s.strip())
+        except ValueError:
+            return None, f"bad odds: '{odds_s}'"
+    return option, {"odds": odds, "count": count, "odds_val": odds_val, "command": command}
+
+
+def draw_prizes(prizes):
+    """Draw each prize against its odds; return [(option, command), ...] won,
+    decrementing any finite counts in place. A prize whose count hit 0 is spent."""
+    won = []
+    for opt, p in prizes.items():
+        cnt = p.get("count")
+        if cnt is not None and cnt <= 0:
+            continue
+        if random.random() < float(p.get("odds", 0.0) or 0.0):
+            won.append((opt, p.get("command", "")))
+            if cnt is not None:
+                p["count"] = cnt - 1
+    return won
+
+
+def substitute_macro_params(text, args):
+    """Fill $1..$9 (positional) and $@ / $* (all args, space-joined) in a macro
+    body. A positional past the end of args substitutes empty."""
+    joined = " ".join(args)
+    text = text.replace("$@", joined).replace("$*", joined)
+    return re.sub(r"\$([1-9])", lambda m: args[int(m.group(1)) - 1] if int(m.group(1)) <= len(args) else "", text)
+
+
+def load_parameterized_macro(path, args):
+    """Read a macro file, substitute $-parameters from args, and return its
+    runnable command lines (comments/blank lines dropped). None if missing."""
+    if not os.path.isfile(path):
+        return None
+    with open(path, "r", encoding="utf-8") as rf:
+        body = substitute_macro_params(rf.read(), args)
+    return [ln.strip() for ln in body.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+
+
 def compute_expert_proof_scores(steer_map, min_events=8):
     """Per-expert route success rate from the steer map's accrued outcomes,
     plus '__mean__' (the overall route success rate = centering prior). Only
@@ -848,12 +1171,60 @@ def did_you_mean(name, candidates):
 # Every command word the shell recognizes -- an unknown :word is either a typo
 # (suggest the nearest) or a request to invent a tool (offer to mint a probe),
 # never a generation of a generic essay.
+def resolve_probe_choice(pname_raw, probes, model=None, config=None, action_name=""):
+    if pname_raw.upper() in ("CHOICE", "CHOOSE"):
+        if not probes:
+            print(Fore.YELLOW + "[Choice] No active probes to choose from." + Style.RESET_ALL)
+            return None
+        if not model or not config:
+            print(Fore.RED + "[Error] Model not available for choice." + Style.RESET_ALL)
+            return None
+        
+        plist = list(probes.keys())
+        print(Fore.CYAN + f"[Choice] Asking the model to select a probe for '{action_name}'..." + Style.RESET_ALL)
+        
+        prompt = (
+            f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+            f"You are selecting a cognitive probe for the action: '{action_name}'.\n"
+            f"Available probes:\n" + "\n".join(f"- {p}" for p in plist) + "\n\n"
+            f"Select the single most appropriate probe from the list above. "
+            f"Output ONLY the exact name of the probe, and nothing else.<|eot_id|>"
+            f"<|start_header_id|>assistant<|end_header_id|>\n\n"
+        )
+
+        # generate_agentic_text is imported at module level; no local import (it
+        # would make the name function-local and risk UnboundLocalError).
+        sug = generate_agentic_text(
+            model,
+            instruction=prompt,
+            config=config,
+            pre_formatted=True,
+            max_new_tokens=20
+        )
+        sug = sug.strip()
+        if sug in probes:
+            print(Fore.GREEN + f"[Choice] The model chose: {sug}" + Style.RESET_ALL)
+            return sug
+        else:
+            print(Fore.YELLOW + f"[Choice] Model selected invalid probe '{sug}'. Aborting." + Style.RESET_ALL)
+            return None
+            
+    return pname_raw.replace("probe_", "") if pname_raw.startswith("probe_") else pname_raw
+
 KNOWN_COMMANDS = (
     ":context", ":memory", ":methodmap", ":claimmap", ":steermap", ":steer",
     ":probe", ":label", ":calibrate", ":suggest", ":tune", ":doc", ":sandbox",
     ":experts", ":impact", ":clock", ":prioritize", ":release", ":listen",
     ":timestamps", ":history", ":queue",
 )
+
+# Bare command words that are BUILT IN -- a macro alias by one of these names is
+# never invoked as ':<name>' (the built-in wins). Everything else that is a known
+# macro alias runs directly as ':<alias> args'.
+BUILTIN_COMMANDS = {c[1:] for c in KNOWN_COMMANDS} | {
+    "macro", "run", "game", "solve", "refresh", "place", "consider",
+    "exit", "quit", "timestamps", "listen", "history",
+}
 
 
 def calibratable_names(tuner):
@@ -1359,6 +1730,12 @@ def main():
     # alpha > 0 each reply is steered toward the top-ranked probe (signed by its
     # lift -- toward a helpful concept, away from a harmful one). 0 = off.
     tuner.register("prioritize_alpha", 0.0, kind="coefficient")
+    # Exposed-probe steer: when > 0, each reply is ALSO nudged along the probes
+    # the operator has exposed to the model (:probe expose <name>) -- lift-weighted
+    # and signed just like prioritize (a helpful exposed sensor pulls toward its
+    # concept, a harmful one pushes away). 0 = off; idle until those probes accrue
+    # credited lift. :tune exposed_probe_alpha <small>, or :calibrate from outcomes.
+    tuner.register("exposed_probe_alpha", 0.0, kind="coefficient")
     # Synthesis schedule, same shape: events per reply, optimizer steps per
     # event, and the plateau-velocity trigger that starts one.
     tuner.register("synthesis_events", config.max_synthesis_events, kind="coefficient")
@@ -1578,6 +1955,9 @@ def main():
     print("                or expose -- each with its command; computed, never applied. :suggest apply")
     print("                auto-queues only the safe measurement/calibration ones)")
     print("          :tune, :tune <name> <value>, :tune <name> auto [percentile]")
+    print("          :tune <knob|probe> dynamic <signed mix> [mult]  (each turn set the target")
+    print("                to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a")
+    print("                probe target drives its own firing threshold, never a shadow knob)")
     print("          :tune steer_cap_fraction auto [pct]  (calibrate cap from observed pushes)")
     print("          :tune steer_band auto [min_events] [gold|conversation|any] [synthesis|layersteer]")
     print("                (derive band from outcomes; conversations count as evidence)")
@@ -1595,6 +1975,8 @@ def main():
     print("          :sandbox on|off|status       (run the model's ```python blocks for real)")
     print("          :experts on|off|status       (mint new steering experts from its own")
     print("                recurring self-corrections; roster bounded; default off)")
+    print("          :game <name>                 (run a python script from games/ with full access to")
+    print("                live system state; infinite flexibility for custom rules and interactions)")
     print("          :impact                      (consequence trail: what its words caused,")
     print("                and whether experienced impact tracks better deliberation)")
     print("          :clock                       (last turn's generation time + tok/s and VRAM;")
@@ -1606,6 +1988,24 @@ def main():
     print("          :listen on|off|status        (speak mid-reply: lines you type while it")
     print("                generates are ingested at the next chunk seam and appended to the")
     print("                live stream -- the model chooses to redirect or fold in; never dropped)")
+    print("          :macro <file> <c1> ; <c2> ...  (write a macro; :macro name <alias> <file>")
+    print("                aliases it; :macro name self [file] writes a macro that REGENERATES")
+    print("                the current probes; :macro strip <alias|file> drops display-only")
+    print("                lines in place, :macro name strip <src> [dest] writes a stripped copy)")
+    print("          :save self <name> | choose   (alias for :macro name self; 'choose' asks")
+    print("                the model to generate a name based on the current tuning state)")
+    print("          :spawn <name> join|replace|drop  (multi-agent support. 'join' adds to")
+    print("                the panel, 'replace [N]' takes the operator slot for N turns.")
+    print("                Use @<name> :cmd to target a specific agent's tuning state)")
+    print("          :run <alias|file>            (queue and execute a macro's commands)")
+    print("          :solve <name> [goal]         (model writes a parameterized macro for an")
+    print("                ad-hoc command; then :<name> <args> runs it, filling $1..$9 / $@)")
+    print("          :<macro-name> <args>         (run any aliased macro directly, args -> $1..$9)")
+    print("          <any :command> because <reason>   (logs why you issued it as provenance)")
+    print("          :memory use probe <name> | :memory choice probe <name>")
+    print("                (stage the memories where probe <name> reads furthest from 0)")
+    print("          :tune exposed_probe_alpha <small>  (also steer along the probes you have")
+    print("                exposed to the model, lift-weighted; 0 = off)")
     print("Type 'exit' or 'quit' to leave.\n" + Style.RESET_ALL)
 
     pending_memory_tool_result = None
@@ -1616,6 +2016,12 @@ def main():
     pending_methodmap_tool_result = None
     pending_document_tool_result = None
     pending_sandbox_tool_result = None
+    pending_game_tool_result = None
+    model_proposed_game = None
+    user_proposed_game = None
+    user_proposed_game_args = None
+    active_game = None
+    active_game_state = {}
     doc_session = None          # current document: chunks + cursor + why
     doc_library = []            # every ingested document this session (for inter-ordering)
     doc_autoread = None         # {"remaining": n, "mode": "order"|"interleave"|"reply"} during :doc read
@@ -1663,8 +2069,27 @@ def main():
                     continue
     except OSError:
         pass
+    # Macro name -> file aliases, so :run <name> and :macro strip <name> address a
+    # macro by a short name instead of a path. Persisted across sessions.
+    MACRO_ALIAS_PATH = os.path.join(ROOT, "invariants", "out", "macro_aliases.json")
+    macro_aliases = {}
+    try:
+        with open(MACRO_ALIAS_PATH, "r", encoding="utf-8") as _af:
+            macro_aliases = {str(k): str(v) for k, v in json.load(_af).items()}
+    except (OSError, ValueError):
+        macro_aliases = {}
+
+    def _save_macro_aliases():
+        try:
+            with open(MACRO_ALIAS_PATH, "w", encoding="utf-8") as af:
+                json.dump(macro_aliases, af, indent=2)
+        except Exception as e:
+            print(Fore.RED + f"[Error] Could not save macro aliases: {e}" + Style.RESET_ALL)
     MAX_AUTOREAD = 20           # per :doc read command; reading stays a deliberate act
     sandbox_enabled = False     # deliberate opt-in, like every intervention here
+    joined_agents = []
+    replace_agent = None
+    replace_turns_remaining = 0
     session_context = []
     session_context_enabled = True
     show_timestamps = False
@@ -1673,6 +2098,7 @@ def main():
     # the steer to one probe; "mix" is a list of probes whose DEGREES are their
     # own learned lifts (you pick the probes, the data sets the weights).
     prioritize_pin = {"probe": None, "mix": None}
+    tuner_bindings = {}  # knob -> (probe, multiplier)
     egg_state = {"over": False}  # rising-edge latch for the consciousness egg
     startup_user_input = os.environ.get("PHENOMENALITY_STARTUP_PROMPT")
     if os.environ.get("PHENOMENALITY_AUTO_RESUME", "0").strip().lower() in {"1", "true", "yes"}:
@@ -1767,6 +2193,43 @@ def main():
                 reading_turn_source = doc_session["source_name"] if doc_session else "reading"
                 preview = " ".join(staged_reading.split())[:160]
                 print(Fore.CYAN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL + preview + " [...]")
+
+            elif replace_turns_remaining > 0 and replace_agent:
+                # Agent replaces user
+                print(Fore.MAGENTA + f"\n[{replace_agent.name} is thinking...]" + Style.RESET_ALL)
+                _sys_tuner = tuner
+                _sys_probes = probes
+                _sys_tb = tuner_bindings
+                tuner = replace_agent.tuner
+                probes = replace_agent.probes
+                tuner_bindings = replace_agent.tuner_bindings
+                
+                # Generate user input autonomously
+                r_prompt = build_prompt(
+                    "[Your turn to respond]", 
+                    session_context=session_context if session_context_enabled else None
+                )
+                r_response = generate_agentic_text(
+                    model,
+                    instruction=r_prompt,
+                    config=config,
+                    max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
+                    synthesis_recorder=None,
+                    chatty_log=False,
+                    pre_formatted=True,
+                    return_telemetry=False,
+                )
+                user_input = r_response.strip() if r_response else "..."
+                
+                # Restore
+                tuner = _sys_tuner
+                probes = _sys_probes
+                tuner_bindings = _sys_tb
+                replace_turns_remaining -= 1
+                _last_replace_name = replace_agent.name
+                if replace_turns_remaining <= 0:
+                    replace_agent = None
+                print(Fore.MAGENTA + Style.BRIGHT + f"\n[{_last_replace_name} replacing You]: " + Style.RESET_ALL + user_input)
             else:
                 prefix = f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] You: " if show_timestamps else "\nYou: "
                 prompt_str = Fore.MAGENTA + Style.BRIGHT + prefix + Style.RESET_ALL
@@ -1774,9 +2237,398 @@ def main():
                 # queue (so mid-generation typing was never dropped); otherwise
                 # the plain, unchanged input() path.
                 user_input = listener.get(prompt_str) if listener.active else input(prompt_str)
+
+            
+            user_input = user_input.strip()
+            if user_input.startswith(":") and ";" in user_input and not user_input.startswith(":macro "):
+                cmds = [c.strip() for c in user_input.split(";") if c.strip()]
+                if len(cmds) > 1:
+                    user_input = cmds[0]
+                    input_queue.extend(cmds[1:])
+
+            # A trailing ' because <reason>' on any command is provenance, not an
+            # argument: peel it off, log it, and hand the handler a clean line.
+            command_because = None
+            if user_input.startswith(":") or user_input.startswith("@"):
+                user_input, command_because = split_because(user_input)
+            target_agent = None
+            if user_input.startswith("@"):
+                t_parts = user_input.split(maxsplit=1)
+                if len(t_parts) == 2:
+                    t_name = t_parts[0][1:]
+                    user_input = t_parts[1]
+                    # Find agent
+                    for a in joined_agents:
+                        if a.name == t_name:
+                            target_agent = a
+                            break
+                    if not target_agent and replace_agent and replace_agent.name == t_name:
+                        target_agent = replace_agent
+                    if target_agent:
+                        print(Fore.CYAN + f"[Target] Directing command to '{t_name}'..." + Style.RESET_ALL)
+                    else:
+                        print(Fore.YELLOW + f"[Target] Unknown agent '{t_name}'. Ignoring target." + Style.RESET_ALL)
+
+            # Swap global state if target_agent
+            if target_agent:
+                _sys_tuner = tuner
+                _sys_probes = probes
+                _sys_tb = tuner_bindings
+                tuner = target_agent.tuner
+                probes = target_agent.probes
+                tuner_bindings = target_agent.tuner_bindings
+
+                if command_because:
+                    memory.append_event(
+                        "command_because",
+                        tags=["provenance"],
+                        provenance={"command": user_input.split()[0] if user_input else "", "because": command_because},
+                    )
+                    print(Fore.BLUE + f"[Because] noted: {command_because}" + Style.RESET_ALL)
+
+            
+            if user_input.startswith(":save self"):
+                # Alias for :macro name self <name>
+                sargs = user_input.split()
+                if len(sargs) >= 3:
+                    alias = sargs[2]
+                    if alias == "choose":
+                        print(Fore.CYAN + "[System] Asking model for a name..." + Style.RESET_ALL)
+                        nm = generate_agentic_text(
+                            model,
+                            instruction="Pick a short, one-word name for this persona based on the current tuning state. Reply with just the lowercase name.",
+                            config=config,
+                            max_new_tokens=10,
+                            chatty_log=False,
+                            pre_formatted=False
+                        )
+                        alias = re.sub(r'[^a-z0-9]', '', (nm or "agent").lower())[:20]
+                        if not alias: alias = "agent"
+                        print(Fore.CYAN + f"[System] Model chose '{alias}'." + Style.RESET_ALL)
+                    user_input = f":macro name self {alias}"
+                else:
+                    print(Fore.YELLOW + "[System] Usage: :save self <name> | :save self choose" + Style.RESET_ALL)
+                    continue
+
+            if user_input.startswith(":spawn"):
+                sargs = user_input.split()
+                if len(sargs) < 3:
+                    print(Fore.YELLOW + "[System] Usage: :spawn <name> join | :spawn <name> replace [N] | :spawn <name> drop" + Style.RESET_ALL)
+                    continue
+                a_name = sargs[1]
+                mode = sargs[2].lower()
                 
-            if user_input.lower() in ['exit', 'quit']:
-                memory.append_event("shell_closed", tags=["session"], provenance={"reason": "operator_exit"})
+                if mode == "drop":
+                    joined_agents = [a for a in joined_agents if a.name != a_name]
+                    if replace_agent and replace_agent.name == a_name:
+                        replace_agent = None
+                        replace_turns_remaining = 0
+                    print(Fore.CYAN + f"[Spawn] Dropped agent '{a_name}'." + Style.RESET_ALL)
+                    continue
+                
+                # Create agent state
+                new_agent = AgentState(name=a_name, tuner=TriggerTuner())
+                # Load profile if macro exists
+                macro_path = macro_aliases.get(a_name, a_name)
+                if os.path.isfile(macro_path) or os.path.isfile(os.path.join(ROOT, "invariants", "out", "macros", f"{a_name}.txt")):
+                    real_path = macro_path if os.path.isfile(macro_path) else os.path.join(ROOT, "invariants", "out", "macros", f"{a_name}.txt")
+                    try:
+                        with open(real_path, "r", encoding="utf-8") as rf:
+                            lines = [l.strip() for l in rf.read().splitlines() if l.strip() and not l.strip().startswith("#")]
+                        
+                        # Temporarily swap global tuner to apply macro commands
+                        _old_t = tuner
+                        _old_p = probes
+                        _old_tb = tuner_bindings
+                        
+                        tuner = new_agent.tuner
+                        probes = new_agent.probes
+                        tuner_bindings = new_agent.tuner_bindings
+                        
+                        # simple execution of tune commands for the agent
+                        for cmd in lines:
+                            if cmd.startswith(":tune"):
+                                targs = cmd[len(":tune"):].split()
+                                if len(targs) >= 2:
+                                    try:
+                                        tuner.set(targs[0], float(targs[1]))
+                                    except:
+                                        pass
+                                
+                        new_agent.tuner = tuner
+                        new_agent.probes = probes
+                        new_agent.tuner_bindings = tuner_bindings
+                        
+                        tuner = _old_t
+                        probes = _old_p
+                        tuner_bindings = _old_tb
+                        print(Fore.GREEN + f"[Spawn] Loaded profile for '{a_name}' from {real_path}." + Style.RESET_ALL)
+                    except Exception as e:
+                        print(Fore.RED + f"[Spawn] Failed to load profile for '{a_name}': {e}" + Style.RESET_ALL)
+                else:
+                    print(Fore.CYAN + f"[Spawn] No saved profile found for '{a_name}'. Generating profile based on name..." + Style.RESET_ALL)
+                    g_prompt = (
+                        f"You are generating a tuning profile for an agent named '{a_name}'. "
+                        "Respond ONLY with a series of lines starting with :tune, :steer, or :label to configure this persona. "
+                        "For example: ':tune response_tokens 128\\n:steer accuracy 0.5'. "
+                        "Output no other text."
+                    )
+                    g_out = generate_agentic_text(
+                        model, instruction=g_prompt, config=config,
+                        max_new_tokens=200, chatty_log=False, pre_formatted=False
+                    )
+                    if g_out:
+                        _old_t, _old_p, _old_tb = tuner, probes, tuner_bindings
+                        tuner, probes, tuner_bindings = new_agent.tuner, new_agent.probes, new_agent.tuner_bindings
+                        g_lines = [l.strip() for l in g_out.splitlines() if l.strip().startswith(":")]
+                        print(Fore.CYAN + f"[Spawn] Generated {len(g_lines)} config commands for '{a_name}'." + Style.RESET_ALL)
+                        for cmd in g_lines:
+                            if cmd.startswith(":tune"):
+                                targs = cmd[len(":tune"):].split()
+                                if len(targs) >= 2:
+                                    try: tuner.set(targs[0], float(targs[1]))
+                                    except: pass
+                        new_agent.tuner, new_agent.probes, new_agent.tuner_bindings = tuner, probes, tuner_bindings
+                        tuner, probes, tuner_bindings = _old_t, _old_p, _old_tb
+                    else:
+                        print(Fore.CYAN + f"[Spawn] Generation failed, using default state." + Style.RESET_ALL)
+                if mode == "join":
+                    if not any(a.name == a_name for a in joined_agents):
+                        joined_agents.append(new_agent)
+                    print(Fore.GREEN + f"[Spawn] Agent '{a_name}' joined the panel." + Style.RESET_ALL)
+                elif mode == "replace":
+                    n_turns = int(sargs[3]) if len(sargs) > 3 else 1
+                    replace_agent = new_agent
+                    replace_turns_remaining = n_turns
+                    print(Fore.GREEN + f"[Spawn] Agent '{a_name}' is replacing the user for {n_turns} turn(s)." + Style.RESET_ALL)
+                continue
+
+            if user_input == ":macro" or user_input.startswith(":macro "):
+                mtail = user_input[len(":macro"):].strip()
+                mtok = mtail.split()
+                sub = mtok[0].lower() if mtok else ""
+                if sub == "name":
+                    kind = mtok[1].lower() if len(mtok) >= 2 else ""
+                    if kind == "self":
+                        # :macro name self [file] -- regenerate the CURRENT probes as
+                        # a replayable macro (re-mint/adopt/compose each from its
+                        # stored framings) and alias it 'self'. Recreate: :run self.
+                        dest = mtail.split(maxsplit=2)[2].strip() if len(mtok) >= 3 else os.path.join(ROOT, "invariants", "out", "macros", "self.txt")
+                        macro_lines = build_probe_init_macro(probes)
+                        n_cmds = sum(1 for l in macro_lines if l.startswith(":"))
+                        try:
+                            os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+                            with open(dest, "w", encoding="utf-8") as wf:
+                                for l in macro_lines:
+                                    wf.write(l + "\n")
+                            macro_aliases["self"] = dest
+                            _save_macro_aliases()
+                            print(Fore.GREEN + f"[System] Wrote a probe-regenerating macro ({n_cmds} command(s) for {len(probes)} probe(s)) to {dest}, aliased 'self'. Recreate them with :run self." + Style.RESET_ALL)
+                            if not probes:
+                                print(Fore.YELLOW + "[System] (No active probes to regenerate -- the macro is empty.)" + Style.RESET_ALL)
+                        except Exception as e:
+                            print(Fore.RED + f"[Error] Could not write self macro: {e}" + Style.RESET_ALL)
+                        continue
+                    if kind == "strip":
+                        # :macro name strip <src> [dest] -- write a STRIPPED COPY of
+                        # <src> to a NEW file, leaving the original intact (vs :macro
+                        # strip, which rewrites in place). Default dest: '<name>_og'
+                        # -> '<name>', otherwise '<name>_stripped'.
+                        args = mtail.split(maxsplit=2)[2].split() if len(mtok) >= 3 else []
+                        if not args:
+                            print(Fore.YELLOW + "[System] Usage: :macro name strip <src> [dest]" + Style.RESET_ALL)
+                            continue
+                        src = macro_aliases.get(args[0], args[0])
+                        if not os.path.isfile(src):
+                            print(Fore.YELLOW + f"[System] Macro not found: {src}" + Style.RESET_ALL)
+                            continue
+                        if len(args) >= 2:
+                            dest = args[1]
+                        else:
+                            _b, _ext = os.path.splitext(src)
+                            dest = (_b[:-3] + _ext) if _b.endswith("_og") else (_b + "_stripped" + _ext)
+                        try:
+                            with open(src, "r", encoding="utf-8") as rf:
+                                kept, removed = strip_macro_lines(rf.read().splitlines())
+                            os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+                            with open(dest, "w", encoding="utf-8") as wf:
+                                for line in kept:
+                                    wf.write(line + "\n")
+                            _stem = os.path.splitext(os.path.basename(dest))[0]
+                            macro_aliases[_stem] = dest
+                            _save_macro_aliases()
+                            cmd_kept = [k for k in kept if not k.strip().startswith("#")]
+                            print(Fore.GREEN + f"[System] Stripped copy of {src} -> {dest} (kept {len(cmd_kept)} command(s), dropped {len(removed)}); original untouched, aliased '{_stem}'." + Style.RESET_ALL)
+                        except Exception as e:
+                            print(Fore.RED + f"[Error] Could not strip-copy macro: {e}" + Style.RESET_ALL)
+                        continue
+                    # :macro name <alias> <file> -- bind a short name to a macro file.
+                    if len(mtok) < 3:
+                        print(Fore.YELLOW + "[System] Usage: :macro name <alias> <file>  |  :macro name self [file]  |  :macro name strip <src> [dest]" + Style.RESET_ALL)
+                    else:
+                        alias = mtok[1]
+                        mpath = mtail.split(maxsplit=2)[2].strip()
+                        macro_aliases[alias] = mpath
+                        _save_macro_aliases()
+                        exists_note = "" if os.path.isfile(mpath) else " (file does not exist yet)"
+                        print(Fore.GREEN + f"[System] Macro alias '{alias}' -> {mpath}{exists_note}. Use :run {alias} or :macro strip {alias}." + Style.RESET_ALL)
+                    continue
+                if sub == "strip":
+                    # :macro strip <alias|file> -- rewrite IN PLACE, dropping every
+                    # line that does not mutate a probe or a tuning knob.
+                    target = mtail.split(maxsplit=1)[1].strip() if len(mtok) >= 2 else ""
+                    mpath = macro_aliases.get(target, target)
+                    if not target:
+                        print(Fore.YELLOW + "[System] Usage: :macro strip <alias|file>  (or :macro name strip <src> [dest] to keep the original)" + Style.RESET_ALL)
+                    elif not os.path.isfile(mpath):
+                        print(Fore.YELLOW + f"[System] Macro not found: {mpath}" + Style.RESET_ALL)
+                    else:
+                        try:
+                            with open(mpath, "r", encoding="utf-8") as rf:
+                                kept, removed = strip_macro_lines(rf.read().splitlines())
+                            with open(mpath, "w", encoding="utf-8") as wf:
+                                for line in kept:
+                                    wf.write(line + "\n")
+                            cmd_kept = [k for k in kept if not k.strip().startswith("#")]
+                            print(Fore.GREEN + f"[System] Stripped {mpath}: kept {len(cmd_kept)} probe/tuning command(s), removed {len(removed)} display-only line(s)." + Style.RESET_ALL)
+                            for r in removed[:20]:
+                                print(Fore.CYAN + f"  - {r}" + Style.RESET_ALL)
+                            if len(removed) > 20:
+                                print(Fore.CYAN + f"  ... and {len(removed) - 20} more." + Style.RESET_ALL)
+                            if not cmd_kept:
+                                print(Fore.YELLOW + "[System] Nothing probe/tuning-related remained -- the macro is now empty of commands." + Style.RESET_ALL)
+                        except Exception as e:
+                            print(Fore.RED + f"[Error] Could not strip macro: {e}" + Style.RESET_ALL)
+                    continue
+                # Legacy create form: :macro <file> <cmd1> ; <cmd2> ; ...
+                parts = mtail.split(maxsplit=1)
+                if len(parts) < 2:
+                    print(Fore.YELLOW + "[System] Usage: :macro <file> <c1> ; <c2> ...  |  :macro name <alias> <file>  |  :macro strip <alias|file>" + Style.RESET_ALL)
+                else:
+                    mac_file = parts[0]
+                    mac_cmds = [c.strip() for c in parts[1].split(";") if c.strip()]
+                    try:
+                        with open(mac_file, "w", encoding="utf-8") as wf:
+                            for c in mac_cmds:
+                                wf.write(c + "\n")
+                        print(Fore.GREEN + f"[System] Created macro '{mac_file}' with {len(mac_cmds)} commands. Execute it anytime with: :run {mac_file}" + Style.RESET_ALL)
+                    except Exception as e:
+                        print(Fore.RED + f"[Error] Could not write macro file: {e}" + Style.RESET_ALL)
+                continue
+
+            if user_input.startswith(":run "):
+                target = user_input[len(":run "):].strip()
+                resolved = macro_aliases.get(target, target)
+                # Glob target (fun*, *.txt): run every matching macro file.
+                if any(c in target for c in "*?[") and not os.path.isfile(resolved):
+                    matches = sorted(glob.glob(resolved))
+                    if not matches:
+                        print(Fore.YELLOW + f"[System] No macros match '{target}'." + Style.RESET_ALL)
+                        continue
+                    total = []
+                    for m in matches:
+                        try:
+                            sub = expand_macro_lines(m, macro_aliases)
+                        except Exception as e:
+                            print(Fore.RED + f"[Error] Could not read macro '{m}': {e}" + Style.RESET_ALL)
+                            sub = None
+                        if sub:
+                            total.extend(sub)
+                    if total:
+                        names = ", ".join(os.path.basename(x) for x in matches)
+                        print(Fore.CYAN + f"[System] Queued {len(total)} command(s) from {len(matches)} macro(s) matching '{target}' ({names})." + Style.RESET_ALL)
+                        input_queue.extend(total)
+                    else:
+                        print(Fore.YELLOW + f"[System] Macros matching '{target}' had no runnable commands." + Style.RESET_ALL)
+                    continue
+                try:
+                    lines = expand_macro_lines(target, macro_aliases)
+                except Exception as e:
+                    print(Fore.RED + f"[Error] Could not read macro '{target}': {e}" + Style.RESET_ALL)
+                    continue
+                if lines is None:
+                    print(Fore.YELLOW + f"[System] Macro not found: {resolved}" + Style.RESET_ALL)
+                elif lines:
+                    print(Fore.CYAN + f"[System] Queued {len(lines)} command(s) from {target}." + Style.RESET_ALL)
+                    input_queue.extend(lines)
+                else:
+                    print(Fore.YELLOW + f"[System] '{target}' had no runnable commands." + Style.RESET_ALL)
+                continue
+
+            # :solve <name> [goal] -- have the model WRITE a parameterized macro (a
+            # list of ':' commands using $1..$9 / $@) for an ad-hoc command, save
+            # it, and alias it so ':<name> args' runs it directly.
+            if user_input.startswith(":solve"):
+                sbody = user_input[len(":solve"):].strip()
+                sparts = sbody.split(maxsplit=1)
+                if not sparts:
+                    print(Fore.YELLOW + "[Solve] Usage: :solve <command_name> [what it should do]" + Style.RESET_ALL)
+                    continue
+                sname = re.sub(r"[^a-z0-9_]", "_", sparts[0].lower())[:40].strip("_")
+                if not sname or sname in BUILTIN_COMMANDS:
+                    print(Fore.YELLOW + f"[Solve] '{sparts[0]}' can't be a macro name (empty or a built-in command)." + Style.RESET_ALL)
+                    continue
+                goal = sparts[1].strip() if len(sparts) > 1 else sname.replace("_", " ")
+                prompt = (
+                    "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                    "You write macros for an interactive cognition shell. A macro is a list of ':' "
+                    "commands, one per line -- e.g. :probe <name> <a> || <b>, :tune <knob> <value>, "
+                    ":calibrate <name> <anchor>, :steer mix <p1> <p2>, :prioritize, :memory use probe "
+                    "<name>, :label <probe> pos|neg. Use $1, $2, ... for parameters and $@ for all of "
+                    f"them. Write a macro named '{sname}' that does: {goal}\n"
+                    "Output ONLY the command lines, nothing else.<|eot_id|>"
+                    "<|start_header_id|>assistant<|end_header_id|>\n\n"
+                )
+                print(Fore.CYAN + f"[Solve] Asking the model to write macro ':{sname}' for: {goal}" + Style.RESET_ALL)
+                try:
+                    sug = generate_agentic_text(model, instruction=prompt, config=config, pre_formatted=True, max_new_tokens=300)
+                except Exception as e:
+                    print(Fore.RED + f"[Solve] Generation failed: {e}" + Style.RESET_ALL)
+                    continue
+                cmd_lines = [ln.strip() for ln in (sug or "").splitlines() if ln.strip().startswith(":")]
+                if not cmd_lines:
+                    print(Fore.YELLOW + f"[Solve] The model produced no ':' commands. Raw output:\n{(sug or '').strip()[:400]}" + Style.RESET_ALL)
+                    continue
+                dest = os.path.join(ROOT, "invariants", "out", "macros", f"{sname}.txt")
+                try:
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with open(dest, "w", encoding="utf-8") as wf:
+                        wf.write(f"# :solve macro '{sname}' -- {goal}\n")
+                        for ln in cmd_lines:
+                            wf.write(ln + "\n")
+                    macro_aliases[sname] = dest
+                    _save_macro_aliases()
+                except Exception as e:
+                    print(Fore.RED + f"[Solve] Could not save macro: {e}" + Style.RESET_ALL)
+                    continue
+                print(Fore.GREEN + f"[Solve] Created ':{sname}' ({len(cmd_lines)} command(s)) -> {dest}. Run it with :{sname} <args>." + Style.RESET_ALL)
+                for ln in cmd_lines:
+                    print(Fore.CYAN + f"  {ln}" + Style.RESET_ALL)
+                continue
+
+            # Direct parameterized-macro invocation: ':<name> args' runs a known
+            # macro alias with $1..$9 / $@ substituted from args. Built-ins win, so
+            # only a non-built-in alias is dispatched here.
+            if user_input.startswith(":") and len(user_input) > 1 and not user_input[1].isspace():
+                _itok = user_input[1:].split()
+                _iname = _itok[0] if _itok else ""
+                if _iname in macro_aliases and _iname not in BUILTIN_COMMANDS:
+                    _iargs = _itok[1:]
+                    _ilines = load_parameterized_macro(macro_aliases[_iname], _iargs)
+                    if _ilines is None:
+                        print(Fore.YELLOW + f"[Macro] ':{_iname}' -> {macro_aliases[_iname]} not found on disk." + Style.RESET_ALL)
+                    elif _ilines:
+                        print(Fore.CYAN + f"[Macro] :{_iname} ({len(_iargs)} arg(s)) -> queued {len(_ilines)} command(s)." + Style.RESET_ALL)
+                        input_queue.extend(_ilines)
+                    else:
+                        print(Fore.YELLOW + f"[Macro] ':{_iname}' has no commands." + Style.RESET_ALL)
+                    continue
+
+            first_word = user_input.lower().split()[0] if user_input else ""
+            if first_word in ['exit', 'quit', ':exit', ':quit']:
+                parts = user_input.strip().split(maxsplit=1)
+                reason = parts[1] if len(parts) > 1 else "operator_exit"
+                memory.append_event("shell_closed", tags=["session"], provenance={"reason": reason})
                 break
             if user_input.startswith(":timestamps"):
                 parts = user_input.split()
@@ -1887,6 +2739,29 @@ def main():
                     query = tail[len("search "):].strip()
                     records = memory.search(query, max_records=6, scope=memory.scope)
                     print(Fore.CYAN + memory.format_tool_result(records) + Style.RESET_ALL)
+                elif tail.startswith("use probe"):
+                    pname_raw = tail[len("use probe"):].strip()
+                    pname = resolve_probe_choice(pname_raw, probes, model=model, config=config, action_name="memory ranking") if pname_raw else None
+                    if not pname or pname not in probes:
+                        print(Fore.YELLOW + f"[Memory] Unknown probe '{pname_raw}'. Active: {', '.join(sorted(probes)) or 'none'}." + Style.RESET_ALL)
+                        continue
+                    ranked = rank_memories_by_probe(model, memory, probes[pname]["direction"], top_n=6)
+                    if not ranked:
+                        print(Fore.YELLOW + "[Memory] No memories to score." + Style.RESET_ALL)
+                        continue
+                    records = [t[2] for t in ranked]
+                    pending_memory_tool_result = memory.format_tool_result(records)
+                    memory.append_event(
+                        "memory_tool_staged",
+                        tags=["memory_tool", "probe"],
+                        provenance={"query": f"probe:{pname}", "records": len(records)},
+                    )
+                    print(Fore.CYAN + f"[Memory] Staged {len(records)} memories where '{pname}' reads furthest from 0:" + Style.RESET_ALL)
+                    for _abs, raw, r in ranked:
+                        prev = (r.text or "")[:70].replace("\n", " ")
+                        print(Fore.CYAN + f"  {raw:+.3f}  [{r.kind}] {prev}..." + Style.RESET_ALL)
+                    print(Fore.CYAN + pending_memory_tool_result + Style.RESET_ALL)
+                    print(Fore.YELLOW + "[Memory] This tool result will be provided to the next model turn only." + Style.RESET_ALL)
                 elif tail.startswith("use "):
                     query = tail[len("use "):].strip()
                     records = memory.search(query, max_records=6, scope=memory.scope)
@@ -1902,10 +2777,53 @@ def main():
                     memory.mark_session_boundary("operator_request")
                     pending_memory_tool_result = None
                     print(Fore.YELLOW + "[Memory] Session boundary marked. Persistent memory file was not deleted." + Style.RESET_ALL)
+                elif tail.startswith("choice"):
+                    query = tail[len("choice"):].strip()
+                    if query.lower().startswith("probe"):
+                        pname_raw = query[len("probe"):].strip()
+                        pname = resolve_probe_choice(pname_raw, probes, model=model, config=config, action_name="memory ranking") if pname_raw else None
+                        if not pname or pname not in probes:
+                            print(Fore.YELLOW + f"[Memory] Unknown probe '{pname_raw}'. Active: {', '.join(sorted(probes)) or 'none'}." + Style.RESET_ALL)
+                            continue
+                        records = [t[2] for t in rank_memories_by_probe(model, memory, probes[pname]["direction"], top_n=15)]
+                        choice_note = f" (ranked by probe '{pname}', furthest from 0)"
+                    elif query:
+                        records = memory.search(query, max_records=15, scope=memory.scope)
+                        choice_note = f" (search: {query})"
+                    else:
+                        records = [r for r in memory.records if (r.text or "").strip()][-15:]
+                        choice_note = " (most recent)"
+                    if not records:
+                        print(Fore.YELLOW + "[Memory] No records found to choose from." + Style.RESET_ALL)
+                        continue
+                    print(Fore.CYAN + f"[Memory] Select a record to stage for the next turn{choice_note}:" + Style.RESET_ALL)
+                    for i, r in enumerate(records, 1):
+                        text_preview = (r.text or "")[:80].replace('\n', ' ')
+                        print(Fore.CYAN + f"  {i}. [{r.kind}] {text_preview}..." + Style.RESET_ALL)
+                    while True:
+                        try:
+                            ans = input(Fore.GREEN + "Choice (number) or Enter to cancel: " + Style.RESET_ALL).strip()
+                            if not ans:
+                                break
+                            idx = int(ans) - 1
+                            if 0 <= idx < len(records):
+                                chosen = records[idx]
+                                pending_memory_tool_result = memory.format_tool_result([chosen])
+                                memory.append_event(
+                                    "memory_tool_staged",
+                                    tags=["memory_tool"],
+                                    provenance={"query": f"interactive_choice:{query}", "records": 1},
+                                )
+                                print(Fore.CYAN + pending_memory_tool_result + Style.RESET_ALL)
+                                print(Fore.YELLOW + "[Memory] This tool result will be provided to the next model turn only." + Style.RESET_ALL)
+                                break
+                            print(Fore.YELLOW + "Invalid selection." + Style.RESET_ALL)
+                        except ValueError:
+                            print(Fore.YELLOW + "Please enter a number." + Style.RESET_ALL)
                 else:
                     print(
                         Fore.YELLOW
-                        + "[Memory] Commands: :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory boundary"
+                        + "[Memory] Commands: :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory use probe <name>, :memory choice [query], :memory choice probe <name>, :memory boundary"
                         + Style.RESET_ALL
                     )
                 continue
@@ -2046,6 +2964,7 @@ def main():
                     else:
                         count, mode = 1, "order"
                         until_settled, explicit_count = False, False
+                        until_probe = None
                         mode_aliases = {"weave": "interleave", "mtime": "updated", "chrono": "updated"}
                         for extra in dargs.split()[1:]:
                             token = extra.strip().lower()
@@ -2053,16 +2972,19 @@ def main():
                                 mode = mode_aliases.get(token, token)
                             elif token in {"satisfied", "settled", "until"}:
                                 until_settled = True
+                            elif token.startswith("probe_") or token in probes:
+                                until_probe = token.replace("probe_", "")
+                                until_settled = False
                             else:
                                 try:
                                     count = int(token)
                                     explicit_count = True
                                 except ValueError:
                                     pass
-                        if until_settled and not explicit_count:
+                        if (until_settled or until_probe) and not explicit_count:
                             count = MAX_AUTOREAD  # "until satisfied" reads up to the cap
                         count = max(1, min(MAX_AUTOREAD, count))
-                        doc_autoread = {"remaining": count, "mode": mode, "until_settled": until_settled, "settled_streak": 0}
+                        doc_autoread = {"remaining": count, "mode": mode, "until_settled": until_settled, "until_probe": until_probe, "settled_streak": 0}
                         how = {
                             "order": "in document order -- the text advances on its own course",
                             "interleave": "weaving between documents -- their course, not the model's echo",
@@ -2070,10 +2992,13 @@ def main():
                             "updated": "in the order the files were last written (newest first)",
                         }[mode]
                         stop_note = (
-                            " Stops early once the reading settles (sense clears conversation_productive "
-                            f"{max(1, int(tuner.get('reading_settled_streak', 2)))} turn(s) in a row)."
-                            if until_settled
-                            else ""
+                            f" Stops early once probe '{until_probe}' crosses its threshold."
+                            if until_probe else
+                            (
+                                " Stops early once the reading settles (sense clears conversation_productive "
+                                f"{max(1, int(tuner.get('reading_settled_streak', 2)))} turn(s) in a row)."
+                                if until_settled else ""
+                            )
                         )
                         print(
                             Fore.CYAN
@@ -2374,6 +3299,196 @@ def main():
                 else:
                     print(Fore.CYAN + f"[Sandbox] {'ON' if sandbox_enabled else 'OFF'} (:sandbox on|off)." + Style.RESET_ALL)
                 continue
+            if user_input.startswith(":refresh"):
+                # Re-read referenced files from disk WITHOUT restarting -- the
+                # session and the loaded model stay live. (Code edits to this
+                # script still need a full restart; only data files refresh here.)
+                print(Fore.CYAN + "[System] Refreshing referenced files from disk (session + model stay live)..." + Style.RESET_ALL)
+                probes.clear()
+                try:
+                    if os.path.isdir(PROBE_DIR):
+                        for pf in os.listdir(PROBE_DIR):
+                            if pf.endswith(".pt"):
+                                pname = pf[:-3]
+                                pdata = torch.load(os.path.join(PROBE_DIR, pf), weights_only=True)
+                                probes[pname] = {"direction": pdata["direction"], "history": deque(maxlen=40), "framings": pdata.get("framings", ("", "")), "exposed": bool(pdata.get("exposed", False))}
+                                # Register a trigger for a probe that appeared on
+                                # disk since startup; leave existing thresholds and
+                                # accrued outcomes untouched.
+                                if f"probe_{pname}" not in tuner.triggers:
+                                    tuner.register(f"probe_{pname}", 0.0, kind="threshold", comparator=">=")
+                        print(Fore.GREEN + f"[System] Reloaded {len(probes)} probe(s) from {PROBE_DIR}." + Style.RESET_ALL)
+                except Exception as e:
+                    print(Fore.RED + f"[System] Error refreshing probes: {e}" + Style.RESET_ALL)
+                try:
+                    with open(MACRO_ALIAS_PATH, "r", encoding="utf-8") as _af:
+                        _loaded = {str(k): str(v) for k, v in json.load(_af).items()}
+                    macro_aliases.clear()
+                    macro_aliases.update(_loaded)
+                    print(Fore.GREEN + f"[System] Reloaded {len(macro_aliases)} macro alias(es)." + Style.RESET_ALL)
+                except (OSError, ValueError):
+                    pass
+                print(Fore.YELLOW + "[System] (Macro files are re-read on every :run, so edits to them need no refresh.)" + Style.RESET_ALL)
+                continue
+
+            if user_input.startswith(":game ") or user_input.startswith(":game,") or user_input.strip() == ":game":
+                body = user_input[len(":game"):].strip()
+                if body.startswith(","):
+                    body = body[1:].strip()
+                if not body:
+                    print(Fore.YELLOW + "[Game] Usage: :game <name> [ +/-<rule> <desc> | +/-win <cond> | +/-loss <cond> | +/-prize <opt>,<odds> [<count>,<odds_val>] <cmd> | draw | start | end ]" + Style.RESET_ALL)
+                    continue
+                _nm = re.split(r"[\s,]+", body, maxsplit=1)
+                gname = _nm[0].strip()
+                rest = _nm[1].strip().lstrip(",").strip() if len(_nm) > 1 else ""
+                gpath = os.path.join(ROOT, "games", f"{gname}.py")
+                rules_path = os.path.join(ROOT, "games", f"{gname}_rules.json")
+                gcfg = load_game_config(rules_path)
+
+                first = rest.split()[0] if rest else ""
+                sign = "+" if first.startswith("+") else ("-" if first.startswith("-") else None)
+                key = (first[1:] if sign else first).lower()
+                arg = rest[len(first):].strip() if first else ""
+
+                # --- prizes: +prize <opt>,<odds> [<count>,<odds_val>] <cmd> / -prize <opt> ---
+                if key == "prize" and sign:
+                    if sign == "+":
+                        option, spec = parse_prize_spec(arg)
+                        if option is None:
+                            print(Fore.YELLOW + f"[Game] Bad prize ({spec}). Usage: :game {gname} +prize <opt>,<odds> [<count>,<odds_val>] <cmd>" + Style.RESET_ALL)
+                            continue
+                        gcfg["prizes"][option] = spec
+                        save_game_config(rules_path, gcfg)
+                        cnt = "unlimited" if spec["count"] is None else spec["count"]
+                        print(Fore.GREEN + f"[Game] Prize '{option}' on {gname}: odds {spec['odds']:g}, count {cnt}" + (f", wins run '{spec['command']}'" if spec["command"] else "") + "." + Style.RESET_ALL)
+                    else:
+                        opt = (arg.split(",")[0].strip() if arg else "")
+                        if gcfg["prizes"].pop(opt, None) is not None:
+                            save_game_config(rules_path, gcfg)
+                            print(Fore.YELLOW + f"[Game] Removed prize '{opt}' from {gname}." + Style.RESET_ALL)
+                        else:
+                            print(Fore.YELLOW + f"[Game] No prize '{opt}' on {gname}." + Style.RESET_ALL)
+                    continue
+
+                # --- win / loss conditions: +win <cond> / -win, +loss <cond> / -loss ---
+                if key in ("win", "loss") and sign:
+                    gcfg[key] = arg if sign == "+" else ""
+                    save_game_config(rules_path, gcfg)
+                    if sign == "+":
+                        print(Fore.GREEN + f"[Game] {gname} {key} condition: {arg or '(empty)'}. (the {gname}.py/model evaluates it)" + Style.RESET_ALL)
+                    else:
+                        print(Fore.YELLOW + f"[Game] Cleared {gname} {key} condition." + Style.RESET_ALL)
+                    continue
+
+                # --- rules: +<rule> <desc> / -<rule> ---
+                if sign and key not in GAME_RESERVED:
+                    rule_name = first[1:]
+                    if sign == "+":
+                        gcfg["rules"][rule_name] = arg.lstrip(",").strip()
+                        print(Fore.GREEN + f"[Game] Added rule '{rule_name}' to {gname}: '{gcfg['rules'][rule_name]}'." + Style.RESET_ALL)
+                    else:
+                        gcfg["rules"].pop(rule_name, None)
+                        print(Fore.YELLOW + f"[Game] Removed rule '{rule_name}' from {gname}." + Style.RESET_ALL)
+                    save_game_config(rules_path, gcfg)
+                    print(Fore.CYAN + f"[Game] (the {gname}.py script or the model enforces this.)" + Style.RESET_ALL)
+                    continue
+
+                # --- draw prizes now: run each against its odds ---
+                if key == "draw":
+                    won = draw_prizes(gcfg["prizes"])
+                    save_game_config(rules_path, gcfg)
+                    if not won:
+                        print(Fore.CYAN + f"[Game] Draw: nothing hit (of {len(gcfg['prizes'])} prize(s))." + Style.RESET_ALL)
+                    for opt, cmd in won:
+                        print(Fore.MAGENTA + Style.BRIGHT + f"[Game] Prize won: {opt}!" + Style.RESET_ALL + (Fore.MAGENTA + f" running '{cmd}'" + Style.RESET_ALL if cmd else ""))
+                        if cmd:
+                            input_queue.append(cmd)
+                    continue
+
+                # --- end / stop / quit: award prizes, then end the active game ---
+                if key in ("end", "stop", "quit") or gname.lower() in ("end", "stop", "quit"):
+                    if active_game:
+                        for opt, cmd in draw_prizes(gcfg["prizes"]):
+                            print(Fore.MAGENTA + Style.BRIGHT + f"[Game] End prize: {opt}!" + Style.RESET_ALL + (f" running '{cmd}'" if cmd else ""))
+                            if cmd:
+                                input_queue.append(cmd)
+                        save_game_config(rules_path, gcfg)
+                        print(Fore.CYAN + f"[Game] Ended active game: {active_game}." + Style.RESET_ALL)
+                        active_game = None
+                        pending_game_tool_result = None
+                    else:
+                        print(Fore.YELLOW + "[Game] No game is currently active." + Style.RESET_ALL)
+                    continue
+
+                # --- :game start (bare): accept & start the game the model just
+                # proposed, without retyping its name ---
+                if gname.lower() == "start" and not rest:
+                    if not model_proposed_game:
+                        print(Fore.YELLOW + "[Game] Nothing proposed to start. Propose one with :game <name>, or force a script with :game <name> start." + Style.RESET_ALL)
+                        continue
+                    gname = model_proposed_game
+                    gpath = os.path.join(ROOT, "games", f"{gname}.py")
+                    rules_path = os.path.join(ROOT, "games", f"{gname}_rules.json")
+                    gcfg = load_game_config(rules_path)
+                    key = "start"
+
+                force_start = (key == "start")
+                has_script = os.path.isfile(gpath)
+                accepting = force_start or (model_proposed_game == gname)
+
+                if not has_script and not accepting:
+                    # No script and no pending proposal -> ask the model to DESIGN
+                    # the game (form 3), then fall through to its turn.
+                    print(Fore.CYAN + f"[Game] No script for '{gname}' -- asking the model to design it..." + Style.RESET_ALL)
+                    cond = ""
+                    if gcfg["rules"] or gcfg["win"] or gcfg["loss"] or gcfg["prizes"]:
+                        cond = (f" Honor the existing config -- rules={list(gcfg['rules'])}, "
+                                f"win='{gcfg['win']}', loss='{gcfg['loss']}', prizes={list(gcfg['prizes'])}.")
+                    user_input = (
+                        f"Design a short, playable game called '{gname}': clear rules, options, and "
+                        f"win/loss conditions (probe-based if apt).{cond} Then propose it to me to play."
+                    )
+                    # Fall through (no continue) so this reaches the model's turn.
+                elif not accepting:
+                    # A real script exists but nothing is pending -> propose it.
+                    print(Fore.CYAN + f"[Game] Proposing {gname} to the model... (waiting for acceptance)" + Style.RESET_ALL)
+                    user_proposed_game = gname
+                    pending_game_tool_result = f"[Game Proposal] The operator proposes playing '{gname}'. To accept, output <<GAME_ACCEPT: {gname}>>; to decline, output <<GAME_DECLINE: {gname}>>. Either way, also reply in words."
+                    user_input = "(system: operator proposed a game)"
+                    continue
+                else:
+                    # Accepting (force_start, or the model's proposal) -> START.
+                    print(Fore.GREEN + (f"[Game] Forcibly starting {gname}!" if force_start else f"[Game] You accepted the model's proposal to play {gname}!") + Style.RESET_ALL)
+                    model_proposed_game = None
+                    active_game = gname
+                    if gcfg["rules"]:
+                        print(Fore.CYAN + f"Active rules: {', '.join(gcfg['rules'])}." + Style.RESET_ALL)
+                    if gcfg["prizes"]:
+                        print(Fore.CYAN + f"Prizes: {', '.join(gcfg['prizes'])}." + Style.RESET_ALL)
+                    if has_script:
+                        print(Fore.MAGENTA + f"[Game] Initializing {gname}..." + Style.RESET_ALL)
+                        try:
+                            with open(gpath, "r", encoding="utf-8") as _gf:
+                                gcode = _gf.read()
+                            exec_globals = globals().copy()
+                            exec_globals["GAME_RULES"] = gcfg["rules"]   # legacy: flat rules dict
+                            exec_globals["GAME_CONFIG"] = gcfg           # full config: rules/win/loss/prizes
+                            exec_globals["game_args"] = rest.split()
+                            exec_globals["active_game_state"] = active_game_state
+                            exec(gcode, exec_globals)
+                        except Exception as e:
+                            import traceback
+                            print(Fore.RED + f"[Game Error] {e}\n{traceback.format_exc()}" + Style.RESET_ALL)
+                    else:
+                        # Conversational (model-designed, no script): mark active and
+                        # hand the model its config to run turn by turn.
+                        print(Fore.MAGENTA + f"[Game] '{gname}' is active -- no script, so we play it in conversation." + Style.RESET_ALL)
+                        pending_game_tool_result = (
+                            f"[Game] '{gname}' is now active; run it with me turn by turn. "
+                            f"Rules: {gcfg['rules'] or '(none)'}; win: {gcfg['win'] or '(none)'}; "
+                            f"loss: {gcfg['loss'] or '(none)'}; prizes: {list(gcfg['prizes']) or '(none)'}."
+                        )
+                    continue
             if user_input.startswith(":steer "):
                 sargs = user_input[len(":steer "):].strip().split()
                 # :steer auto | off  -> back to the ranking.
@@ -2416,9 +3531,11 @@ def main():
                 if len(sargs) >= 2 and sargs[0] in probes:
                     probe_name = sargs[0]
                     try:
-                        steer_alpha = float(sargs[1])
+                        if sargs[1].lower() == "up": steer_alpha = 0.5
+                        elif sargs[1].lower() == "down": steer_alpha = -0.5
+                        else: steer_alpha = float(sargs[1])
                     except ValueError:
-                        print(Fore.YELLOW + f"[Steer] invalid alpha: {sargs[1]}" + Style.RESET_ALL)
+                        print(Fore.YELLOW + f"[Steer] invalid alpha: {sargs[1]}. Must be a number (e.g. 0.5) or 'up'/'down'." + Style.RESET_ALL)
                         continue
                     prioritize_pin["mix"] = None
                     prioritize_pin["probe"] = probe_name
@@ -2531,14 +3648,34 @@ def main():
                         print(Fore.CYAN + f"[Probe] {pname}: {len(pdata['direction'])} layers, {n_pairs} paired turns{exposed_note}." + Style.RESET_ALL)
                     continue
                 if pargs.lower().startswith("drop "):
-                    dropped = pargs[5:].strip()
+                    dropped_raw = pargs[5:].strip()
+                    dropped = resolve_probe_choice(dropped_raw, probes, model=model, config=config, action_name="drop")
+                    if not dropped:
+                        continue
                     if probes.pop(dropped, None) is not None:
                         print(Fore.CYAN + f"[Probe] {dropped} dropped (its observed stream is kept)." + Style.RESET_ALL)
                     else:
                         print(Fore.YELLOW + f"[Probe] no active probe named {dropped}.{did_you_mean(dropped, probes)}" + Style.RESET_ALL)
                     continue
+                if pargs.lower().startswith("explain "):
+                    ename_raw = pargs[8:].strip()
+                    ename_resolved = resolve_probe_choice(ename_raw, probes, model=model, config=config, action_name="explain")
+                    if not ename_resolved:
+                        continue
+                    if ename_resolved not in probes:
+                        print(Fore.YELLOW + f"[Probe] no active probe named '{ename_resolved}'.{did_you_mean(ename_resolved, probes)}" + Style.RESET_ALL)
+                        continue
+                    framings = probes[ename_resolved].get("framings")
+                    if framings and any(framings):
+                        print(Fore.CYAN + f"[Probe] {ename_resolved} was minted with framings:\n  WITH:    {framings[0]}\n  WITHOUT: {framings[1]}" + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + f"[Probe] {ename_resolved} has no stored framings (likely adopted from a raw vector)." + Style.RESET_ALL)
+                    continue
                 if pargs.lower().startswith("chatty "):
-                    chatty_name = pargs[7:].strip()
+                    chatty_name_raw = pargs[7:].strip()
+                    chatty_name = resolve_probe_choice(chatty_name_raw, probes, model=model, config=config, action_name="chatty")
+                    if not chatty_name:
+                        continue
                     if chatty_name in probes:
                         current = probes[chatty_name].get("chatty", True)
                         probes[chatty_name]["chatty"] = not current
@@ -2549,7 +3686,11 @@ def main():
                     continue
                 if pargs.lower().startswith("expose "):
                     eargs = pargs[7:].split()
-                    ename = re.sub(r"[^a-z0-9_]", "_", eargs[0].lower())[:40] if eargs else ""
+                    ename_raw = eargs[0].lower() if eargs else ""
+                    ename_resolved = resolve_probe_choice(ename_raw, probes)
+                    if not ename_resolved:
+                        continue
+                    ename = re.sub(r"[^a-z0-9_]", "_", ename_resolved)[:40]
                     turn_off = len(eargs) > 1 and eargs[1].lower() in ("off", "0", "false")
                     if ename not in probes:
                         print(Fore.YELLOW + f"[Probe] no active probe named '{ename}'.{did_you_mean(ename, probes)}" + Style.RESET_ALL)
@@ -2761,10 +3902,36 @@ def main():
                     continue
                 if pargs.lower() == "backfill" or pargs.lower().startswith("backfill "):
                     rest = pargs[len("backfill"):].split()
-                    bf_name = re.sub(r"[^a-z0-9_]", "_", rest[0].lower())[:40] if rest else ""
-                    if bf_name not in probes:
-                        print(Fore.YELLOW + f"[Probe] no active probe named '{bf_name}'.{did_you_mean(bf_name, probes)} Bare :probe lists them." + Style.RESET_ALL)
+                    if not rest:
+                        print(Fore.YELLOW + "[Probe] Usage: :probe backfill <name|all|choose> [n]" + Style.RESET_ALL)
                         continue
+                    bf_name_raw = rest[0]
+                    bf_names_to_rebuild = []
+                    if bf_name_raw == "all":
+                        bf_names_to_rebuild = list(probes.keys())
+                    elif bf_name_raw == "choose":
+                        candidates = []
+                        for p in probes:
+                            tr = tuner.triggers.get(f"probe_{p}")
+                            n_sigs = len(tr.signals) if tr else 0
+                            candidates.append((n_sigs, p))
+                        if candidates:
+                            candidates.sort()
+                            chosen = candidates[0][1]
+                            print(Fore.CYAN + f"[Probe] Model chose to backfill '{chosen}' (only {candidates[0][0]} signals)." + Style.RESET_ALL)
+                            bf_names_to_rebuild = [chosen]
+                        else:
+                            print(Fore.YELLOW + "[Probe] No active probes to backfill." + Style.RESET_ALL)
+                            continue
+                    else:
+                        bf_name_resolved = resolve_probe_choice(bf_name_raw, probes)
+                        if not bf_name_resolved:
+                            continue
+                        bf_name = re.sub(r"[^a-z0-9_]", "_", bf_name_resolved)[:40]
+                        if bf_name not in probes:
+                            print(Fore.YELLOW + f"[Probe] no active probe named '{bf_name}'.{did_you_mean(bf_name, probes)} Bare :probe lists them." + Style.RESET_ALL)
+                            continue
+                        bf_names_to_rebuild = [bf_name]
                     bf_limit = None
                     if len(rest) > 1:
                         try:
@@ -2788,11 +3955,14 @@ def main():
                     # from counting twice. Pre-mint turns alone get new paired
                     # rows in the turn log -- post-mint turns already wrote
                     # theirs live.
-                    mint_ts = next(
-                        (e.timestamp for e in memory.records
-                         if e.kind == "event" and "probe" in (e.tags or []) and (e.text or "").startswith(f"{bf_name}:")),
-                        None,
-                    )
+                    mint_ts_map = {}
+                    for _pn in bf_names_to_rebuild:
+                        _mint = next(
+                            (e.timestamp for e in memory.records
+                             if e.kind == "event" and "probe" in (e.tags or []) and (e.text or "").startswith(f"{_pn}:")),
+                            None,
+                        )
+                        mint_ts_map[_pn] = _mint
                     from invariants.engine import _inputs as _bf_inputs, _hidden_states as _bf_hidden, probe_score as _bf_score
                     # One shared forward per archived reply scores EVERY active
                     # probe (projections are free once the states exist), so the
@@ -2801,9 +3971,10 @@ def main():
                     # and rolling history are rebuilt.
                     bf_rollings = {p: deque(maxlen=40) for p in probes}
                     bf_scored = []  # (timestamp, {probe: (raw, sig)}, stored sense)
+                    display_name = "all probes" if bf_name_raw == "all" else bf_names_to_rebuild[0]
                     print(
                         Fore.CYAN
-                        + f"[Probe] backfilling {bf_name} over {len(archive)} archived replies "
+                        + f"[Probe] backfilling {display_name} over {len(archive)} archived replies "
                         + f"(one forward each; scoring {len(probes)} active probe(s) per reply)..."
                         + Style.RESET_ALL,
                         flush=True,
@@ -2824,23 +3995,24 @@ def main():
                             bf_scored.append((br.timestamp, per_probe, float(sense) if sense is not None else None))
                             if (bf_i + 1) % 25 == 0:
                                 print(Fore.CYAN + f"  ...{bf_i + 1}/{len(archive)}" + Style.RESET_ALL, flush=True)
-                    trig = tuner.register(f"probe_{bf_name}", 0.0, kind="threshold", comparator=">=")
-                    trig.signals.clear()
-                    trig.outcomes.clear()
-                    trig.observed = 0
-                    trig.fired = 0
-                    credited = 0
-                    for _bts, _bpp, _bsense in bf_scored:
-                        _bsig = _bpp[bf_name][1]
-                        trig.observe(_bsig)
-                        if _bsense is not None:
-                            trig.credit(_bsig, _bsense)
-                            credited += 1
+                    total_credited = {}
+                    for _pn in bf_names_to_rebuild:
+                        trig = tuner.register(f"probe_{_pn}", 0.0, kind="threshold", comparator=">=")
+                        trig.signals.clear()
+                        trig.outcomes.clear()
+                        trig.observed = 0
+                        trig.fired = 0
+                        credited = 0
+                        for _bts, _bpp, _bsense in bf_scored:
+                            _bsig = _bpp[_pn][1]
+                            trig.observe(_bsig)
+                            if _bsense is not None:
+                                trig.credit(_bsig, _bsense)
+                                credited += 1
+                        total_credited[_pn] = credited
+                        probes[_pn]["history"] = deque((pp[_pn][0] for _, pp, _ in bf_scored), maxlen=40)
                     tuner.save()
-                    probes[bf_name]["history"] = deque((pp[bf_name][0] for _, pp, _ in bf_scored), maxlen=40)
-                    # Rows already carrying this probe's column (an earlier
-                    # backfill) are skipped by timestamp; recomputation is
-                    # deterministic, so a re-run adds nothing twice.
+                    
                     existing_ts = set()
                     try:
                         with open(TURN_SIGNALS_PATH, "r", encoding="utf-8") as _tf:
@@ -2849,15 +4021,18 @@ def main():
                                     _r = json.loads(_line)
                                 except Exception:
                                     continue
-                                if _r.get("basis") == "backfill" and f"probe_{bf_name}" in _r and _r.get("ts"):
-                                    existing_ts.add(_r["ts"])
+                                if _r.get("basis") == "backfill" and _r.get("ts"):
+                                    # if ANY of the rebuilt probes are already in this backfill row, consider it existing
+                                    if any(f"probe_{_pn}" in _r for _pn in bf_names_to_rebuild):
+                                        existing_ts.add(_r["ts"])
                     except OSError:
                         pass
                     rows_added = 0
                     try:
                         with open(TURN_SIGNALS_PATH, "a", encoding="utf-8") as _tf:
                             for _bts, _bpp, _bsense in bf_scored:
-                                if mint_ts is not None and _bts >= mint_ts:
+                                # We skip adding this joint row if ALL rebuilt probes were minted BEFORE this turn
+                                if all(mint_ts_map.get(_pn) is not None and _bts >= mint_ts_map[_pn] for _pn in bf_names_to_rebuild):
                                     continue
                                 if _bts in existing_ts:
                                     continue
@@ -2873,23 +4048,21 @@ def main():
                         pass
                     memory.append_event(
                         "probe_backfilled",
-                        text=f"{bf_name}: {len(bf_scored)} archived replies re-scored",
+                        text=f"{display_name}: {len(bf_scored)} archived replies re-scored",
                         tags=["probe"],
                         provenance={
-                            "probe": bf_name,
+                            "probes": bf_names_to_rebuild,
                             "turns_scored": len(bf_scored),
-                            "credited": credited,
                             "paired_rows_added": rows_added,
-                            "history_seeded": len(probes[bf_name]["history"]),
                         },
                     )
-                    st = trig.outcome_stats()
+                    st = tuner.triggers[f"probe_{bf_names_to_rebuild[0]}"].outcome_stats() if bf_names_to_rebuild else {"lift": 0}
                     print(
                         Fore.GREEN
-                        + f"[Probe] {bf_name} backfilled: {len(bf_scored)} archived replies re-scored in order. "
-                        + f"Trigger stream rebuilt ({credited} turns credited with stored sense, lift={st['lift']}), "
-                        + f"{rows_added} pre-mint paired rows added, rolling history seeded with the last "
-                        + f"{len(probes[bf_name]['history'])} raws -- live scoring continues from it."
+                        + f"[Probe] {display_name} backfilled: {len(bf_scored)} archived replies re-scored in order. "
+                        + f"Trigger stream(s) rebuilt, "
+                        + f"{rows_added} pre-mint paired rows added, rolling history seeded. "
+                        + f"Live scoring continues normally."
                         + Style.RESET_ALL
                     )
                     continue
@@ -2968,53 +4141,56 @@ def main():
                 continue
             if user_input.startswith(":place "):
                 pargs = user_input[len(":place "):].strip().split()
-                if len(pargs) >= 2 and pargs[0] in probes:
-                    pname = pargs[0]
-                    sign_arg = pargs[1]
-                    if sign_arg in ("+", "positive", "1", "pos"):
-                        sign = 1.0
-                    elif sign_arg in ("-", "negative", "-1", "neg"):
-                        sign = -1.0
-                    else:
-                        print(Fore.YELLOW + "[Place] specify + or - for the placement." + Style.RESET_ALL)
+                if len(pargs) >= 2:
+                    pname = resolve_probe_choice(pargs[0], probes)
+                    if not pname:
                         continue
-                    
-                    last_reply = None
-                    for r in reversed(memory.records):
-                        if r.role == "assistant":
-                            last_reply = r.text
-                            break
-                    if not last_reply:
-                        print(Fore.YELLOW + "[Place] no assistant reply found to place." + Style.RESET_ALL)
-                        continue
+                    if pname in probes:
+                        sign_arg = pargs[1]
+                        if sign_arg in ("+", "positive", "1", "pos"):
+                            sign = 1.0
+                        elif sign_arg in ("-", "negative", "-1", "neg"):
+                            sign = -1.0
+                        else:
+                            print(Fore.YELLOW + "[Place] specify + or - for the placement." + Style.RESET_ALL)
+                            continue
                         
-                    print(Fore.CYAN + f"[Place] Extracting state of last response to update '{pname}'..." + Style.RESET_ALL)
-                    from invariants.engine import _inputs, _hidden_states
-                    ids = _inputs(model, last_reply[:600])
-                    hs = _hidden_states(model, ids["input_ids"], ids.get("attention_mask"))
-                    
-                    probe_dir = probes[pname]["direction"]
-                    learning_rate = 0.15  # a noticeable nudge
-                    updated_layers = 0
-                    for L in list(probe_dir.keys()):
-                        L_str = str(L)
-                        if L_str in hs:
-                            mean_hs = hs[L_str].mean(dim=0).to(model.device).reshape(-1)
-                            if mean_hs.norm().item() > 0:
-                                mean_hs = mean_hs / mean_hs.norm()
-                                current_dir = probe_dir[L].to(model.device).reshape(-1)
-                                new_dir = current_dir + sign * learning_rate * mean_hs
-                                if new_dir.norm().item() > 0:
-                                    probe_dir[L] = new_dir / new_dir.norm()
-                                    updated_layers += 1
-                                    
-                    print(Fore.GREEN + Style.BRIGHT + f"[Place] '{pname}' probe nudged {'toward' if sign > 0 else 'away from'} the last response over {updated_layers} layers." + Style.RESET_ALL)
-                    memory.append_event(
-                        "probe_placed",
-                        text=f"placed last response on '{pname}' as {'positive' if sign > 0 else 'negative'}",
-                        tags=["probe", "place"],
-                        provenance={"probe": pname, "sign": sign}
-                    )
+                        last_reply = None
+                        for r in reversed(memory.records):
+                            if r.role == "assistant":
+                                last_reply = r.text
+                                break
+                        if not last_reply:
+                            print(Fore.YELLOW + "[Place] no assistant reply found to place." + Style.RESET_ALL)
+                            continue
+                            
+                        print(Fore.CYAN + f"[Place] Extracting state of last response to update '{pname}'..." + Style.RESET_ALL)
+                        from invariants.engine import _inputs, _hidden_states
+                        ids = _inputs(model, last_reply[:600])
+                        hs = _hidden_states(model, ids["input_ids"], ids.get("attention_mask"))
+                        
+                        probe_dir = probes[pname]["direction"]
+                        learning_rate = 0.15  # a noticeable nudge
+                        updated_layers = 0
+                        for L in list(probe_dir.keys()):
+                            L_str = str(L)
+                            if L_str in hs:
+                                mean_hs = hs[L_str].mean(dim=0).to(model.device).reshape(-1)
+                                if mean_hs.norm().item() > 0:
+                                    mean_hs = mean_hs / mean_hs.norm()
+                                    current_dir = probe_dir[L].to(model.device).reshape(-1)
+                                    new_dir = current_dir + sign * learning_rate * mean_hs
+                                    if new_dir.norm().item() > 0:
+                                        probe_dir[L] = new_dir / new_dir.norm()
+                                        updated_layers += 1
+                                        
+                        print(Fore.GREEN + Style.BRIGHT + f"[Place] '{pname}' probe nudged {'toward' if sign > 0 else 'away from'} the last response over {updated_layers} layers." + Style.RESET_ALL)
+                        memory.append_event(
+                            "probe_placed",
+                            text=f"placed last response on '{pname}' as {'positive' if sign > 0 else 'negative'}",
+                            tags=["probe", "place"],
+                            provenance={"probe": pname, "sign": sign}
+                        )
                 else:
                     print(Fore.YELLOW + "[Place] Usage: :place <probe> <+|->" + Style.RESET_ALL)
                 continue
@@ -3066,7 +4242,10 @@ def main():
                 if len(largs) < 2:
                     print(Fore.CYAN + "[Label] Usage: :label <probe|stream> pos|neg -- mark the last turn on that axis." + Style.RESET_ALL)
                     continue
-                lname = largs[0]
+                lname_raw = largs[0]
+                lname = resolve_probe_choice(lname_raw, probes)
+                if not lname:
+                    continue
                 verdict = largs[1].lower()
                 if verdict in ("pos", "positive", "+", "good", "1", "up"):
                     outcome = 1.0
@@ -3116,7 +4295,10 @@ def main():
                                      "band": "per-layer outcomes", "reject": "REFUSED (circular/binary)"}[route]
                             print(Fore.CYAN + f"  {label}: {', '.join(routes[route])}" + Style.RESET_ALL)
                     continue
-                cal_name = cargs[0]
+                cal_name_raw = cargs[0]
+                cal_name = resolve_probe_choice(cal_name_raw, probes)
+                if not cal_name:
+                    continue
                 route, reason = calibration_policy(cal_name)
                 if len(cargs) >= 2 and cargs[1].lower() == "outcome":
                     if cal_name not in OUTCOME_CALIBRATABLE and route != "threshold":
@@ -3306,6 +4488,75 @@ def main():
                     print(Fore.GREEN + f"[Queue] Added: :calibrate {cmd_to_queue} (will silently retry every turn)." + Style.RESET_ALL)
                 continue
             if user_input.startswith(":tune"):
+                if " dynamic " in user_input.lower():
+                    # :tune <target> dynamic <signed mix> [mult]
+                    #   target : a knob, OR a probe (drives probe_<name>'s threshold,
+                    #            never a bare shadow knob).
+                    #   mix    : a single probe/stream, or a signed mix parsed like
+                    #            :probe compose (e.g. +ambiguity-consensus). Each turn
+                    #            the target = mult * Sigma(weight * stream) over the mix.
+                    parts = user_input[len(":tune"):].strip().split()
+                    try:
+                        dyn_idx = [p.lower() for p in parts].index("dynamic")
+                    except ValueError:
+                        dyn_idx = -1
+                    if dyn_idx > 0 and dyn_idx < len(parts) - 1:
+                        target = parts[0]
+                        rest = parts[dyn_idx + 1:]
+                        # Peel a trailing standalone multiplier (number|auto|pNN) off
+                        # the end; whatever remains is the mix expression.
+                        mult_str = None
+                        if len(rest) >= 2 and re.match(r"^(auto|p\d+(?:\.\d+)?|-?\d+(?:\.\d+)?)$", rest[-1].lower()):
+                            mult_str = rest[-1].lower()
+                            rest = rest[:-1]
+                        terms, perr = parse_compose_expr(" ".join(rest))
+                        if perr:
+                            print(Fore.RED + f"[Tune] Could not parse dynamic expression near '{perr}'." + Style.RESET_ALL)
+                            continue
+                        # A probe target drives its OWN threshold (probe_<name>) -- no
+                        # shadow. A real knob is driven directly.
+                        bind_key = f"probe_{target}" if f"probe_{target}" in tuner.triggers else target
+                        single = terms[0][1] if len(terms) == 1 else None
+                        if mult_str is None:
+                            mult_str = "auto" if single else "1.0"
+                        mult = 1.0
+                        if mult_str == "auto" or mult_str.startswith("p"):
+                            if single:
+                                pct = 80.0
+                                if mult_str.startswith("p"):
+                                    try:
+                                        pct = float(mult_str[1:])
+                                    except ValueError:
+                                        pass
+                                pct = min(max(pct, 0.0), 100.0)
+                                ptrig = tuner.triggers.get(f"probe_{single}")
+                                if ptrig and ptrig.signals:
+                                    data = sorted(ptrig.signals)
+                                    p_val = data[int(round((pct / 100.0) * (len(data) - 1)))]
+                                    if p_val > 0:
+                                        cur = tuner.get(bind_key, 0.0)
+                                        mult = cur / p_val
+                                        print(Fore.CYAN + f"[Tune] Auto-multiplier {mult:.4f} (maps {single} P{pct:g} {p_val:.3f} to current {bind_key} {cur:.3f})." + Style.RESET_ALL)
+                                    else:
+                                        print(Fore.YELLOW + f"[Tune] Auto failed ({single} P{pct:g} <= 0). Give a numeric multiplier." + Style.RESET_ALL)
+                                        continue
+                                else:
+                                    print(Fore.YELLOW + f"[Tune] Auto failed (no history for '{single}'). Give a numeric multiplier." + Style.RESET_ALL)
+                                    continue
+                            else:
+                                print(Fore.YELLOW + "[Tune] Auto-multiplier needs a single probe's history; using 1.0 for the mix." + Style.RESET_ALL)
+                        else:
+                            try:
+                                mult = float(mult_str)
+                            except ValueError:
+                                print(Fore.RED + "[Tune] Multiplier must be a number, 'auto', or 'pNN'." + Style.RESET_ALL)
+                                continue
+                        tuner_bindings[bind_key] = (terms, mult)
+                        label = " ".join(f"{'-' if w < 0 else '+'}{abs(w):g}*{n}" for w, n in terms)
+                        tgt_note = f"probe '{target}' threshold" if bind_key.startswith("probe_") else f"knob '{bind_key}'"
+                        print(Fore.GREEN + f"[Tune] Dynamic binding: {tgt_note} = {mult:.4f} * ({label}) every turn." + Style.RESET_ALL)
+                        continue
+
                 targs = user_input[len(":tune"):].split()
                 if not targs:
                     rows = tuner.summary()
@@ -3440,11 +4691,51 @@ def main():
                     else:
                         print(Fore.GREEN + f"[Tune] {targs[0]} calibrated toward p{pct:g} = {round(v, 4)}" + Style.RESET_ALL)
                 elif len(targs) >= 2:
+                    if targs[0].lower() == "off":
+                        targs[0], targs[1] = targs[1], "0.0"
+                    elif targs[1].lower() == "off":
+                        targs[1] = "0.0"
+                        
+                    if targs[0].startswith("probe_") or (targs[0] in probes and targs[0] not in tuner.triggers):
+                        pname = targs[0].replace("probe_", "")
+                        if targs[1] == "0.0":
+                            if pname in probes:
+                                probes[pname]["chatty"] = False
+                                print(Fore.CYAN + f"[Tune] Redirected: muted console output for probe '{pname}' (use ':probe drop {pname}' to remove it entirely)." + Style.RESET_ALL)
+                            else:
+                                print(Fore.YELLOW + f"[Tune] No active probe named '{pname}'." + Style.RESET_ALL)
+                        else:
+                            if targs[1].replace("probe_", "") in probes:
+                                print(Fore.YELLOW + f"[Tune] Did you mean to dynamically tie the threshold? Use: :tune {targs[0]} dynamic {targs[1]}" + Style.RESET_ALL)
+                            else:
+                                print(Fore.YELLOW + f"[Tune] '{targs[0]}' is a probe. To mute it use ':tune {targs[0]} off', or to drop it use ':probe drop {pname}'." + Style.RESET_ALL)
+                        continue
+
                     # Setting a brand-new name that collides with a probe would
                     # create a junk knob shadowing it -- refuse and redirect.
                     if targs[0] not in tuner.triggers and f"probe_{targs[0]}" in tuner.triggers:
                         print(Fore.YELLOW + f"[Tune] '{targs[0]}' is a probe, not a knob -- :tune would create a shadow. Use :label {targs[0]} pos|neg or :calibrate {targs[0]} <anchor>." + Style.RESET_ALL)
                     else:
+                        if targs[1].upper() in ("CHOICE", "CHOOSE"):
+                            print(Fore.CYAN + f"[Choice] Asking the model to select a value for '{targs[0]}'..." + Style.RESET_ALL)
+                            prompt = (
+                                f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                                f"You are configuring the cognitive tuning parameter '{targs[0]}'.\n"
+                                f"Select an appropriate numerical value (float). Output ONLY the number and nothing else.<|eot_id|>"
+                                f"<|start_header_id|>assistant<|end_header_id|>\n\n"
+                            )
+                            # NOTE: no local `import generate_agentic_text` here --
+                            # it is imported at module level. A local import would
+                            # make the name function-local across all of run() and
+                            # UnboundLocalError every other generate call.
+                            sug = generate_agentic_text(model, instruction=prompt, config=config, pre_formatted=True, max_new_tokens=10)
+                            try:
+                                targs[1] = str(float(sug.strip()))
+                                print(Fore.GREEN + f"[Choice] The model chose value: {targs[1]}" + Style.RESET_ALL)
+                            except ValueError:
+                                print(Fore.YELLOW + f"[Choice] Model output an invalid number '{sug.strip()}'. Aborting." + Style.RESET_ALL)
+                                continue
+
                         try:
                             v = tuner.set(targs[0], float(targs[1]))
                             print(Fore.GREEN + f"[Tune] {targs[0]} = {round(v, 4)}" + Style.RESET_ALL)
@@ -3481,6 +4772,10 @@ def main():
             methodmap_tool_result = pending_methodmap_tool_result
             document_tool_result = pending_document_tool_result
             sandbox_tool_result = pending_sandbox_tool_result
+            game_tool_result = pending_game_tool_result
+            if active_game and not game_tool_result:
+                sys_prompt = active_game_state.get("system_prompt", "The operator expects you to play it with them. To end the game, output <<GAME_END>>.")
+                game_tool_result = f"[Game Active: {active_game}] A game is currently active. {sys_prompt}"
             # Consequences of the model's LAST words arrive as THIS turn's
             # context; the same-turn tag requests below add to the list.
             turn_impacts = impact_state["pending"]
@@ -3494,6 +4789,7 @@ def main():
             pending_methodmap_tool_result = None
             pending_document_tool_result = None
             pending_sandbox_tool_result = None
+            pending_game_tool_result = None
             prompt = build_prompt(
                 user_input,
                 memory_tool_result=memory_tool_result,
@@ -3502,6 +4798,7 @@ def main():
                 methodmap_tool_result=methodmap_tool_result,
                 sandbox_tool_result=sandbox_tool_result,
                 document_tool_result=document_tool_result,
+                game_tool_result=game_tool_result,
                 session_context=session_context if session_context_enabled else None,
             )
             # Honest attribution in the permanent record: a reading turn is the
@@ -3510,7 +4807,10 @@ def main():
             memory.append_turn(
                 "user",
                 user_input,
-                tags=["reading_turn" if reading_turn_source else "operator_input"],
+                tags=[
+                    "reading_turn" if reading_turn_source else "operator_input",
+                    _last_replace_name if ('_last_replace_name' in locals() and _last_replace_name) else "operator"
+                ],
                 provenance={
                     "spoken_by": "model_reading" if reading_turn_source else "operator",
                     "document_source": reading_turn_source,
@@ -3569,6 +4869,31 @@ def main():
 
             print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
             synthesis_records = []
+
+            # Evaluate dynamic tuner bindings before generation
+            if tuner_bindings and turn_log:
+                last_turn = turn_log[-1]
+                for bind_key, (terms, mult) in list(tuner_bindings.items()):
+                    vals = []
+                    for w, name in terms:
+                        # Resolve each mix term to last turn's stream: a probe
+                        # (probe_<name>), a bare named stream, or a phenomenality
+                        # dimension (phen_<name>).
+                        s = last_turn.get(f"probe_{name}")
+                        if s is None:
+                            s = last_turn.get(name)
+                        if s is None:
+                            s = last_turn.get(f"phen_{name}")
+                        if s is None:
+                            vals = None  # a term has no reading yet -> skip this turn
+                            break
+                        vals.append(w * float(s))
+                    if vals is not None:
+                        mix_sig = sum(vals)
+                        new_val = mix_sig * mult
+                        tuner.set(bind_key, new_val)
+                        label = " ".join(f"{'-' if w < 0 else '+'}{abs(w):g}*{n}" for w, n in terms)
+                        print(Fore.CYAN + f"[Tune] Dynamic binding: {bind_key} set to {new_val:.4f} ({mult:g} * [{label}] = {mix_sig:+.3f})." + Style.RESET_ALL, flush=True)
 
             # Live steering surface: cap/band/fraction move with the tuner each
             # turn, so a :tune takes effect on the very next generation.
@@ -3642,6 +4967,34 @@ def main():
                     + f"[Prioritize] steering {_dir_word} {prio_steered[0]} (alpha {round(prio_alpha,4)})."
                     + Style.RESET_ALL
                 )
+            # Exposed-probe steer: same envelope/mechanism as prioritize, but the
+            # target is the SET of probes the operator exposed to the model --
+            # lift-weighted, so evidence sets each one's degree and sign. Off at 0,
+            # idle until those probes have credited lift.
+            exposed_alpha = tuner.get("exposed_probe_alpha", 0.0)
+            if exposed_alpha and exposed_alpha > 0 and probes:
+                exposed_names = sorted(n for n in probes if probes[n].get("exposed"))
+                if exposed_names:
+                    from invariants.engine import _steer_handles as _e_steer
+                    _edir = build_priority_mix_direction(model, exposed_names, probes, tuner)
+                    if _edir:
+                        try:
+                            steer_handles.extend(_e_steer(model, _edir, list(_edir.keys()), exposed_alpha))
+                            print(
+                                Fore.MAGENTA
+                                + f"[Exposed] steering along {len(exposed_names)} exposed probe(s) "
+                                + f"({', '.join(exposed_names)}) at alpha {round(exposed_alpha, 4)}."
+                                + Style.RESET_ALL
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        print(
+                            Fore.YELLOW
+                            + "[Exposed] exposed_probe_alpha is set but no exposed probe has credited "
+                            + "lift yet -- steering idle until they accrue outcomes."
+                            + Style.RESET_ALL
+                        )
             # Clock start: wall-time for THIS turn's generation (all
             # regenerations included), snapshotted before probe-scoring so the
             # reading reflects generation, not instrumentation. Peak VRAM is
@@ -3670,6 +5023,77 @@ def main():
             model_methodmap_query = extract_methodmap_query(response)
             model_doc_query = extract_doc_query(response)
             model_probe_query = extract_probe_query(response)
+            model_game_propose = extract_game_propose(response)
+            model_game_accept = extract_game_accept(response)
+            model_game_decline = extract_game_decline(response)
+            model_game_end = extract_game_end(response)
+            model_game_exposed, model_game_hidden = extract_game_expose_hide(response)
+
+            if model_game_exposed or model_game_hidden:
+                print(Fore.MAGENTA + Style.BRIGHT + "\n[Game State Changed]" + Style.RESET_ALL)
+                for p in model_game_exposed:
+                    if p in probes:
+                        probes[p]["exposed"] = True
+                        pf = os.path.join(ROOT, "invariants", "out", "probes", f"{p}.pt")
+                        if os.path.exists(pf):
+                            data = torch.load(pf, weights_only=True)
+                            data["exposed"] = True
+                            torch.save(data, pf)
+                        print(Fore.GREEN + f"  [+] EXPOSED: {p}" + Style.RESET_ALL)
+                for p in model_game_hidden:
+                    if p in probes:
+                        probes[p]["exposed"] = False
+                        pf = os.path.join(ROOT, "invariants", "out", "probes", f"{p}.pt")
+                        if os.path.exists(pf):
+                            data = torch.load(pf, weights_only=True)
+                            data["exposed"] = False
+                            torch.save(data, pf)
+                        print(Fore.RED + f"  [-] HIDDEN: {p}" + Style.RESET_ALL)
+
+            if model_game_propose:
+                model_proposed_game = model_game_propose
+                print(Fore.MAGENTA + f"\n[Game] The model proposes playing '{model_proposed_game}'. Type ':game {model_proposed_game}' to accept." + Style.RESET_ALL)
+            
+            if model_game_accept:
+                if user_proposed_game == model_game_accept:
+                    print(Fore.GREEN + f"\n[Game] The model accepted your proposal to play {model_game_accept}!" + Style.RESET_ALL)
+                    user_proposed_game = None
+                    active_game = model_game_accept
+                    
+                    gpath = os.path.join(ROOT, "games", f"{active_game}.py")
+                    if os.path.isfile(gpath):
+                        print(Fore.MAGENTA + f"[Game] Initializing {active_game}..." + Style.RESET_ALL)
+                        try:
+                            with open(gpath, "r", encoding="utf-8") as _gf:
+                                gcode = _gf.read()
+                            exec_globals = globals().copy()
+                            exec(gcode, exec_globals)
+                        except Exception as e:
+                            import traceback
+                            print(Fore.RED + f"[Game Error] {e}\n{traceback.format_exc()}" + Style.RESET_ALL)
+            
+            if model_game_decline:
+                # The model's own agency: it may refuse a proposed game, or back
+                # out of one that was force-started, by emitting <<GAME_DECLINE>>.
+                declined = None
+                if user_proposed_game and model_game_decline in ("*", user_proposed_game):
+                    declined, user_proposed_game = user_proposed_game, None
+                elif active_game and model_game_decline in ("*", active_game):
+                    declined, active_game = active_game, None
+                if declined:
+                    print(Fore.YELLOW + f"\n[Game] The model declined {declined}." + Style.RESET_ALL)
+                    pending_game_tool_result = None
+                    memory.append_event("game_declined", tags=["game", "self_concept"], provenance={"game": declined})
+
+            if model_game_end:
+                if active_game:
+                    print(Fore.CYAN + f"\n[Game] The model ended the active game: {active_game}." + Style.RESET_ALL)
+                    prize = active_game_state.get("prize_command")
+                    if prize:
+                        print(Fore.GREEN + f"[Game] Awarding prize! Queuing command: {prize}" + Style.RESET_ALL)
+                        input_queue.insert(0, prize)
+                    active_game = None
+                    active_game_state = {}
             model_memory_tool_result = None
             model_claimmap_tool_result = None
             model_methodmap_tool_result = None
@@ -4047,14 +5471,15 @@ def main():
                 if session_context_enabled:
                     s_score = sense_score(synthesis_records) if synthesis_records else 0.0
                     if s_score is None: s_score = 0.0
-                    session_context.append(("user", user_input, s_score))
-                    session_context.append(("assistant", response, s_score))
+                    active_u_name = _last_replace_name if '_last_replace_name' in locals() and _last_replace_name else "user"
+                    session_context.append(("user", active_u_name, user_input, s_score))
+                    session_context.append(("assistant", "assistant", response, s_score))
                     if len(session_context) > MAX_SESSION_TURNS * 2:
                         if len(session_context) >= 6:
                             min_score = float('inf')
                             min_idx = 0
                             for i in range(0, len(session_context) - 4, 2):
-                                pair_score = session_context[i][2] if len(session_context[i]) > 2 else 0.0
+                                pair_score = session_context[i][3] if len(session_context[i]) > 3 else (session_context[i][2] if len(session_context[i]) > 2 else 0.0)
                                 if pair_score < min_score:
                                     min_score = pair_score
                                     min_idx = i
@@ -4062,10 +5487,55 @@ def main():
                             session_context.pop(min_idx)
                         else:
                             session_context = session_context[-MAX_SESSION_TURNS * 2 :]
+
+                # Run Joined Agents
+                for ja in joined_agents:
+                    print(Fore.GREEN + Style.BRIGHT + f"\n[{ja.name}]: " + Style.RESET_ALL, end="")
+                    
+                    _sys_tuner = tuner
+                    _sys_probes = probes
+                    _sys_tb = tuner_bindings
+                    tuner = ja.tuner
+                    probes = ja.probes
+                    tuner_bindings = ja.tuner_bindings
+                    
+                    ja_prompt = build_prompt(
+                        "[Please respond]", 
+                        session_context=session_context if session_context_enabled else None
+                    )
+                    ja_response = generate_agentic_text(
+                        model,
+                        instruction=ja_prompt,
+                        config=config,
+                        max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
+                        synthesis_recorder=None,
+                        chatty_log=False,
+                        pre_formatted=True,
+                        return_telemetry=False,
+                    )
+                    
+                    print(ja_response, end="")
+                    
+                    if session_context_enabled:
+                        session_context.append(("assistant", ja.name, ja_response, 0.0))
+                    
+                    tuner = _sys_tuner
+                    probes = _sys_probes
+                    tuner_bindings = _sys_tb
+                    
+                    memory.append_turn(
+                        "assistant",
+                        ja_response,
+                        tags=["model_output", ja.name],
+                        metrics={
+                            "chars": len(ja_response),
+                        }
+                    )
+
                 memory.append_turn(
                     "assistant",
                     response,
-                    tags=["model_output"],
+                    tags=["model_output", "main_assistant"],
                     metrics={
                         "chars": len(response),
                         "sense_score": float(s_score) if session_context_enabled else 0.0,
@@ -4287,7 +5757,21 @@ def main():
             # sense clears the conversation_productive bar (or needed no
             # deliberation at all); enough settled turns in a row end the
             # auto-read early, honestly, with the remainder still unread.
-            if doc_autoread and doc_autoread.get("until_settled") and reading_turn_source:
+            if doc_autoread and doc_autoread.get("until_probe") and reading_turn_source:
+                up = doc_autoread["until_probe"]
+                trig = tuner.triggers.get(f"probe_{up}")
+                sig = turn_row.get(f"probe_{up}")
+                if trig and sig is not None and sig >= trig.value:
+                    unread_left = sum(s["chunk_count"] - len(s.get("read") or ()) for s in doc_library)
+                    print(
+                        Fore.CYAN
+                        + f"[Doc] Reading stopped: probe '{up}' thresholded ({sig:+.3f} >= {trig.value:.3f}). "
+                        + f"Stopping with {unread_left} chunk(s) unread -- ':doc read' resumes anytime."
+                        + Style.RESET_ALL
+                    )
+                    doc_autoread = None
+
+            elif doc_autoread and doc_autoread.get("until_settled") and reading_turn_source:
                 settled_turn = turn_sense is None or turn_sense >= float(
                     tuner.get("conversation_productive", 0.0)
                 )

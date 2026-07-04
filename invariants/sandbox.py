@@ -66,6 +66,13 @@ def run_python(
     workdir = Path(cwd) if cwd is not None else SANDBOX_DIR
     workdir.mkdir(parents=True, exist_ok=True)
     code = (code or "")[:MAX_CODE_CHARS]
+    
+    # Save the exact script to disk so the user can inspect what ran
+    try:
+        (workdir / "last_run.py").write_text(code, encoding="utf-8")
+    except Exception:
+        pass
+        
     started = time.time()
     timed_out = False
     try:
@@ -84,6 +91,14 @@ def run_python(
         stdout = exc.stdout if isinstance(exc.stdout, str) else (exc.stdout or b"").decode("utf-8", "replace")
         stderr = exc.stderr if isinstance(exc.stderr, str) else (exc.stderr or b"").decode("utf-8", "replace")
     duration = time.time() - started
+    
+    # Save the raw outputs to disk for the user
+    try:
+        (workdir / "last_run.out").write_text(stdout or "", encoding="utf-8")
+        (workdir / "last_run.err").write_text(stderr or "", encoding="utf-8")
+    except Exception:
+        pass
+        
     return {
         "ok": (exit_code == 0) and not timed_out,
         "exit_code": exit_code,
