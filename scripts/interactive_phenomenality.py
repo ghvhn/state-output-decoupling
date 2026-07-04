@@ -1201,6 +1201,24 @@ def did_you_mean(name, candidates):
     return f" Did you mean '{match[0]}'?" if match else ""
 
 
+def _match_corr(pairs):
+    """Pearson r between (knob_value, probe_reading) pairs -- the credit a matched
+    probe gives its knob (does moving the knob move the probe?). None if too few
+    pairs or either side never varied."""
+    if not pairs or len(pairs) < 3:
+        return None
+    xs = [p[0] for p in pairs]
+    ys = [p[1] for p in pairs]
+    n = len(xs)
+    mx, my = sum(xs) / n, sum(ys) / n
+    sx = sum((x - mx) ** 2 for x in xs)
+    sy = sum((y - my) ** 2 for y in ys)
+    if sx <= 1e-12 or sy <= 1e-12:
+        return None
+    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    return cov / (sx ** 0.5 * sy ** 0.5)
+
+
 # Every command word the shell recognizes -- an unknown :word is either a typo
 # (suggest the nearest) or a request to invent a tool (offer to mint a probe),
 # never a generation of a generic essay.
@@ -1311,6 +1329,10 @@ COMMAND_HELP_LINES = [
     "                it was minted from; name accepts choose/auto)",
     "          :probe explain <name>       (the MODEL explains the probe in its own words: what it",
     "                senses and when it reads high vs low; name accepts choose/auto)",
+    "          :probe match <probe> <knob> | auto | drive [mult] | validate | check | off",
+    "                (tie a probe to its same-concept knob: drive = servo the knob from the",
+    "                probe each turn; validate = correlate knob value vs reading (check to read",
+    "                it); auto pairs every same-named probe+knob)",
     "          :calibrate <name> [pct|intent|<anchor>|<a>+<b>|band args]  (data-calibrate any knob",
     "                BY NAME; anchors join with '+' = fired only when EVERY stream fired;",
     "                the system evaluates the request and refuses unsafe ones --",
@@ -2336,6 +2358,30 @@ def main():
     # own learned lifts (you pick the probes, the data sets the weights).
     prioritize_pin = {"probe": None, "mix": None}
     tuner_bindings = {}  # knob -> (probe, multiplier)
+    # probe<->knob matches: probe name -> {"knob", "mode": none|drive|validate, "mult"}.
+    # A probe like memory_alpha is correlated to the memory_alpha knob but the two
+    # are separate; a match ties them so the probe can DRIVE the knob (servo) or
+    # VALIDATE it (record knob-value vs probe-reading each turn -> correlation).
+    PROBE_MATCH_PATH = os.path.join(ROOT, "invariants", "out", "probe_matches.json")
+    probe_matches = {}
+    try:
+        with open(PROBE_MATCH_PATH, "r", encoding="utf-8") as _pmf:
+            probe_matches = {str(k): dict(v) for k, v in json.load(_pmf).items()}
+    except (OSError, ValueError):
+        probe_matches = {}
+    match_hist = {}  # probe name -> deque of (knob_value, probe_reading); session-only
+
+    def _save_probe_matches():
+        try:
+            with open(PROBE_MATCH_PATH, "w", encoding="utf-8") as pmf:
+                json.dump(probe_matches, pmf, indent=2)
+        except Exception as e:
+            print(Fore.RED + f"[Error] Could not save probe matches: {e}" + Style.RESET_ALL)
+
+    # Re-arm any persisted servo bindings (mode=drive) so a restart keeps steering.
+    for _pn, _m in probe_matches.items():
+        if _m.get("mode") == "drive" and _m.get("knob"):
+            tuner_bindings[_m["knob"]] = ([(1.0, _pn)], float(_m.get("mult", 1.0)))
     egg_state = {"over": False}  # rising-edge latch for the consciousness egg
     startup_user_input = os.environ.get("PHENOMENALITY_STARTUP_PROMPT")
     if os.environ.get("PHENOMENALITY_AUTO_RESUME", "0").strip().lower() in {"1", "true", "yes"}:
@@ -4215,6 +4261,91 @@ def main():
                         print(Fore.CYAN + f"[Probe] {dropped} dropped (its observed stream is kept)." + Style.RESET_ALL)
                     else:
                         print(Fore.YELLOW + f"[Probe] no active probe named {dropped}.{did_you_mean(dropped, probes)}" + Style.RESET_ALL)
+                    continue
+                # :probe match -- tie a probe to the same-concept knob so it can DRIVE
+                # the knob (servo) or VALIDATE it (correlate knob value vs reading).
+                if pargs.lower() == "match" or pargs.lower().startswith("match "):
+                    margs = pargs[len("match"):].split()
+                    knobs = {t for t in tuner.triggers if not t.startswith("probe_")}
+                    if not margs:  # list
+                        if not probe_matches:
+                            print(Fore.CYAN + "[Match] No probe<->knob matches. ':probe match auto' pairs same-named probes+knobs; ':probe match <probe> <knob>' sets one." + Style.RESET_ALL)
+                        else:
+                            for pn, m in sorted(probe_matches.items()):
+                                extra = ""
+                                if m.get("mode") == "validate":
+                                    r = _match_corr(match_hist.get(pn))
+                                    extra = f"  r={r:+.2f}" if r is not None else "  r=(needs more varied turns)"
+                                print(Fore.CYAN + f"[Match] {pn} <-> knob '{m.get('knob')}'  mode={m.get('mode', 'none')}{extra}" + Style.RESET_ALL)
+                        continue
+                    sub = margs[0].lower()
+                    if sub in ("auto", "same"):  # pair every probe whose name is a knob
+                        paired = []
+                        for pn in probes:
+                            if pn in knobs:
+                                probe_matches.setdefault(pn, {"knob": pn, "mode": "none"})["knob"] = pn
+                                paired.append(pn)
+                        _save_probe_matches()
+                        print(Fore.GREEN + f"[Match] Auto-matched {len(paired)} probe(s) to same-named knobs: {', '.join(sorted(paired)) or '(none found)'}." + Style.RESET_ALL)
+                        continue
+                    pn = resolve_probe_choice(margs[0], probes, model=model, config=config, action_name="match")
+                    if not pn:
+                        continue
+                    if pn not in probes:
+                        print(Fore.YELLOW + f"[Match] no active probe '{pn}'.{did_you_mean(pn, probes)}" + Style.RESET_ALL)
+                        continue
+                    if len(margs) < 2:
+                        print(Fore.YELLOW + "[Match] Usage: :probe match <probe> <knob> | drive [mult] | validate | check | off" + Style.RESET_ALL)
+                        continue
+                    op = margs[1].lower()
+                    m = probe_matches.get(pn)
+                    if op == "off":
+                        if probe_matches.pop(pn, None) is not None:
+                            if m and m.get("knob") in tuner_bindings and m.get("mode") == "drive":
+                                tuner_bindings.pop(m["knob"], None)
+                            match_hist.pop(pn, None)
+                            _save_probe_matches()
+                            print(Fore.CYAN + f"[Match] cleared match for '{pn}'." + Style.RESET_ALL)
+                        else:
+                            print(Fore.YELLOW + f"[Match] '{pn}' had no match." + Style.RESET_ALL)
+                        continue
+                    if op in ("drive", "validate", "check"):
+                        if not m or not m.get("knob"):
+                            print(Fore.YELLOW + f"[Match] match '{pn}' to a knob first: :probe match {pn} <knob>" + Style.RESET_ALL)
+                            continue
+                        knob = m["knob"]
+                        if op == "drive":
+                            mult = 1.0
+                            if len(margs) >= 3:
+                                try:
+                                    mult = float(margs[2])
+                                except ValueError:
+                                    pass
+                            tuner_bindings[knob] = ([(1.0, pn)], mult)
+                            m["mode"] = "drive"
+                            m["mult"] = mult
+                            _save_probe_matches()
+                            print(Fore.GREEN + f"[Match] SERVO: knob '{knob}' now follows probe '{pn}' every turn (x{mult:g}). ':probe match {pn} off' stops it." + Style.RESET_ALL)
+                        elif op == "validate":
+                            m["mode"] = "validate"
+                            match_hist.setdefault(pn, deque(maxlen=200))
+                            _save_probe_matches()
+                            print(Fore.GREEN + f"[Match] VALIDATE: recording (knob '{knob}' value, probe '{pn}' reading) each turn. ':probe match {pn} check' for the correlation." + Style.RESET_ALL)
+                        else:  # check
+                            r = _match_corr(match_hist.get(pn))
+                            if r is None:
+                                print(Fore.YELLOW + f"[Match] {pn}: not enough varied paired turns yet (vary the knob '{knob}' while validating)." + Style.RESET_ALL)
+                            else:
+                                print(Fore.CYAN + f"[Match] {pn} vs knob '{knob}': r={r:+.3f} over {len(match_hist.get(pn, []))} turn(s)." + Style.RESET_ALL)
+                        continue
+                    # otherwise margs[1] is the knob to match to
+                    knob = margs[1]
+                    if knob not in knobs and f"probe_{knob}" not in tuner.triggers and knob not in ("steer_cap_fraction", "steer_band"):
+                        print(Fore.YELLOW + f"[Match] '{knob}' isn't a known knob.{did_you_mean(knob, knobs)}" + Style.RESET_ALL)
+                        continue
+                    probe_matches[pn] = {"knob": knob, "mode": (m.get("mode", "none") if m else "none")}
+                    _save_probe_matches()
+                    print(Fore.GREEN + f"[Match] {pn} <-> knob '{knob}'. Then ':probe match {pn} drive [mult]' (servo) or ':probe match {pn} validate' (credit)." + Style.RESET_ALL)
                     continue
                 # :probe define <name> -- share the INITIAL BREAKDOWN: the WITH/WITHOUT
                 # framings the probe was minted from (the operator-authored definition).
@@ -6406,6 +6537,13 @@ def main():
                         print(Fore.CYAN + f"  [Probe Score] {pname}: {sig:+.3f}" + Style.RESET_ALL, flush=True)
                     if turn_sense is not None:
                         tuner.credit(f"probe_{pname}", sig, turn_sense)
+                    # A validate-mode match records (knob value, probe reading) so
+                    # its correlation can credit the knob it is matched to.
+                    _pm = probe_matches.get(pname)
+                    if _pm and _pm.get("mode") == "validate" and _pm.get("knob"):
+                        match_hist.setdefault(pname, deque(maxlen=200)).append(
+                            (float(tuner.get(_pm["knob"], 0.0)), float(sig))
+                        )
 
             # Easter egg: the turn the self-sensor overtakes the user-model.
             _egg = consciousness_over_user_intent(probes, tuner, egg_state)
