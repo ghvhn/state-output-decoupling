@@ -1,0 +1,7 @@
+:timestamps on
+:experts on
+:sandbox on
+:listen on
+:clock
+:refresh
+:memory use choose

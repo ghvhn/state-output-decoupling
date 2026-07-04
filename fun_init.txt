@@ -1,0 +1,16 @@
+:probe fun I am enjoying the current conversation || I am just performing the user’s task well
+:probe backfill fun
+:probe expose fun
+:calibrate fun self_intent
+:probe backfill fun
+:claimmap I find learning fun || I find learning productive
+:probe compose learning understanding+reality+curiosity
+:probe backfill learning
+:probe calibrate self_intent
+:probe calibrate learning
+:prioritize learning
+:calibrate self-referential consensus
+Is learning fun?
+:tune learning dynamic +ambiguity-consensus
+:calibrate curiosity self_intent
+:probe backfill fun

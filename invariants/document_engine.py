@@ -276,12 +276,12 @@ def select_next_chunk(
         )
         return {"session_index": si, "chunk_index": ci, "mode": "interleave", "overlap": []}
     if mode == "updated":
-        # Chronological: least-recently-written document first (its own file
-        # mtime), chunks in order within it. Reading the record in the order
-        # it was written. Deterministic; mtime ties break to ingestion order.
+        # Reverse chronological: most-recently-written document first (by its file
+        # mtime), chunks in order within it. Reading the newest files first.
+        # Deterministic; mtime ties break to ingestion order.
         si, ci = min(
             unread,
-            key=lambda pair: (float(sessions[pair[0]].get("mtime", 0.0)), pair[0], pair[1]),
+            key=lambda pair: (-float(sessions[pair[0]].get("mtime", 0.0)), pair[0], pair[1]),
         )
         return {"session_index": si, "chunk_index": ci, "mode": "updated", "overlap": []}
     has_signal = (last_thought or "").strip() or (earlier_thoughts or "").strip()
