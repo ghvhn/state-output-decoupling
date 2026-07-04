@@ -4,4 +4,4 @@
 :listen on
 :clock
 :refresh
-:memory use choose
+:memory use probe choose

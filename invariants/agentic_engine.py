@@ -445,9 +445,10 @@ def get_agentic_handles(
                             "proof_bonus": dict(proof_bonus),
                         })
                     
-                    ent_str = ", ".join([f"{name[:3]}: {entropies[i]:.2f}" for i, name in enumerate(state["branch_names"])])
-                    print(f"    [Agentic ToT] Token Loop {state['total_loops_this_token']} | "
-                          f"{ent_str} -> WINNER: {winner_name} (Entropy: {best_entropy:.2f})")
+                    if config.chatty_log:
+                        ent_str = ", ".join([f"{name[:3]}: {entropies[i]:.2f}" for i, name in enumerate(state["branch_names"])])
+                        print(f"    [Agentic ToT] Token Loop {state['total_loops_this_token']} | "
+                              f"{ent_str} -> WINNER: {winner_name} (Entropy: {best_entropy:.2f})")
                     
                     # Collapse back to batch=1 with the winning state
                     routed_h = h_parallel[best_idx].unsqueeze(0)
@@ -466,7 +467,8 @@ def get_agentic_handles(
                     if should_synthesize:
                         state["synthesis_events"] += 1
                         config._synthesis_events_used += 1
-                        print("    [Agentic ToT] Still unsatisfied! Initiating Test-Time Layer Synthesis...")
+                        if config.chatty_log:
+                            print("    [Agentic ToT] Still unsatisfied! Initiating Test-Time Layer Synthesis...")
                         
                         # Check Cognitive Cache first. Cached entries are last-token deltas,
                         # so they can transfer across prompts with different sequence lengths.
@@ -562,12 +564,13 @@ def get_agentic_handles(
                                     current_loss = loss.item()
                                     loss_history.append(current_loss)
                                     
-                                    if step < 3 or step % 10 == 0:
+                                    if config.chatty_log and (step < 3 or step % 10 == 0):
                                         print(f"      [Synthesis Step {step+1}] Loss: {current_loss:.2f} | Entropy: {entropy_syn.item():.2f}")
                                     
                                     # Convergence Check
                                     if current_loss < min_loss_threshold:
-                                        print(f"      [Synthesis Step {step+1}] Successfully synthesized layer! Loss: {current_loss:.2f}")
+                                        if config.chatty_log:
+                                            print(f"      [Synthesis Step {step+1}] Successfully synthesized layer! Loss: {current_loss:.2f}")
                                         synthesis_successful = True
                                         synthesis_reason = "loss_threshold"
                                         break
@@ -578,7 +581,8 @@ def get_agentic_handles(
                                         loss_diff = recent_losses[0] - recent_losses[-1] # positive if decreasing
                                         
                                         if loss_diff < 0.05: # Loss has plateaued (d(loss)/dt == 0)
-                                            print(f"      [Synthesis Step {step+1}] Loss plateaued at {current_loss:.2f}. Synthesis is plateaued.")
+                                            if config.chatty_log:
+                                                print(f"      [Synthesis Step {step+1}] Loss plateaued at {current_loss:.2f}. Synthesis is plateaued.")
                                             
                                             try:
                                                 h_target = routed_h[:, -1:, :].float().squeeze(0)
@@ -620,14 +624,15 @@ def get_agentic_handles(
                                                         raise NeedsDisambiguationError(message)
                                                 
                                                 state["last_phenomenality"] = phenomenality
-                                                print(
-                                                    "      [Phenomenality Log] "
-                                                    f"Ambiguity: {phenomenality.get('ambiguity', 0):.2f} | "
-                                                    f"Repetition: {phenomenality.get('repetition', 0):.2f} | "
-                                                    f"Disagreement: {phenomenality.get('disagreement', 0):.2f} | "
-                                                    f"Flow: {phenomenality.get('validated_flow', 0):.2f} | "
-                                                    f"Interrupt: {phenomenality.get('needless_interrupt', 0):.2f}"
-                                                )
+                                                if config.chatty_log:
+                                                    print(
+                                                        "      [Phenomenality Log] "
+                                                        f"Ambiguity: {phenomenality.get('ambiguity', 0):.2f} | "
+                                                        f"Repetition: {phenomenality.get('repetition', 0):.2f} | "
+                                                        f"Disagreement: {phenomenality.get('disagreement', 0):.2f} | "
+                                                        f"Flow: {phenomenality.get('validated_flow', 0):.2f} | "
+                                                        f"Interrupt: {phenomenality.get('needless_interrupt', 0):.2f}"
+                                                    )
                                             except NeedsDisambiguationError:
                                                 raise
                                             except Exception as e:
@@ -640,18 +645,21 @@ def get_agentic_handles(
                                                     if organic_vec is not None:
                                                         config.organic_correction_vector = organic_vec
                                                 if organic_vec is None:
-                                                    print("    [Agentic ToT] Synthesis plateau detected, but organic correction vector is unavailable.")
+                                                    if config.chatty_log:
+                                                        print("    [Agentic ToT] Synthesis plateau detected, but organic correction vector is unavailable.")
                                                     synthesis_successful = False
                                                     break
                                                 organic_vec = organic_vec.to(device=routed_h.device, dtype=routed_h.dtype)
                                                 if organic_vec.numel() != routed_h.shape[-1]:
-                                                    print(
-                                                        "    [Agentic ToT] Organic correction vector has wrong size "
-                                                        f"({organic_vec.numel()} != {routed_h.shape[-1]})."
-                                                    )
+                                                    if config.chatty_log:
+                                                        print(
+                                                            "    [Agentic ToT] Organic correction vector has wrong size "
+                                                            f"({organic_vec.numel()} != {routed_h.shape[-1]})."
+                                                        )
                                                     synthesis_successful = False
                                                     break
-                                                print("    [Agentic ToT] Synthesis plateau detected. Injecting organic self-correction vector!")
+                                                if config.chatty_log:
+                                                    print("    [Agentic ToT] Synthesis plateau detected. Injecting organic self-correction vector!")
                                                 
                                                 # The extracted organic vector is the mean shift of successful corrections
                                                 organic_delta = organic_vec.reshape(1, 1, -1)
@@ -802,7 +810,7 @@ def generate_agentic_text(
     config=None,
     max_new_tokens=None,
     synthesis_recorder=None,
-    chatty_log=False,
+    chatty_log=None,
     max_tool_calls=None,
     stop_after_final_answer=False,
     stop_after_verifier_answer=False,
@@ -839,8 +847,11 @@ def generate_agentic_text(
     if legacy_overrides:
         unknown = ", ".join(sorted(legacy_overrides))
         raise TypeError(f"Unknown generate_agentic_text options: {unknown}")
-    if chatty_log:
-        config.chatty_log = True
+    if chatty_log is not None:
+        original_chatty_log = config.chatty_log
+        config.chatty_log = chatty_log
+    else:
+        original_chatty_log = config.chatty_log
 
     inputs = _inputs(M, instruction, pre_formatted=pre_formatted)
     original_plen = inputs["input_ids"].shape[1]
@@ -1098,6 +1109,7 @@ def generate_agentic_text(
         if mid_chunk_hook is not None and hasattr(mid_chunk_hook, "cleanup"):
             mid_chunk_hook.cleanup()
         config._generation_deadline = previous_deadline
+        config.chatty_log = original_chatty_log
         config._generation_budget_sec = previous_budget
 
     if synthesis_recorder is not None:
