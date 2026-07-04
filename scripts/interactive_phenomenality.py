@@ -79,6 +79,8 @@ METHODMAP_TOOL_PATTERN = re.compile(r"<<\s*METHODMAP\s*:\s*(.*?)\s*>>", re.IGNOR
 DOC_TOOL_PATTERN = re.compile(r"<<\s*DOC\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
 HELP_TOOL_PATTERN = re.compile(r"<<\s*HELP\s*>>", re.IGNORECASE)
 HELP_TOOL_HEADER = "[Help Tool Result]"
+CMD_TOOL_PATTERN = re.compile(r"<<\s*CMD\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
+CMD_TOOL_HEADER = "[Command Tool Result]"
 CONCRETE_TASK_PATTERN = re.compile(
     r"\b(calculate|solve|answer|total|cost|profit|salary|percent|percentage|"
     r"distance|time|rate|equation|benchmark|gsm8k|\d)\b",
@@ -129,6 +131,7 @@ def build_prompt(
     sandbox_tool_result=None,
     document_tool_result=None,
     probe_tool_result=None,
+    command_tool_result=None,
     game_tool_result=None,
     help_tool_result=None,
     session_context=None,
@@ -158,6 +161,7 @@ def build_prompt(
             sandbox_tool_result,
             document_tool_result,
             probe_tool_result,
+            command_tool_result,
             game_tool_result,
             help_tool_result,
         )
@@ -189,6 +193,7 @@ def scrub_unstaged_memory_status(
     sandbox_tool_result=None,
     document_tool_result=None,
     probe_tool_result=None,
+    command_tool_result=None,
 ):
     if (
         memory_tool_result
@@ -198,6 +203,7 @@ def scrub_unstaged_memory_status(
         or sandbox_tool_result
         or document_tool_result
         or probe_tool_result
+        or command_tool_result
     ):
         return remove_tool_calls(response)
     lines = []
@@ -216,6 +222,8 @@ def scrub_unstaged_memory_status(
         if stripped.startswith("[Sandbox Tool Result") or stripped.startswith("Sandbox Tool Result"):
             continue
         if stripped.startswith("[Probe Tool Result") or stripped.startswith("Probe Tool Result"):
+            continue
+        if stripped.startswith("[Command Tool Result") or stripped.startswith("Command Tool Result"):
             continue
         lines.append(remove_tool_calls(line))
     return "\n".join(lines).strip()
@@ -316,6 +324,21 @@ def extract_help_request(response):
 def remove_help_tags(response):
     return HELP_TOOL_PATTERN.sub("", response or "").strip()
 
+def extract_cmd_requests(response):
+    """Every ':command' the model asked to run via <<CMD: ...>> (a leading ':'
+    is optional in the tag)."""
+    out = []
+    for raw in CMD_TOOL_PATTERN.findall(response or ""):
+        c = raw.strip()
+        if c and not c.startswith(":"):
+            c = ":" + c
+        if c:
+            out.append(c)
+    return out
+
+def remove_cmd_tags(response):
+    return CMD_TOOL_PATTERN.sub("", response or "").strip()
+
 def remove_probe_tool_calls(response):
     return PROBE_TOOL_PATTERN.sub("", response or "").strip()
 
@@ -328,7 +351,7 @@ def remove_game_tags(response):
     return GAME_END_PATTERN.sub("", response).strip()
 
 def remove_tool_calls(response):
-    return remove_help_tags(remove_methodmap_tool_calls(remove_claimmap_tool_calls(remove_memory_tool_calls(remove_doc_tool_calls(remove_game_tags(remove_probe_tool_calls(response)))))))
+    return remove_cmd_tags(remove_help_tags(remove_methodmap_tool_calls(remove_claimmap_tool_calls(remove_memory_tool_calls(remove_doc_tool_calls(remove_game_tags(remove_probe_tool_calls(response))))))))
 
 
 def format_methodmap_tool_result(memory, query, *, max_records=6):
@@ -365,7 +388,7 @@ def is_tool_only_response(response):
     if not text:
         return False
     return bool(
-        (extract_memory_query(text) or extract_claimmap_payload(text) or extract_methodmap_query(text) or extract_doc_query(text) or extract_probe_query(text) or extract_help_request(text))
+        (extract_memory_query(text) or extract_claimmap_payload(text) or extract_methodmap_query(text) or extract_doc_query(text) or extract_probe_query(text) or extract_help_request(text) or extract_cmd_requests(text))
         and not remove_tool_calls(text).strip()
     )
 
@@ -937,6 +960,66 @@ def split_because(line):
     return line[:idx].rstrip(), line[idx + len(" because "):].strip()
 
 
+DOC_REWRITE_MAX_CHARS = 12000
+
+
+def parse_doc_rewrite_request(dargs):
+    """Parse ':doc <path> rewrite [output]' / ':doc rewrite <path> [output]'."""
+    s = (dargs or "").strip()
+    low = s.lower()
+    if low == "rewrite":
+        return {"source": "__current__", "output": None}
+    if low.startswith("rewrite "):
+        rest = s[len("rewrite "):].strip()
+        source, _, output = rest.partition(" ")
+        return {"source": source.strip().strip('"'), "output": output.strip().strip('"') or None}
+    marker = " rewrite "
+    if marker in low:
+        idx = low.rfind(marker)
+        source = s[:idx].strip().strip('"')
+        output = s[idx + len(marker):].strip().strip('"')
+        return {"source": source, "output": output or None}
+    if low.endswith(" rewrite"):
+        return {"source": s[:-len(" rewrite")].strip().strip('"'), "output": None}
+    return None
+
+
+def unique_rewrite_path(path):
+    base, ext = os.path.splitext(path)
+    candidate = f"{base}_rewritten{ext}"
+    i = 2
+    while os.path.exists(candidate):
+        candidate = f"{base}_rewritten_{i}{ext}"
+        i += 1
+    return candidate
+
+
+def rewrite_output_path(path, requested_name=None):
+    if not requested_name:
+        return unique_rewrite_path(path)
+    src_dir = os.path.dirname(os.path.abspath(path))
+    src_ext = os.path.splitext(path)[1]
+    out_name = os.path.basename(str(requested_name).strip().strip('"'))
+    if not out_name:
+        return unique_rewrite_path(path)
+    if not os.path.splitext(out_name)[1] and src_ext:
+        out_name += src_ext
+    out_path = os.path.join(src_dir, out_name)
+    if os.path.abspath(out_path) == os.path.abspath(path):
+        raise ValueError("output name would overwrite the source file")
+    if os.path.exists(out_path):
+        raise FileExistsError(f"output already exists: {out_path}")
+    return out_path
+
+
+def clean_rewrite_output(text):
+    out = (text or "").strip()
+    lines = out.splitlines()
+    if len(lines) >= 2 and lines[0].strip().startswith("```") and lines[-1].strip().startswith("```"):
+        out = "\n".join(lines[1:-1]).strip()
+    return out.replace("<|eot_id|>", "").strip()
+
+
 def strip_macro_lines(orig_lines):
     """Split macro lines into (kept, removed): keep only probe/tuning-mutating
     commands (and '#' comments as documentation); drop blank lines and every
@@ -1074,6 +1157,166 @@ def save_game_config(path, cfg):
         json.dump(out, wf, indent=2)
 
 
+def command_keeps_semicolons(line):
+    """Commands whose arguments may deliberately contain semicolons."""
+    low = (line or "").lstrip().lower()
+    return low.startswith(":macro ") or low.startswith(":game restore ")
+
+
+def split_cmd_tool_commands(cmd):
+    """Split a model <<CMD: ...>> request into shell commands.
+
+    Normal shell chaining uses semicolons, but :macro uses semicolons inside its
+    argument to define macro bodies, so it must stay whole.
+    """
+    c = (cmd or "").strip()
+    if not c:
+        return []
+    if not c.startswith(":"):
+        c = ":" + c
+    if command_keeps_semicolons(c):
+        return [c]
+    out = []
+    for part in c.split(";"):
+        p = part.strip()
+        if not p:
+            continue
+        if not p.startswith(":"):
+            p = ":" + p
+        out.append(p)
+    return out
+
+
+def command_word(cmd):
+    s = (cmd or "").strip()
+    if not s.startswith(":"):
+        return ""
+    toks = s[1:].split()
+    return toks[0].lower() if toks else ""
+
+
+def restore_command_path(path, root=ROOT):
+    """Prefer root-relative paths so replay commands survive spaces in ROOT."""
+    try:
+        ap = os.path.abspath(path)
+        rp = os.path.relpath(ap, root)
+        if not rp.startswith(".."):
+            return rp.replace(os.sep, "/")
+    except Exception:
+        pass
+    return str(path)
+
+
+def normalize_game_config(raw):
+    """Accept the internal {rules, win, loss, prizes} shape or old flat JSON."""
+    if not isinstance(raw, dict):
+        raw = {}
+    if any(k in raw for k in ("rules", "win", "loss", "prizes")):
+        rules = raw.get("rules", {})
+        prizes = raw.get("prizes", {})
+        return {
+            "rules": dict(rules) if isinstance(rules, dict) else {},
+            "win": str(raw.get("win", "") or ""),
+            "loss": str(raw.get("loss", "") or ""),
+            "prizes": dict(prizes) if isinstance(prizes, dict) else {},
+        }
+    return {
+        "rules": {k: v for k, v in raw.items() if not str(k).startswith("__")},
+        "win": str(raw.get("__win", "") or ""),
+        "loss": str(raw.get("__loss", "") or ""),
+        "prizes": raw.get("__prizes", {}) if isinstance(raw.get("__prizes"), dict) else {},
+    }
+
+
+def build_session_restore_macro(probes, macro_aliases, exposed_commands, exposed_knobs=None, hidden_commands=None, self_dest=None, root=ROOT):
+    """Regenerate probes plus shell-defined macros, hidden/exposed commands, and games."""
+    exposed_knobs = set(exposed_knobs or [])
+    hidden_commands = set(hidden_commands or [])
+    lines = ["# Regenerates probes, macro commands, hidden/exposed command tools, and game configs."]
+    probe_lines = build_probe_init_macro(probes)[1:]
+    lines.extend(probe_lines)
+    stats = {
+        "probes": len(probes),
+        "macro_files": 0,
+        "macro_aliases": 0,
+        "hidden_commands": 0,
+        "exposed_commands": 0,
+        "exposed_knobs": 0,
+        "games": 0,
+        "skipped": [],
+    }
+
+    self_abs = os.path.abspath(self_dest) if self_dest else None
+    seen_paths = set()
+    for alias, path in sorted((macro_aliases or {}).items()):
+        try:
+            abs_path = os.path.abspath(path)
+        except Exception:
+            abs_path = str(path)
+        if self_abs and abs_path == self_abs:
+            continue
+        if abs_path in seen_paths:
+            continue
+        seen_paths.add(abs_path)
+        if not os.path.isfile(path):
+            stats["skipped"].append(f"macro file missing for {alias}: {path}")
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as rf:
+                body = rf.read().splitlines()
+        except Exception as e:
+            stats["skipped"].append(f"macro file unreadable for {alias}: {e}")
+            continue
+        payload = {"path": restore_command_path(path, root), "lines": body}
+        lines.append(":macro restore " + json.dumps(payload, ensure_ascii=True, separators=(",", ":")))
+        stats["macro_files"] += 1
+
+    for alias, path in sorted((macro_aliases or {}).items()):
+        try:
+            abs_path = os.path.abspath(path)
+        except Exception:
+            abs_path = str(path)
+        if alias == "self" or (self_abs and abs_path == self_abs):
+            continue
+        lines.append(f":macro name {alias} {restore_command_path(path, root)}")
+        stats["macro_aliases"] += 1
+
+    for word in sorted(hidden_commands):
+        lines.append(f":hide :{word}")
+        stats["hidden_commands"] += 1
+
+    for knob in sorted(exposed_knobs):
+        lines.append(f":expose {knob}")
+        stats["exposed_knobs"] += 1
+
+    for word, mode in sorted((exposed_commands or {}).items()):
+        if word == "expose" or word in hidden_commands:
+            continue
+        suffix = " direct" if str(mode).lower() == "direct" else ""
+        lines.append(f":expose :{word}{suffix}")
+        stats["exposed_commands"] += 1
+
+    games_dir = os.path.join(root, "games")
+    if os.path.isdir(games_dir):
+        for fn in sorted(os.listdir(games_dir)):
+            if not fn.endswith("_rules.json"):
+                continue
+            name = fn[:-len("_rules.json")]
+            try:
+                cfg = load_game_config(os.path.join(games_dir, fn))
+            except Exception as e:
+                stats["skipped"].append(f"game config unreadable for {name}: {e}")
+                continue
+            payload = {"name": name, "config": cfg}
+            lines.append(":game restore " + json.dumps(payload, ensure_ascii=True, separators=(",", ":")))
+            stats["games"] += 1
+    if stats["games"]:
+        lines.append("# Note: game rule configs are restored; custom games/*.py scripts are ordinary files.")
+    for skipped in stats["skipped"]:
+        lines.append(f"# skipped: {skipped}")
+    return lines, stats
+
+
 def parse_prize_spec(argstr):
     """Parse '<option>,<odds> [<count>,<odds_val>] <command>' into
     (option, {odds, count, odds_val, command}) or (None, error_message)."""
@@ -1123,6 +1366,76 @@ def draw_prizes(prizes):
     return won
 
 
+def parse_macro_arg_spec(raw, fallback="arg"):
+    """Parse one macro arg declaration.
+
+    Accepted forms: name, name?, [name], name=default, [name=default].
+    A leading +, -, or $ is a solve-time hint, and trailing ! / !! keeps the
+    existing auto/choose restriction hints.
+    """
+    original = (raw or "").strip()
+    spec = original
+    hint_prefix = ""
+    if spec[:1] in {"+", "-", "$"}:
+        hint_prefix, spec = spec[0], spec[1:]
+
+    no_auto_or_choose = False
+    no_choose = False
+    if spec.endswith("!!"):
+        no_auto_or_choose = True
+        spec = spec[:-2]
+    elif spec.endswith("!"):
+        no_choose = True
+        spec = spec[:-1]
+
+    spec = spec.strip()
+    optional = False
+    if spec.startswith("[") and spec.endswith("]"):
+        optional = True
+        spec = spec[1:-1].strip()
+
+    default = None
+    if "?=" in spec:
+        name, default = spec.split("?=", 1)
+        optional = True
+    elif "=" in spec:
+        name, default = spec.split("=", 1)
+        optional = True
+    else:
+        name = spec
+        if name.endswith("?"):
+            optional = True
+            name = name[:-1]
+
+    name = re.sub(r"[^A-Za-z0-9_]", "_", name.strip()).strip("_")
+    if name and name[0].isdigit():
+        name = "_" + name
+    if not name:
+        name = re.sub(r"[^A-Za-z0-9_]", "_", fallback).strip("_") or "arg"
+
+    if default is not None:
+        default = default.strip()
+    header = f"{name}={default}" if default is not None else (f"{name}?" if optional else name)
+    return {
+        "name": name,
+        "header": header,
+        "optional": optional,
+        "default": default,
+        "hint_prefix": hint_prefix,
+        "no_choose": no_choose,
+        "no_auto_or_choose": no_auto_or_choose,
+        "raw": original,
+    }
+
+
+def parse_macro_arg_header(header):
+    return [
+        parse_macro_arg_spec(part, fallback=f"arg{i + 1}")
+        for i, part in enumerate((header or "").split(","))
+        if part.strip()
+    ]
+
+
 def substitute_macro_params(text, args):
     """Fill $1..$9 (positional), $@ (all args), and named $args in a macro body.
     A param with no supplied arg collapses to empty -- named params behave like
@@ -1130,10 +1443,11 @@ def substitute_macro_params(text, args):
     lines = text.splitlines()
     for ln in lines:
         if ln.strip().startswith("# args:"):
-            arg_names = [a.strip() for a in ln.strip()[len("# args:"):].split(",")]
-            for i, name in enumerate(arg_names):
-                if name and i < len(args):
-                    text = re.sub(r"\$" + re.escape(name) + r"\b", args[i], text)
+            arg_specs = parse_macro_arg_header(ln.strip()[len("# args:"):])
+            for i, spec in enumerate(arg_specs):
+                value = args[i] if i < len(args) else (spec["default"] if spec["default"] is not None else "")
+                if spec["name"]:
+                    text = re.sub(r"\$" + re.escape(spec["name"]) + r"\b", lambda _m, v=value: v, text)
             break
 
     joined = " ".join(args)
@@ -1219,6 +1533,16 @@ def _match_corr(pairs):
     return cov / (sx ** 0.5 * sy ** 0.5)
 
 
+def latest_probe_signal_from_history(history):
+    """Reconstruct the latest centered probe signal from raw probe history."""
+    vals = [float(v) for v in (history or [])]
+    if not vals:
+        return None, None, 0
+    raw = vals[-1]
+    sig = raw - (sum(vals[:-1]) / len(vals[:-1])) if len(vals) > 1 else 0.0
+    return sig, raw, len(vals)
+
+
 # Every command word the shell recognizes -- an unknown :word is either a typo
 # (suggest the nearest) or a request to invent a tool (offer to mint a probe),
 # never a generation of a generic essay.
@@ -1288,7 +1612,7 @@ KNOWN_COMMANDS = (
     ":context", ":memory", ":methodmap", ":claimmap", ":steermap", ":steer",
     ":probe", ":label", ":calibrate", ":suggest", ":tune", ":doc", ":sandbox",
     ":experts", ":impact", ":clock", ":prioritize", ":release", ":listen",
-    ":timestamps", ":history", ":queue", ":accept", ":reject", ":help",
+    ":timestamps", ":history", ":queue", ":accept", ":reject", ":help", ":expose", ":hide",
 )
 
 # Bare command words that are BUILT IN -- a macro alias by one of these names is
@@ -1296,7 +1620,7 @@ KNOWN_COMMANDS = (
 # macro alias runs directly as ':<alias> args'.
 BUILTIN_COMMANDS = {c[1:] for c in KNOWN_COMMANDS} | {
     "macro", "run", "game", "solve", "refresh", "place", "consider",
-    "exit", "quit", "timestamps", "listen", "history", "accept", "reject", "help",
+    "exit", "quit", "timestamps", "listen", "history", "accept", "reject", "help", "expose", "hide",
 }
 
 # Single source of truth for the command reference: the shell prints these lines
@@ -1325,6 +1649,8 @@ COMMAND_HELP_LINES = [
     "                candidate words. Reading only -- minting/calibrating stay operator acts)",
     "          :probe backfill <name> [n]  (retro-score up to n archived replies in order:",
     "                rebuilds the probe's stream+credit from the whole record, seeds its history)",
+    "          :probe values [name|all] [n]  (show the latest centered probe readings;",
+    "                aliases: :probe recent, :probe last)",
     "          :probe define <name>        (share its initial breakdown -- the WITH/WITHOUT framings",
     "                it was minted from; name accepts choose/auto)",
     "          :probe explain <name>       (the MODEL explains the probe in its own words: what it",
@@ -1355,6 +1681,8 @@ COMMAND_HELP_LINES = [
     "          :tune steer_layer_sweep 1    (isolate steers by layer: each steer pushes",
     "                ONE least-tested band layer; per-layer outcomes accrue, transfer-free)",
     "          :doc <path> [because <why>]  (share a document into the conversation)",
+    "          :doc <path> rewrite [new_name] [because <why>]  (rewrite a text file",
+    "                better and save a sibling in the same folder; omitted name uses *_rewritten)",
     "          :doc next | :doc status      (stage the next chunk / show progress)",
     "          :doc read [n] [order|interleave|reply|updated] [satisfied]",
     "                (reading as dialogue: the document speaks each turn, the model",
@@ -1371,6 +1699,14 @@ COMMAND_HELP_LINES = [
     "          :game no | decline           (decline the game the model just proposed)",
     "          :accept [n|all] | :reject [n|all]  (a game may STAGE a command instead of",
     "                running it; nothing a game chose runs until you accept it here)",
+    "          :expose :<command> [stage|direct|off]  (make a built-in command or",
+    "                macro command callable by the model as <<CMD: :command args>>;",
+    "                bare/default = staged for :accept, direct = queued immediately)",
+    "          :expose <probe|knob> [off]  (without leading ':', expose a probe sensor",
+    "                or tuner knob to the model's <<PROBE: name>> tool)",
+    "          :hide <command> [off]       (hide a command from model-facing help,",
+    "                suggestions, exposed-command discovery, and <<CMD>> hints; also",
+    "                unexposes it. Operator help and execution still work)",
     "          :impact                      (consequence trail: what its words caused,",
     "                and whether experienced impact tracks better deliberation)",
     "          :clock                       (last turn's generation time + tok/s and VRAM;",
@@ -1382,20 +1718,25 @@ COMMAND_HELP_LINES = [
     "          :listen on|off|status        (speak mid-reply: lines you type while it",
     "                generates are ingested at the next chunk seam and appended to the",
     "                live stream -- the model chooses to redirect or fold in; never dropped)",
-    "          :macro <file> <c1> ; <c2> ...  (write a macro; :macro name <alias> <file>",
-    "                aliases it; :macro name self [file] writes a macro that REGENERATES",
-    "                the current probes; :macro strip <alias|file> drops display-only",
-    "                lines in place, :macro name strip <src> [dest] writes a stripped copy)",
+    "          :macro <file> <c1> ; <c2> ...  (write a macro; :macro restore <json>",
+    "                exactly restores one; :macro name <alias> <file> aliases it;",
+    "                :macro name self [file] writes a macro that REGENERATES probes,",
+    "                macros/commands, hidden/exposed command tools, and game configs;",
+    "                :macro strip <alias|file> drops display-only lines in place,",
+    "                :macro name strip <src> [dest] writes a stripped copy)",
     "          :save self <name> | choose   (alias for :macro name self; 'choose' asks",
     "                the model to generate a name based on the current tuning state)",
     "          :spawn <name> join|replace|drop  (multi-agent support. 'join' adds to",
     "                the panel, 'replace [N]' takes the operator slot for N turns.",
     "                Use @<name> :cmd to target a specific agent's tuning state)",
     "          :run <alias|file>            (queue and execute a macro's commands)",
-    "          :solve <name> [goal]         (model writes a parameterized macro for an",
+    "          :solve <name> [args --] <goal>  (model writes a parameterized macro for an",
     "                ad-hoc command; it is PROPOSED, then :accept adopts it (or :reject",
     "                drops it); after that :<name> <args> runs it, filling $1..$9 / $@.",
-    "                Context staged with :memory use is folded into the request)",
+    "                Named args fill $name; optional/default specs are name?, [name],",
+    "                name=default, or [name=default].",
+    "                All non-hidden commands are available; context staged with",
+    "                :memory use is folded into the request)",
     "          :<macro-name> <args>         (run any aliased macro directly, args -> $1..$9)",
     "          <any :command> because <reason>   (logs why you issued it as provenance)",
     "          :memory use probe <name> | :memory choice probe <name>",
@@ -1403,6 +1744,46 @@ COMMAND_HELP_LINES = [
     "          :tune exposed_probe_alpha <small>  (also steer along the probes you have",
     "                exposed to the model, lift-weighted; 0 = off)",
 ]
+
+
+def command_help_entries(lines=COMMAND_HELP_LINES):
+    """Return help entries as raw line groups from COMMAND_HELP_LINES."""
+    entries = []
+    current = []
+    for raw in lines:
+        if raw.startswith("Commands:"):
+            if current:
+                entries.append(current)
+            current = [raw]
+            continue
+        text = raw.strip()
+        if not text:
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if indent <= 12:
+            if current:
+                entries.append(current)
+            current = [raw]
+        elif current:
+            current.append(raw)
+    if current:
+        entries.append(current)
+    return entries
+
+
+def find_command_help_entries(query, lines=COMMAND_HELP_LINES):
+    q = (query or "").strip().split()[0].lstrip(":").lower()
+    if not q:
+        return []
+    matches = []
+    for entry in command_help_entries(lines):
+        head = entry[0].strip()
+        if head.startswith("Commands:"):
+            head = head[len("Commands:"):].strip()
+        words = {m.group(1).lower() for m in re.finditer(r":([a-z_][\w-]*)", head)}
+        if q in words:
+            matches.append(entry)
+    return matches
 
 
 def render_commands_md(lines=COMMAND_HELP_LINES):
@@ -1486,21 +1867,53 @@ def list_solve_macros(macros_dir=None):
     return out
 
 
-def build_model_help_text(solve_macros=None):
+def build_model_help_text(solve_macros=None, exposed_commands=None, exposed_knobs=None, hidden_commands=None):
     """Model-facing help: what the model may run ITSELF (its <<...>> tools) vs.
     the operator's ':' commands, which it can only reach by proposing a game."""
     if solve_macros is None:
         solve_macros = list_solve_macros()
+    exposed_commands = exposed_commands or {}
+    exposed_knobs = set(exposed_knobs or [])
+    hidden_commands = set(hidden_commands or [])
+    visible_exposed = {
+        name: mode for name, mode in exposed_commands.items()
+        if name not in hidden_commands
+    }
+    visible_operator_commands = sorted(c for c in BUILTIN_COMMANDS if c not in hidden_commands)
+    visible_solve_macros = [
+        (n, d, a) for n, d, a in solve_macros
+        if n not in hidden_commands
+    ]
     lines = [
         HELP_TOOL_HEADER,
-        "You can do these YOURSELF -- emit the tag mid-reply and it runs, no operator approval:",
+        "You can reach these YOURSELF -- emit the tag mid-reply; read-only tools return directly, exposed commands follow their mode:",
         "  <<MEMORY: query>>          search long-term memory",
         "  <<METHODMAP: query>>       retrieve sanitized methodology maps",
         "  <<DOC: query>>             read from documents shared into this session",
         "  <<CLAIMMAP: A || B>>       weigh two framings against each other",
-        "  <<PROBE: name>>            read one of your exposed sensors on your last turn",
-        "  <<PROBE: name || words>>   score candidate words on that sensor",
+        "  <<PROBE: name>>            read one exposed probe sensor or knob",
+        "  <<PROBE: name || words>>   score candidate words on an exposed probe sensor",
         "  <<HELP>>                   show this help",
+    ]
+    if exposed_knobs:
+        lines.append("                             Exposed knobs: " + ", ".join(sorted(exposed_knobs)) + ".")
+    if visible_exposed:
+        exposed_list = ", ".join(
+            f":{name} ({mode})" for name, mode in sorted(visible_exposed.items())
+        )
+        lines.extend([
+            "  <<CMD: :command args>>    call an operator-exposed command tool",
+            "                             Currently exposed: " + exposed_list + ".",
+            "                             Semicolon chains run only exposed commands; :macro keeps semicolons as its body.",
+        ])
+    else:
+        expose_hint = (
+            "unavailable until the operator exposes a command"
+            if "expose" in hidden_commands
+            else "unavailable until the operator exposes a command with :expose"
+        )
+        lines.append("  <<CMD: ...>>              " + expose_hint)
+    lines.extend([
         "",
         "Games are the ONE place you reach commands. You may:",
         "  <<GAME_PROPOSE: name>>     propose a game -- the operator accepts or declines it",
@@ -1509,14 +1922,14 @@ def build_model_help_text(solve_macros=None):
         "  <<GAME_END>>               end the active game",
         "  <<GAME_EXPOSE: a,b>> / <<GAME_HIDE: a,b>>   apply probe state inside a game",
         "",
-        "The ':' commands are the OPERATOR's -- you cannot run them. A game may STAGE one, but",
-        "nothing runs until the operator types :accept. Your only lever on them is to propose a",
-        "game. Operator commands (for reference): "
-        + ", ".join(sorted(c for c in ({k for k in BUILTIN_COMMANDS}))) + ".",
-    ]
-    if solve_macros:
+        "The ':' commands are the OPERATOR's. Macros, solves, and games may use/stage any",
+        "non-hidden command, but staged game/command-tool actions do not run until the operator",
+        "types :accept. Operator commands available here: "
+        + ", ".join(visible_operator_commands) + ".",
+    ])
+    if visible_solve_macros:
         lines.append("Operator solve-macros (also operator-run): "
-                     + ", ".join(f":{n}" for n, _d, _a in solve_macros) + ".")
+                     + ", ".join(f":{n}" for n, _d, _a in visible_solve_macros) + ".")
     return "\n".join(lines)
 
 
@@ -2382,6 +2795,140 @@ def main():
     for _pn, _m in probe_matches.items():
         if _m.get("mode") == "drive" and _m.get("knob"):
             tuner_bindings[_m["knob"]] = ([(1.0, _pn)], float(_m.get("mult", 1.0)))
+
+    # Commands the operator has EXPOSED to the model as tools: word -> mode, where
+    # mode is "stage" (the model's <<CMD: ...>> proposes it, awaiting :accept) or
+    # "direct" (it enters the shell queue immediately). Everything else the
+    # model still cannot run. Meta-commands (:run/:solve/:macro/:game/:sandbox)
+    # reach OTHER commands through their argument -- allowed, but warned.
+    EXPOSED_CMD_PATH = os.path.join(ROOT, "invariants", "out", "exposed_commands.json")
+    EXPOSED_KNOB_PATH = os.path.join(ROOT, "invariants", "out", "exposed_knobs.json")
+    HIDDEN_CMD_PATH = os.path.join(ROOT, "invariants", "out", "hidden_commands.json")
+    EXPOSE_META_CMDS = {"run", "solve", "macro", "game", "sandbox", "spawn", "accept"}
+    hidden_commands = set()
+    try:
+        with open(HIDDEN_CMD_PATH, "r", encoding="utf-8") as _hcf:
+            _raw_hidden = json.load(_hcf)
+            if isinstance(_raw_hidden, list):
+                hidden_commands = {str(x).lstrip(":").lower() for x in _raw_hidden if str(x).strip()}
+            elif isinstance(_raw_hidden, dict):
+                hidden_commands = {str(k).lstrip(":").lower() for k, v in _raw_hidden.items() if v}
+    except (OSError, ValueError):
+        hidden_commands = set()
+
+    exposed_commands = {}
+    try:
+        with open(EXPOSED_CMD_PATH, "r", encoding="utf-8") as _ecf:
+            exposed_commands = {str(k): str(v) for k, v in json.load(_ecf).items()}
+    except (OSError, ValueError):
+        exposed_commands = {}
+    if hidden_commands:
+        exposed_commands = {k: v for k, v in exposed_commands.items() if k not in hidden_commands}
+
+    exposed_knobs = set()
+    try:
+        with open(EXPOSED_KNOB_PATH, "r", encoding="utf-8") as _ekf:
+            _raw_knobs = json.load(_ekf)
+            if isinstance(_raw_knobs, list):
+                exposed_knobs = {str(x).strip() for x in _raw_knobs if str(x).strip()}
+            elif isinstance(_raw_knobs, dict):
+                exposed_knobs = {str(k).strip() for k, v in _raw_knobs.items() if v}
+    except (OSError, ValueError):
+        exposed_knobs = set()
+    exposed_knobs = {k for k in exposed_knobs if k in tuner.triggers and not _is_shadow_trigger(k, tuner)}
+
+    def _save_exposed_commands():
+        try:
+            os.makedirs(os.path.dirname(EXPOSED_CMD_PATH) or ".", exist_ok=True)
+            with open(EXPOSED_CMD_PATH, "w", encoding="utf-8") as ecf:
+                json.dump(exposed_commands, ecf, indent=2)
+        except Exception as e:
+            print(Fore.RED + f"[Error] Could not save exposed commands: {e}" + Style.RESET_ALL)
+
+    def _save_hidden_commands():
+        try:
+            os.makedirs(os.path.dirname(HIDDEN_CMD_PATH) or ".", exist_ok=True)
+            with open(HIDDEN_CMD_PATH, "w", encoding="utf-8") as hcf:
+                json.dump(sorted(hidden_commands), hcf, indent=2)
+        except Exception as e:
+            print(Fore.RED + f"[Error] Could not save hidden commands: {e}" + Style.RESET_ALL)
+
+    def _save_exposed_knobs():
+        try:
+            os.makedirs(os.path.dirname(EXPOSED_KNOB_PATH) or ".", exist_ok=True)
+            with open(EXPOSED_KNOB_PATH, "w", encoding="utf-8") as ekf:
+                json.dump(sorted(exposed_knobs), ekf, indent=2)
+        except Exception as e:
+            print(Fore.RED + f"[Error] Could not save exposed knobs: {e}" + Style.RESET_ALL)
+
+    def _all_shell_commands():
+        return BUILTIN_COMMANDS | set(macro_aliases)
+
+    def _known_model_commands():
+        return (_all_shell_commands() - hidden_commands) - {"expose"}
+
+    def _visible_command_reference():
+        return ", ".join(f":{w}" for w in sorted(_all_shell_commands() - hidden_commands))
+
+    def _hidden_overwrite_blocked(name, surface):
+        raw_name = str(name or "").lstrip(":").lower()
+        stem_name = os.path.splitext(os.path.basename(raw_name))[0].lower()
+        blocked_name = raw_name if raw_name in hidden_commands else (stem_name if stem_name in hidden_commands else None)
+        if blocked_name:
+            print(
+                Fore.YELLOW
+                + f"[{surface}] Refusing to overwrite hidden command ':{blocked_name}'. "
+                + f"Reveal it first with ':hide :{blocked_name} off' if you mean to reuse that name."
+                + Style.RESET_ALL
+            )
+            return True
+        return False
+
+    def _run_exposed_command_tool(cmd_requests):
+        result_lines = [CMD_TOOL_HEADER]
+        direct_cmds = []
+        seen_any = False
+        for requested in cmd_requests:
+            for cmd in split_cmd_tool_commands(requested):
+                seen_any = True
+                word = command_word(cmd)
+                if not word:
+                    result_lines.append(f"- refused malformed command: {cmd}")
+                    continue
+                if word in hidden_commands:
+                    result_lines.append("- refused an unavailable command.")
+                    continue
+                if word == "expose":
+                    result_lines.append("- refused :expose; the model cannot grant itself command tools.")
+                    continue
+                if word not in exposed_commands:
+                    hint = did_you_mean(word, _known_model_commands())
+                    result_lines.append(f"- refused :{word}; it is not exposed as a model tool.{hint}")
+                    continue
+                if word not in BUILTIN_COMMANDS and word not in macro_aliases:
+                    result_lines.append(f"- refused :{word}; it is exposed but no longer exists as a command.")
+                    continue
+                mode = str(exposed_commands.get(word, "stage")).lower()
+                if mode == "direct":
+                    direct_cmds.append(cmd)
+                    result_lines.append(f"- queued direct command: {cmd}")
+                else:
+                    _stage_for_accept(cmd, why="an exposed command tool")
+                    result_lines.append(f"- staged for operator :accept: {cmd}")
+        if direct_cmds:
+            input_queue[:0] = direct_cmds
+            print(Fore.MAGENTA + f"\n[Command Tool] Queued {len(direct_cmds)} direct command(s): {'; '.join(direct_cmds)}" + Style.RESET_ALL)
+        if not seen_any:
+            result_lines.append("- no command found in the request.")
+        result = "\n".join(result_lines)
+        memory.append_event(
+            "command_tool_model_requested",
+            text=result,
+            tags=["command_tool"],
+            provenance={"requests": cmd_requests, "direct_count": len(direct_cmds)},
+        )
+        return result
+
     egg_state = {"over": False}  # rising-edge latch for the consciousness egg
     startup_user_input = os.environ.get("PHENOMENALITY_STARTUP_PROMPT")
     if os.environ.get("PHENOMENALITY_AUTO_RESUME", "0").strip().lower() in {"1", "true", "yes"}:
@@ -2524,7 +3071,7 @@ def main():
 
             
             user_input = user_input.strip()
-            if user_input.startswith(":") and ";" in user_input and not user_input.startswith(":macro "):
+            if user_input.startswith(":") and ";" in user_input and not command_keeps_semicolons(user_input):
                 cmds = [c.strip() for c in user_input.split(";") if c.strip()]
                 if len(cmds) > 1:
                     user_input = cmds[0]
@@ -2691,14 +3238,52 @@ def main():
                 mtail = user_input[len(":macro"):].strip()
                 mtok = mtail.split()
                 sub = mtok[0].lower() if mtok else ""
+                if sub == "restore":
+                    payload = mtail[len("restore"):].strip()
+                    if not payload:
+                        print(Fore.YELLOW + "[System] Usage: :macro restore {\"path\":\"...\",\"lines\":[...]}" + Style.RESET_ALL)
+                        continue
+                    try:
+                        if payload.startswith("{"):
+                            obj = json.loads(payload)
+                            dest = str(obj.get("path", "")).strip()
+                            body_lines = obj.get("lines", [])
+                        else:
+                            args = payload.split(maxsplit=1)
+                            if len(args) < 2:
+                                raise ValueError("missing path or JSON lines")
+                            dest = args[0]
+                            body_lines = json.loads(args[1])
+                        if not dest or not isinstance(body_lines, list):
+                            raise ValueError("restore payload needs a path and a list of lines")
+                        if _hidden_overwrite_blocked(dest, "System"):
+                            continue
+                        out_path = dest if os.path.isabs(dest) else os.path.join(ROOT, dest)
+                        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                        with open(out_path, "w", encoding="utf-8") as wf:
+                            for line in body_lines:
+                                wf.write(str(line) + "\n")
+                        print(Fore.GREEN + f"[System] Restored macro file {dest} ({len(body_lines)} line(s))." + Style.RESET_ALL)
+                    except Exception as e:
+                        print(Fore.RED + f"[Error] Could not restore macro: {e}" + Style.RESET_ALL)
+                    continue
                 if sub == "name":
                     kind = mtok[1].lower() if len(mtok) >= 2 else ""
                     if kind == "self":
-                        # :macro name self [file] -- regenerate the CURRENT probes as
-                        # a replayable macro (re-mint/adopt/compose each from its
-                        # stored framings) and alias it 'self'. Recreate: :run self.
+                        # :macro name self [file] -- regenerate the CURRENT shell
+                        # state as replayable commands: probes, macro-command
+                        # files/aliases, exposed command tools, and game configs.
                         dest = mtail.split(maxsplit=2)[2].strip() if len(mtok) >= 3 else os.path.join(ROOT, "invariants", "out", "macros", "self.txt")
-                        macro_lines = build_probe_init_macro(probes)
+                        if _hidden_overwrite_blocked("self", "System"):
+                            continue
+                        macro_lines, restore_stats = build_session_restore_macro(
+                            probes,
+                            macro_aliases,
+                            exposed_commands,
+                            exposed_knobs,
+                            hidden_commands,
+                            self_dest=dest,
+                        )
                         n_cmds = sum(1 for l in macro_lines if l.startswith(":"))
                         try:
                             os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
@@ -2707,9 +3292,20 @@ def main():
                                     wf.write(l + "\n")
                             macro_aliases["self"] = dest
                             _save_macro_aliases()
-                            print(Fore.GREEN + f"[System] Wrote a probe-regenerating macro ({n_cmds} command(s) for {len(probes)} probe(s)) to {dest}, aliased 'self'. Recreate them with :run self." + Style.RESET_ALL)
+                            print(
+                                Fore.GREEN
+                                + f"[System] Wrote a state-regenerating macro ({n_cmds} command(s): "
+                                + f"{restore_stats['probes']} probe(s), {restore_stats['macro_files']} macro file(s), "
+                                + f"{restore_stats['macro_aliases']} macro alias(es), {restore_stats['hidden_commands']} hidden command(s), "
+                                + f"{restore_stats['exposed_commands']} exposed command(s), "
+                                + f"{restore_stats['exposed_knobs']} exposed knob(s), "
+                                + f"{restore_stats['games']} game config(s)) to {dest}, aliased 'self'. Recreate with :run self."
+                                + Style.RESET_ALL
+                            )
                             if not probes:
                                 print(Fore.YELLOW + "[System] (No active probes to regenerate -- the macro is empty.)" + Style.RESET_ALL)
+                            if restore_stats["skipped"]:
+                                print(Fore.YELLOW + f"[System] Skipped {len(restore_stats['skipped'])} restore item(s); see comments in the macro." + Style.RESET_ALL)
                         except Exception as e:
                             print(Fore.RED + f"[Error] Could not write self macro: {e}" + Style.RESET_ALL)
                         continue
@@ -2734,11 +3330,13 @@ def main():
                         try:
                             with open(src, "r", encoding="utf-8") as rf:
                                 kept, removed = strip_macro_lines(rf.read().splitlines())
+                            _stem = os.path.splitext(os.path.basename(dest))[0]
+                            if _hidden_overwrite_blocked(_stem, "System"):
+                                continue
                             os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
                             with open(dest, "w", encoding="utf-8") as wf:
                                 for line in kept:
                                     wf.write(line + "\n")
-                            _stem = os.path.splitext(os.path.basename(dest))[0]
                             macro_aliases[_stem] = dest
                             _save_macro_aliases()
                             cmd_kept = [k for k in kept if not k.strip().startswith("#")]
@@ -2752,6 +3350,8 @@ def main():
                     else:
                         alias = mtok[1]
                         mpath = mtail.split(maxsplit=2)[2].strip()
+                        if _hidden_overwrite_blocked(alias, "System"):
+                            continue
                         macro_aliases[alias] = mpath
                         _save_macro_aliases()
                         exists_note = "" if os.path.isfile(mpath) else " (file does not exist yet)"
@@ -2764,6 +3364,8 @@ def main():
                     mpath = macro_aliases.get(target, target)
                     if not target:
                         print(Fore.YELLOW + "[System] Usage: :macro strip <alias|file>  (or :macro name strip <src> [dest] to keep the original)" + Style.RESET_ALL)
+                    elif _hidden_overwrite_blocked(target, "System"):
+                        continue
                     elif not os.path.isfile(mpath):
                         print(Fore.YELLOW + f"[System] Macro not found: {mpath}" + Style.RESET_ALL)
                     else:
@@ -2810,6 +3412,8 @@ def main():
                     print(Fore.YELLOW + "[System] Usage: :macro <file> <c1> ; <c2> ...  |  :macro name <alias> <file>  |  :macro strip <alias|file>  |  :macro drop <alias>" + Style.RESET_ALL)
                 else:
                     raw_file = parts[0]
+                    if _hidden_overwrite_blocked(raw_file, "System"):
+                        continue
                     mac_file = macro_aliases.get(raw_file, raw_file)
                     mac_cmds = [c.strip() for c in parts[1].split(";") if c.strip()]
                     try:
@@ -2871,9 +3475,9 @@ def main():
                     print(Fore.YELLOW + f"[System] '{target}' had no runnable commands." + Style.RESET_ALL)
                 continue
 
-            # :solve <name> [goal] -- have the model WRITE a parameterized macro (a
-            # list of ':' commands using $1..$9 / $@) for an ad-hoc command, save
-            # it, and alias it so ':<name> args' runs it directly.
+            # :solve <name> [goal] -- have the model WRITE a parameterized macro
+            # (a list of ':' commands using $1..$9 / $@), then stage it for
+            # :accept so ':<name> args' can run it directly.
             if user_input.startswith(":solve"):
                 sbody = user_input[len(":solve"):].strip()
                 sparts = sbody.split(maxsplit=1)
@@ -2893,7 +3497,11 @@ def main():
                 else:
                     tokens = rest.split()
                     arg_names = []
-                    while tokens and tokens[-1].startswith(("+", "-", "$")):
+                    while tokens and (
+                        tokens[-1].startswith(("+", "-", "$", "["))
+                        or tokens[-1].endswith("?")
+                        or "=" in tokens[-1]
+                    ):
                         arg_names.insert(0, tokens.pop())
                     goal = " ".join(tokens) or sname.replace("_", " ")
 
@@ -2924,10 +3532,12 @@ def main():
                         pre_formatted=False
                     )
                     sname = re.sub(r'[^a-z0-9_]', '', (nm or "macro").lower())[:40].strip("_")
-                    if not sname or sname in BUILTIN_COMMANDS:
+                    if not sname or sname in BUILTIN_COMMANDS or sname in hidden_commands:
                         sname = "macro"
                     print(Fore.CYAN + f"[Solve] Model chose '{sname}'." + Style.RESET_ALL)
                 
+                if _hidden_overwrite_blocked(sname, "Solve"):
+                    continue
                 if not sname or sname in BUILTIN_COMMANDS:
                     print(Fore.YELLOW + f"[Solve] '{sname}' can't be a macro name (empty or a built-in command)." + Style.RESET_ALL)
                     continue
@@ -2936,50 +3546,55 @@ def main():
                 if arg_names:
                     mapping_parts = []
                     clean_names = []
+                    arg_specs = []
                     for i, arg in enumerate(arg_names):
-                        clean_arg = arg[1:] if arg.startswith(("+", "-", "$")) else arg
-                        is_strict_no_auto_or_choose = False
-                        is_strict_no_choose = False
-                        if clean_arg.endswith("!!"):
-                            is_strict_no_auto_or_choose = True
-                            clean_arg = clean_arg[:-2]
-                        elif clean_arg.endswith("!"):
-                            is_strict_no_choose = True
-                            clean_arg = clean_arg[:-1]
+                        spec = parse_macro_arg_spec(arg, fallback=f"arg{i + 1}")
+                        clean_arg = spec["name"]
                         clean_names.append(clean_arg)
+                        arg_specs.append(spec)
                         
                         hints = []
-                        if arg.startswith("+"):
+                        if spec["hint_prefix"] == "+":
                             hints.append("positive/additive")
-                        elif arg.startswith("-"):
+                        elif spec["hint_prefix"] == "-":
                             hints.append("negative/subtractive")
                             
                         if clean_arg.endswith("s"):
                             hints.append("a list of multiple items")
                         elif "name" in clean_arg:
                             hints.append("a specific exact name")
+
+                        if spec["optional"]:
+                            hints.append("optional")
+                        if spec["default"] is not None:
+                            hints.append(f"default {spec['default']!r}")
                             
-                        if is_strict_no_auto_or_choose:
+                        if spec["no_auto_or_choose"]:
                             hints.append("STRICT: cannot accept auto or choose")
-                        elif is_strict_no_choose:
+                        elif spec["no_choose"]:
                             hints.append("cannot accept choose (but auto is okay)")
                             
                         hint_str = f" ({', '.join(hints)})" if hints else ""
                         mapping_parts.append(f"${clean_arg}{hint_str}")
                         
                     mapping = ", ".join(mapping_parts)
-                    prompt_args_str = f" Use {mapping}, and $@ for all of them."
+                    prompt_args_str = (
+                        f" Use {mapping}, and $@ for all supplied arguments. "
+                        "Optional parameters may be omitted; defaults are supplied by the macro header."
+                    )
                 else:
                     clean_names = []
+                    arg_specs = []
                     prompt_args_str = (
                         " Use $1, $2, ... for parameters and $@ for all of them. "
                         "Alternatively, you can invent your own named parameters by making the VERY FIRST line of your response "
-                        "a comment like `# args: target, amount` and then using `$target` and `$amount` in your code."
+                        "a comment like `# args: target, amount` and then using `$target` and `$amount` in your code. "
+                        "Optional named args use `name?` or `[name]`; defaults use `name=default` or `[name=default]`."
                     )
 
                 existing_macros = []
                 for m_alias, m_path in macro_aliases.items():
-                    if m_alias == sname:
+                    if m_alias == sname or m_alias in hidden_commands:
                         continue
                     if os.path.isfile(m_path):
                         try:
@@ -3002,6 +3617,12 @@ def main():
                         "You can also invoke existing macros by writing ':<macro_name> [args]'. "
                         "Available macros include:\n" + "\n".join(f"  {m}" for m in existing_macros) + "\n\n"
                     )
+                command_hints_str = (
+                    "All non-hidden shell commands may be used in generated macros, solves, and games. "
+                    "Available command words now are:\n  "
+                    + _visible_command_reference()
+                    + "\n\n"
+                )
 
                 # Context the operator staged with ':memory use' is folded into the
                 # solve prompt so the macro reflects what they told it (consumed
@@ -3021,9 +3642,8 @@ def main():
                 prompt = (
                     "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
                     "You write macros for an interactive cognition shell. A macro is a list of ':' "
-                    "commands, one per line -- e.g. :probe <name> <a> || <b>, :tune <knob> <value>, "
-                    ":calibrate <name> <anchor>, :steer mix <p1> <p2>, :prioritize, :memory use probe "
-                    "<name>, :label <probe> pos|neg." + prompt_args_str + "\n\n"
+                    "commands, one per line." + prompt_args_str + "\n\n"
+                    f"{command_hints_str}"
                     "Note: Shell commands natively accept 'auto' or 'choose' as arguments where applicable "
                     "to automatically select or interactively prompt for a value. "
                     "You should seamlessly pass these through to the underlying commands if the user provides them, "
@@ -3048,14 +3668,17 @@ def main():
                 # command or a known macro alias (e.g. the model inventing
                 # ':choose'), so a macro that would silently fail later is caught
                 # at creation instead of cascading at run time.
-                known_cmd = BUILTIN_COMMANDS | set(macro_aliases) | {sname}
+                known_cmd = _all_shell_commands() | {sname}
                 unknown_cmds = []
+                hidden_cmds = []
                 for ln in cmd_lines:
                     if not ln.startswith(":"):
                         continue
                     toks = ln[1:].split()
                     w = toks[0].lower() if toks else ""
-                    if w and w not in known_cmd:
+                    if w and w in hidden_commands:
+                        hidden_cmds.append(f":{w}")
+                    elif w and w not in known_cmd:
                         unknown_cmds.append(f":{w}")
                 if unknown_cmds:
                     print(
@@ -3064,13 +3687,21 @@ def main():
                         + "this macro may fail when run. (choose/auto are ARGUMENTS to a command, not commands.)"
                         + Style.RESET_ALL
                     )
+                if hidden_cmds:
+                    print(
+                        Fore.YELLOW
+                        + f"[Solve] warning: generated macro uses hidden command(s): {', '.join(sorted(set(hidden_cmds)))}. "
+                        + "Hidden commands are deliberately excluded from model-authored macros/solves/games unless you accept this anyway."
+                        + Style.RESET_ALL
+                    )
                 dest = os.path.join(ROOT, "invariants", "out", "macros", f"{sname}.txt")
                 # Every :solve output is STAGED, not written/aliased, until the
                 # operator :accepts it -- so any macro (named or model-chosen) can
                 # be reviewed and :rejected first.
-                warn_note = " -- see the warning above" if unknown_cmds else ""
+                warn_note = " -- see the warning above" if (unknown_cmds or hidden_cmds) else ""
                 pending_solve_proposal = {
                     "name": sname, "goal": goal, "clean_names": clean_names,
+                    "arg_specs": [spec["header"] for spec in arg_specs],
                     "cmd_lines": cmd_lines, "dest": dest,
                 }
                 print(Fore.YELLOW + Style.BRIGHT + f"[Solve] Proposed ':{sname}' ({len(cmd_lines)} command(s)) -- NOT adopted yet{warn_note}:" + Style.RESET_ALL)
@@ -3530,9 +4161,94 @@ def main():
                             + f"[Doc] Chunk {doc_session['cursor'] + 1}/{doc_session['chunk_count']} staged for the next turn."
                             + Style.RESET_ALL
                         )
+                elif (rewrite_req := parse_doc_rewrite_request(dargs)) is not None:
+                    rewrite_path = rewrite_req.get("source", "")
+                    rewrite_name = rewrite_req.get("output")
+                    if rewrite_path == "__current__":
+                        if doc_session is None:
+                            print(Fore.YELLOW + "[Doc Rewrite] No current document. Usage: :doc <path> rewrite because <why>" + Style.RESET_ALL)
+                            continue
+                        path_str = doc_session.get("source_path", "")
+                    else:
+                        path_str = rewrite_path.strip().strip('"')
+                    if not path_str or not os.path.isfile(path_str):
+                        print(Fore.YELLOW + f"[Doc Rewrite] No file found for '{path_str}'. Usage: :doc <path> rewrite because <why>" + Style.RESET_ALL)
+                        continue
+                    try:
+                        with open(path_str, "r", encoding="utf-8", errors="replace") as rf:
+                            original_text = rf.read()
+                    except OSError as exc:
+                        print(Fore.RED + f"[Doc Rewrite] Could not read file: {exc}" + Style.RESET_ALL)
+                        continue
+                    if len(original_text) > DOC_REWRITE_MAX_CHARS:
+                        print(
+                            Fore.YELLOW
+                            + f"[Doc Rewrite] {os.path.basename(path_str)} is {len(original_text)} chars; "
+                            + f"single-pass rewrite limit is {DOC_REWRITE_MAX_CHARS}. Split it or rewrite a smaller file."
+                            + Style.RESET_ALL
+                        )
+                        continue
+                    reason = (command_because or "").strip() or "make it clearer, tighter, better organized, and more useful while preserving meaning"
+                    try:
+                        out_path = rewrite_output_path(path_str, rewrite_name)
+                    except (OSError, ValueError) as exc:
+                        print(Fore.YELLOW + f"[Doc Rewrite] {exc}" + Style.RESET_ALL)
+                        continue
+                    prompt = (
+                        "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                        "Rewrite the file below into a better version, guided by the operator's reason. "
+                        "Preserve factual meaning, important details, headings, lists, links, code fences, and code syntax when present. "
+                        "Do not explain what you changed. Output ONLY the complete rewritten file content.\n\n"
+                        f"Source filename: {os.path.basename(path_str)}\n"
+                        f"Output filename: {os.path.basename(out_path)}\n"
+                        f"Reason: {reason}\n\n"
+                        "----- ORIGINAL FILE START -----\n"
+                        f"{original_text}\n"
+                        "----- ORIGINAL FILE END -----<|eot_id|>"
+                        "<|start_header_id|>assistant<|end_header_id|>\n\n"
+                    )
+                    print(Fore.CYAN + f"[Doc Rewrite] Rewriting {os.path.basename(path_str)} because {reason}..." + Style.RESET_ALL)
+                    try:
+                        rewritten = generate_agentic_text(
+                            model,
+                            instruction=prompt,
+                            config=config,
+                            pre_formatted=True,
+                            chatty_log=False,
+                            max_new_tokens=max(512, min(4096, int(len(original_text) / 3) + 512)),
+                        )
+                    except Exception as exc:
+                        print(Fore.RED + f"[Doc Rewrite] Generation failed: {exc}" + Style.RESET_ALL)
+                        continue
+                    rewritten = clean_rewrite_output(rewritten)
+                    if not rewritten:
+                        print(Fore.YELLOW + "[Doc Rewrite] Model returned no rewritten content; nothing saved." + Style.RESET_ALL)
+                        continue
+                    if original_text.endswith("\n") and not rewritten.endswith("\n"):
+                        rewritten += "\n"
+                    try:
+                        with open(out_path, "w", encoding="utf-8", newline="") as wf:
+                            wf.write(rewritten)
+                    except OSError as exc:
+                        print(Fore.RED + f"[Doc Rewrite] Could not save rewrite: {exc}" + Style.RESET_ALL)
+                        continue
+                    memory.append_event(
+                        "document_rewritten",
+                        text=f"{os.path.basename(path_str)} -> {os.path.basename(out_path)}",
+                        tags=["document", "rewrite"],
+                        provenance={
+                            "source_path": os.path.abspath(path_str),
+                            "output_path": os.path.abspath(out_path),
+                            "because": reason,
+                            "source_chars": len(original_text),
+                            "output_chars": len(rewritten),
+                        },
+                    )
+                    print(Fore.GREEN + f"[Doc Rewrite] Saved rewritten file: {out_path}" + Style.RESET_ALL)
                 else:
                     path_part, _, why = dargs.partition(" because ")
                     path_str = path_part.strip().strip('"')
+                    why = (why.strip() or (command_because or "").strip())
                     
                     paths_to_load = []
                     if os.path.isdir(path_str):
@@ -3801,6 +4517,42 @@ def main():
                     print(Fore.GREEN + f"[System] Reloaded {len(macro_aliases)} macro alias(es)." + Style.RESET_ALL)
                 except (OSError, ValueError):
                     pass
+                try:
+                    with open(HIDDEN_CMD_PATH, "r", encoding="utf-8") as _hcf:
+                        _raw_hidden = json.load(_hcf)
+                    if isinstance(_raw_hidden, list):
+                        _loaded_hidden = {str(x).lstrip(":").lower() for x in _raw_hidden if str(x).strip()}
+                    elif isinstance(_raw_hidden, dict):
+                        _loaded_hidden = {str(k).lstrip(":").lower() for k, v in _raw_hidden.items() if v}
+                    else:
+                        _loaded_hidden = set()
+                    hidden_commands.clear()
+                    hidden_commands.update(_loaded_hidden)
+                    print(Fore.GREEN + f"[System] Reloaded {len(hidden_commands)} hidden command(s)." + Style.RESET_ALL)
+                except (OSError, ValueError):
+                    pass
+                try:
+                    with open(EXPOSED_CMD_PATH, "r", encoding="utf-8") as _ecf:
+                        _loaded_exposed = {str(k): str(v) for k, v in json.load(_ecf).items()}
+                    exposed_commands.clear()
+                    exposed_commands.update({k: v for k, v in _loaded_exposed.items() if k not in hidden_commands})
+                    print(Fore.GREEN + f"[System] Reloaded {len(exposed_commands)} exposed command(s)." + Style.RESET_ALL)
+                except (OSError, ValueError):
+                    pass
+                try:
+                    with open(EXPOSED_KNOB_PATH, "r", encoding="utf-8") as _ekf:
+                        _raw_knobs = json.load(_ekf)
+                    if isinstance(_raw_knobs, list):
+                        _loaded_knobs = {str(x).strip() for x in _raw_knobs if str(x).strip()}
+                    elif isinstance(_raw_knobs, dict):
+                        _loaded_knobs = {str(k).strip() for k, v in _raw_knobs.items() if v}
+                    else:
+                        _loaded_knobs = set()
+                    exposed_knobs.clear()
+                    exposed_knobs.update(k for k in _loaded_knobs if k in tuner.triggers and not _is_shadow_trigger(k, tuner))
+                    print(Fore.GREEN + f"[System] Reloaded {len(exposed_knobs)} exposed knob(s)." + Style.RESET_ALL)
+                except (OSError, ValueError):
+                    pass
                 print(Fore.YELLOW + "[System] (Macro files are re-read on every :run, so edits to them need no refresh.)" + Style.RESET_ALL)
                 continue
 
@@ -3812,7 +4564,17 @@ def main():
                     print(Fore.GREEN + f"[Help] Model help {'EXPOSED -- it may now emit <<HELP>>' if help_exposed else 'hidden from the model'}." + Style.RESET_ALL)
                     continue
                 if harg == "model":
-                    print(Fore.CYAN + build_model_help_text(list_solve_macros()) + Style.RESET_ALL)
+                    print(Fore.CYAN + build_model_help_text(list_solve_macros(), exposed_commands, exposed_knobs, hidden_commands) + Style.RESET_ALL)
+                    continue
+                if harg:
+                    matches = find_command_help_entries(harg)
+                    if matches:
+                        for entry in matches:
+                            for _l in entry:
+                                print(Fore.CYAN + _l + Style.RESET_ALL)
+                    else:
+                        q = harg.split()[0]
+                        print(Fore.YELLOW + f"[Help] No help entry for '{q}'.{did_you_mean(q.lstrip(':'), BUILTIN_COMMANDS | set(macro_aliases))}" + Style.RESET_ALL)
                     continue
                 for _l in COMMAND_HELP_LINES:
                     print(Fore.CYAN + _l + Style.RESET_ALL)
@@ -3838,12 +4600,15 @@ def main():
                     if verb == ":reject":
                         print(Fore.YELLOW + f"[Reject] Discarded proposed macro ':{p['name']}'." + Style.RESET_ALL)
                         continue
+                    if _hidden_overwrite_blocked(p["name"], "Accept"):
+                        continue
                     try:
                         os.makedirs(os.path.dirname(p["dest"]), exist_ok=True)
                         with open(p["dest"], "w", encoding="utf-8") as wf:
                             wf.write(f"# :solve macro '{p['name']}' -- {p['goal']}\n")
-                            if p["clean_names"]:
-                                wf.write(f"# args: {', '.join(p['clean_names'])}\n")
+                            arg_header = p.get("arg_specs") or p.get("clean_names") or []
+                            if arg_header:
+                                wf.write(f"# args: {', '.join(arg_header)}\n")
                             for ln in p["cmd_lines"]:
                                 wf.write(ln + "\n")
                         macro_aliases[p["name"]] = p["dest"]
@@ -3878,6 +4643,124 @@ def main():
                     print(Fore.CYAN + f"[Accept] {len(pending_accept_commands)} command(s) still staged." + Style.RESET_ALL)
                 continue
 
+            if _cmdword == ":hide":
+                hargs = user_input.strip()[len(":hide"):].split()
+                if not hargs:
+                    if hidden_commands:
+                        print(Fore.CYAN + "[Hide] Hidden from the model: " + ", ".join(f":{w}" for w in sorted(hidden_commands)) + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + "[Hide] No commands are hidden. Use ':hide <command>' to hide one from model-facing help/discovery, or ':hide <command> off' to reveal it." + Style.RESET_ALL)
+                    continue
+                word = hargs[0].lstrip(":").lower()
+                mode_arg = hargs[1].lower() if len(hargs) > 1 else ""
+                all_shell_commands = _all_shell_commands()
+                if mode_arg in ("off", "show", "reveal", "visible"):
+                    if word in hidden_commands:
+                        hidden_commands.remove(word)
+                        _save_hidden_commands()
+                        print(Fore.GREEN + f"[Hide] ':{word}' is visible to model-facing help/discovery again." + Style.RESET_ALL)
+                    else:
+                        print(Fore.YELLOW + f"[Hide] ':{word}' wasn't hidden." + Style.RESET_ALL)
+                    continue
+                if word not in all_shell_commands:
+                    print(Fore.YELLOW + f"[Hide] ':{word}' isn't a command.{did_you_mean(word, all_shell_commands)}" + Style.RESET_ALL)
+                    continue
+                if mode_arg and mode_arg not in ("on", "hide", "hidden"):
+                    print(Fore.YELLOW + f"[Hide] Unknown mode '{mode_arg}'. Use ':hide <command>' or ':hide <command> off'." + Style.RESET_ALL)
+                    continue
+                hidden_commands.add(word)
+                was_exposed = exposed_commands.pop(word, None) is not None
+                _save_hidden_commands()
+                if was_exposed:
+                    _save_exposed_commands()
+                extra = " and unexposed" if was_exposed else ""
+                print(Fore.GREEN + f"[Hide] ':{word}' is hidden from model-facing help/discovery{extra}. It still works for the operator." + Style.RESET_ALL)
+                continue
+
+            if _cmdword == ":expose":
+                eargs = user_input.strip()[len(":expose"):].split()
+                if not eargs:  # list exposures
+                    exposed_probe_names = sorted(n for n in probes if probes[n].get("exposed"))
+                    if not exposed_commands and not exposed_probe_names and not exposed_knobs:
+                        print(Fore.CYAN + "[Expose] Nothing exposed. Use ':expose :command [stage|direct]' for command tools, or ':expose <probe|knob>' for model-readable probes/knobs." + Style.RESET_ALL)
+                    if exposed_commands:
+                        for w, mode in sorted(exposed_commands.items()):
+                            print(Fore.CYAN + f"[Expose] command :{w}  ({mode})" + Style.RESET_ALL)
+                    if exposed_probe_names:
+                        print(Fore.CYAN + "[Expose] probes: " + ", ".join(exposed_probe_names) + Style.RESET_ALL)
+                    if exposed_knobs:
+                        print(Fore.CYAN + "[Expose] knobs: " + ", ".join(sorted(exposed_knobs)) + Style.RESET_ALL)
+                    continue
+                target = eargs[0]
+                mode_arg = eargs[1].lower() if len(eargs) > 1 else ""
+                if not target.startswith(":"):
+                    if mode_arg not in ("", "on", "expose", "off", "hide"):
+                        print(Fore.YELLOW + f"[Expose] Bare targets expose probes/knobs and only accept 'off'. For command tools use ':expose :{target} [stage|direct]'." + Style.RESET_ALL)
+                        continue
+                    turn_off = mode_arg in ("off", "hide")
+                    probe_name = re.sub(r"[^a-z0-9_]", "_", target.lower())[:40].strip("_")
+                    if probe_name in probes:
+                        probes[probe_name]["exposed"] = not turn_off
+                        pf = os.path.join(ROOT, "invariants", "out", "probes", f"{probe_name}.pt")
+                        if os.path.exists(pf):
+                            try:
+                                data = torch.load(pf, weights_only=True)
+                                data["exposed"] = probes[probe_name]["exposed"]
+                                torch.save(data, pf)
+                            except Exception:
+                                pass
+                        print(Fore.GREEN + f"[Expose] probe '{probe_name}' is now {'hidden from' if turn_off else 'exposed to'} the model's <<PROBE: {probe_name}>> tool." + Style.RESET_ALL)
+                        continue
+                    knob_name = target.strip()
+                    if knob_name not in tuner.triggers and knob_name.lower() in tuner.triggers:
+                        knob_name = knob_name.lower()
+                    if knob_name in tuner.triggers and not _is_shadow_trigger(knob_name, tuner):
+                        if turn_off:
+                            exposed_knobs.discard(knob_name)
+                        else:
+                            exposed_knobs.add(knob_name)
+                        _save_exposed_knobs()
+                        print(Fore.GREEN + f"[Expose] knob '{knob_name}' is now {'hidden from' if turn_off else 'exposed to'} the model's <<PROBE: {knob_name}>> tool." + Style.RESET_ALL)
+                        continue
+                    candidates = set(probes) | {n for n in tuner.triggers if not _is_shadow_trigger(n, tuner)}
+                    command_hint = f" For command tools use ':expose :{target} [stage|direct]'." if target.lower() in _all_shell_commands() else ""
+                    print(Fore.YELLOW + f"[Expose] '{target}' is not an active probe or knob.{did_you_mean(target, candidates)}{command_hint}" + Style.RESET_ALL)
+                    continue
+                word = target.lstrip(":").lower()
+                if mode_arg == "off":
+                    if exposed_commands.pop(word, None) is not None:
+                        _save_exposed_commands()
+                        print(Fore.CYAN + f"[Expose] ':{word}' is no longer a model tool." + Style.RESET_ALL)
+                    else:
+                        print(Fore.YELLOW + f"[Expose] ':{word}' wasn't exposed." + Style.RESET_ALL)
+                    continue
+                if word == "expose":
+                    print(Fore.RED + "[Expose] refusing to expose ':expose' itself -- the model could then self-grant any command." + Style.RESET_ALL)
+                    continue
+                if word in hidden_commands:
+                    print(Fore.YELLOW + f"[Expose] ':{word}' is hidden from model-facing discovery. Reveal it first with ':hide :{word} off'." + Style.RESET_ALL)
+                    continue
+                known_exposable = _known_model_commands()
+                if word not in known_exposable:
+                    print(Fore.YELLOW + f"[Expose] ':{word}' isn't a command.{did_you_mean(word, known_exposable)}" + Style.RESET_ALL)
+                    continue
+                if mode_arg in ("", "stage", "staged", "accept"):
+                    mode = "stage"
+                elif mode_arg in ("direct", "run", "trust", "free"):
+                    mode = "direct"
+                else:
+                    print(Fore.YELLOW + f"[Expose] Unknown mode '{mode_arg}'. Use stage, direct, or off." + Style.RESET_ALL)
+                    continue
+                exposed_commands[word] = mode
+                _save_exposed_commands()
+                run_note = "is queued immediately" if mode == "direct" else "is staged for your :accept"
+                print(Fore.GREEN + f"[Expose] ':{word}' is now a model tool -- it calls <<CMD: :{word} ...>> and it {run_note} ({mode})." + Style.RESET_ALL)
+                if word in EXPOSE_META_CMDS:
+                    print(Fore.YELLOW + f"         WARNING: ':{word}' takes another command/macro/script as its argument, so through it the model can reach commands you did NOT expose. Expose it only if you mean to." + Style.RESET_ALL)
+                elif word in macro_aliases and word not in BUILTIN_COMMANDS:
+                    print(Fore.YELLOW + f"         WARNING: ':{word}' is a macro command; it expands to whatever commands its macro file contains." + Style.RESET_ALL)
+                continue
+
             if user_input.startswith(":game ") or user_input.startswith(":game,") or user_input.strip() == ":game":
                 body = user_input[len(":game"):].strip()
                 if body.startswith(","):
@@ -3888,6 +4771,23 @@ def main():
                 _nm = re.split(r"[\s,]+", body, maxsplit=1)
                 gname = _nm[0].strip()
                 rest = _nm[1].strip().lstrip(",").strip() if len(_nm) > 1 else ""
+                if gname.lower() == "restore":
+                    if not rest:
+                        print(Fore.YELLOW + "[Game] Usage: :game restore {\"name\":\"...\",\"config\":{...}}" + Style.RESET_ALL)
+                        continue
+                    try:
+                        obj = json.loads(rest)
+                        rname = re.sub(r"[^a-z0-9_]", "_", str(obj.get("name", "")).lower())[:40].strip("_")
+                        if not rname:
+                            raise ValueError("missing game name")
+                        cfg = normalize_game_config(obj.get("config", {}))
+                        save_game_config(os.path.join(ROOT, "games", f"{rname}_rules.json"), cfg)
+                        n_rules = len(cfg.get("rules", {}))
+                        n_prizes = len(cfg.get("prizes", {}))
+                        print(Fore.GREEN + f"[Game] Restored config for '{rname}' ({n_rules} rule(s), {n_prizes} prize(s))." + Style.RESET_ALL)
+                    except Exception as e:
+                        print(Fore.RED + f"[Game] Could not restore game config: {e}" + Style.RESET_ALL)
+                    continue
                 # Operator declines the game the model just proposed (the symmetric
                 # counterpart to accepting it with ':game <name>').
                 if gname.lower() in ("no", "decline", "reject", "dismiss") and model_proposed_game:
@@ -4251,6 +5151,90 @@ def main():
                         n_pairs = len(trig.outcomes) if trig else 0
                         exposed_note = ", exposed to the model" if pdata.get("exposed") else ""
                         print(Fore.CYAN + f"[Probe] {pname}: {len(pdata['direction'])} layers, {n_pairs} paired turns{exposed_note}." + Style.RESET_ALL)
+                    continue
+                if pargs.lower() in ("values", "value", "recent", "last") or pargs.lower().startswith(("values ", "value ", "recent ", "last ")):
+                    vparts = pargs.split()
+                    rest = vparts[1:]
+                    if not probes:
+                        print(Fore.CYAN + "[Probe Values] none active. Mint one first with :probe <name> <with> || <without>" + Style.RESET_ALL)
+                        continue
+                    selected = sorted(probes)
+                    limit = 1
+                    if rest:
+                        head = rest[0].lower()
+                        if head == "all":
+                            rest = rest[1:]
+                        elif not re.fullmatch(r"\d+", head):
+                            vname = resolve_probe_choice(rest[0], probes, model=model, config=config, action_name="values")
+                            if not vname:
+                                continue
+                            if vname not in probes:
+                                print(Fore.YELLOW + f"[Probe Values] no active probe named '{vname}'.{did_you_mean(vname, probes)}" + Style.RESET_ALL)
+                                continue
+                            selected = [vname]
+                            rest = rest[1:]
+                    if rest:
+                        try:
+                            limit = max(1, min(20, int(rest[0])))
+                        except ValueError:
+                            print(Fore.YELLOW + "[Probe Values] Usage: :probe values [name|all] [n]" + Style.RESET_ALL)
+                            continue
+
+                    recent_rows = []
+                    for row in reversed(list(turn_log)):
+                        vals = {}
+                        for pname in selected:
+                            key = f"probe_{pname}"
+                            if key in row:
+                                try:
+                                    vals[pname] = float(row[key])
+                                except (TypeError, ValueError):
+                                    pass
+                        if vals:
+                            recent_rows.append((row, vals))
+                            if len(recent_rows) >= limit:
+                                break
+
+                    if not recent_rows:
+                        print(Fore.CYAN + "[Probe Values] no completed turn with probe readings yet; showing raw-history fallback where available." + Style.RESET_ALL)
+                        for pname in selected:
+                            sig, raw, n_hist = latest_probe_signal_from_history(probes[pname].get("history"))
+                            if sig is None:
+                                print(Fore.CYAN + f"  {pname}: no reading yet" + Style.RESET_ALL)
+                            else:
+                                print(Fore.CYAN + f"  {pname}: {sig:+.3f} (raw {raw:+.3f}, history n={n_hist})" + Style.RESET_ALL)
+                        continue
+
+                    if limit == 1:
+                        row, vals = recent_rows[0]
+                        ts = row.get("ts")
+                        print(Fore.CYAN + "[Probe Values] latest completed turn" + (f" ({ts})" if ts else "") + ":" + Style.RESET_ALL)
+                        for pname in selected:
+                            sig = vals.get(pname)
+                            if sig is None:
+                                print(Fore.CYAN + f"  {pname}: no reading on that turn" + Style.RESET_ALL)
+                                continue
+                            _hist_sig, raw, n_hist = latest_probe_signal_from_history(probes[pname].get("history"))
+                            trig = tuner.triggers.get(f"probe_{pname}")
+                            parts = [f"{sig:+.3f}"]
+                            if raw is not None:
+                                parts.append(f"raw {raw:+.3f}")
+                            parts.append(f"history n={n_hist}")
+                            if trig is not None:
+                                fires = sig <= trig.value if trig.comparator == "<=" else sig >= trig.value
+                                parts.append(f"bar {trig.comparator} {trig.value:+.3f} ({'fires' if fires else 'quiet'})")
+                                st = trig.outcome_stats()
+                                if st.get("lift") is not None:
+                                    parts.append(f"lift {st.get('lift'):+.3f} over {st.get('n_credited')} credited")
+                            if probes[pname].get("exposed"):
+                                parts.append("exposed")
+                            print(Fore.CYAN + f"  {pname}: " + ", ".join(parts) + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + f"[Probe Values] {len(recent_rows)} most recent turn(s):" + Style.RESET_ALL)
+                        for idx, (row, vals) in enumerate(recent_rows, 1):
+                            ts = row.get("ts") or f"-{idx}"
+                            compact = "  ".join(f"{p}={vals[p]:+.3f}" for p in sorted(vals))
+                            print(Fore.CYAN + f"  {ts}: {compact}" + Style.RESET_ALL)
                     continue
                 if pargs.lower().startswith("drop "):
                     dropped_raw = pargs[5:].strip()
@@ -4932,55 +5916,14 @@ def main():
                 
                 target_probe = None
                 if len(sargs) > 1 and sargs[1].lower() not in ("apply", "suggestions"):
+                    if sargs[1].lower() in ("command", "commands", "help"):
+                        input_queue.insert(0, ":help")
+                        print(Fore.CYAN + "[Suggest] Showing command help via :help." + Style.RESET_ALL)
+                        continue
                     if sargs[1].startswith(":"):
                         cmd_name = sargs[1]
-                        print(Fore.CYAN + f"[Suggest] Generating help for command '{cmd_name}' based on source..." + Style.RESET_ALL)
-                        my_src = ""
-                        alias_name = cmd_name[1:]
-                        if alias_name in macro_aliases and alias_name not in BUILTIN_COMMANDS:
-                            try:
-                                with open(macro_aliases[alias_name], "r", encoding="utf-8") as f:
-                                    my_src = f.read()
-                            except Exception:
-                                pass
-                        else:
-                            try:
-                                with open(__file__, "r", encoding="utf-8") as f:
-                                    lines = f.readlines()
-                                start_idx = -1
-                                for i, ln in enumerate(lines):
-                                    if "user_input" in ln and (f'"{cmd_name}"' in ln or f'"{cmd_name} "' in ln) and "startswith" in ln:
-                                        start_idx = i
-                                        break
-                                if start_idx != -1:
-                                    indent = len(lines[start_idx]) - len(lines[start_idx].lstrip())
-                                    end_idx = start_idx + 1
-                                    while end_idx < len(lines) and end_idx < start_idx + 150:
-                                        if lines[end_idx].strip() and len(lines[end_idx]) - len(lines[end_idx].lstrip()) == indent and "if " in lines[end_idx]:
-                                            break
-                                        end_idx += 1
-                                    my_src = "".join(lines[start_idx:end_idx])
-                            except Exception:
-                                pass
-                        
-                        prompt = (
-                            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
-                            "You are a helpful documentation assistant for an interactive agent shell.\n"
-                            f"The user wants to know how to use the '{cmd_name}' command. "
-                        )
-                        if my_src:
-                            if alias_name in macro_aliases and alias_name not in BUILTIN_COMMANDS:
-                                prompt += f"Here is the macro source code that defines it:\n```\n{my_src}\n```\n"
-                            else:
-                                prompt += f"Here is the Python source code that implements it:\n```python\n{my_src}\n```\n"
-                        
-                        prompt += (
-                            "Explain what it does, its syntax, and give 2-3 practical examples of how to use it.\n"
-                            "Keep it concise and formatted in Markdown.<|eot_id|>"
-                            "<|start_header_id|>assistant<|end_header_id|>\n\n"
-                        )
-                        sug = generate_agentic_text(model, instruction=prompt, config=config, pre_formatted=True, max_new_tokens=400, chatty_log=True)
-                        print(Fore.GREEN + f"\n[Help for {cmd_name}]:\n" + sug.strip() + Style.RESET_ALL)
+                        input_queue.insert(0, f":help {cmd_name}")
+                        print(Fore.CYAN + f"[Suggest] Showing command help via :help {cmd_name}." + Style.RESET_ALL)
                         continue
                         
                     target_probe = re.sub(r"[^a-z0-9_]", "_", sargs[1].lower())[:40]
@@ -5864,13 +6807,14 @@ def main():
             model_methodmap_query = extract_methodmap_query(response)
             model_doc_query = extract_doc_query(response)
             model_probe_query = extract_probe_query(response)
+            model_cmd_requests = extract_cmd_requests(response)
             model_game_propose = extract_game_propose(response)
             model_game_accept = extract_game_accept(response)
             model_game_decline = extract_game_decline(response)
             model_game_end = extract_game_end(response)
             model_game_exposed, model_game_hidden = extract_game_expose_hide(response)
             if extract_help_request(response):
-                pending_help_tool_result = build_model_help_text(list_solve_macros())
+                pending_help_tool_result = build_model_help_text(list_solve_macros(), exposed_commands, exposed_knobs, hidden_commands)
                 print(Fore.CYAN + "[Help] The model asked for help; serving the tool/command reference next turn." + Style.RESET_ALL)
 
             if model_game_exposed or model_game_hidden:
@@ -5949,6 +6893,44 @@ def main():
             model_methodmap_tool_result = None
             model_doc_tool_result = None
             model_probe_tool_result = None
+            model_cmd_tool_result = None
+            if model_cmd_requests:
+                model_cmd_tool_result = _run_exposed_command_tool(model_cmd_requests)
+                turn_impacts.append({
+                    "cause": "asked for an exposed command tool",
+                    "effect": "command request was staged or queued according to exposure mode",
+                })
+                print(Fore.CYAN + "\n[Command Tool]\n" + model_cmd_tool_result + Style.RESET_ALL + "\n")
+                prompt = build_prompt(
+                    user_input,
+                    memory_tool_result=memory_tool_result,
+                    orientation_tool_result=orientation_tool_result,
+                    claimmap_tool_result=claimmap_tool_result,
+                    methodmap_tool_result=methodmap_tool_result,
+                    sandbox_tool_result=sandbox_tool_result,
+                    document_tool_result=document_tool_result,
+                    probe_tool_result=None,
+                    command_tool_result=model_cmd_tool_result,
+                    game_tool_result=game_tool_result,
+                    help_tool_result=help_tool_result,
+                    session_context=session_context if session_context_enabled else None,
+                )
+                print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
+                response, telemetry = generate_agentic_text(
+                    model,
+                    instruction=prompt,
+                    config=config,
+                    max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
+                    synthesis_recorder=synthesis_records,
+                    chatty_log=True,
+                    pre_formatted=True,
+                    return_telemetry=True,
+                )
+                model_memory_query = extract_memory_query(response)
+                model_claimmap_payload = extract_claimmap_payload(response)
+                model_methodmap_query = extract_methodmap_query(response)
+                model_doc_query = extract_doc_query(response)
+                model_probe_query = extract_probe_query(response)
             if model_doc_query and doc_library and document_tool_result is None:
                 # The model asked to keep reading, in its own words -- and its
                 # words pick the chunk (reply-mode selection over the query
@@ -5993,6 +6975,7 @@ def main():
                     methodmap_tool_result=methodmap_tool_result,
                     sandbox_tool_result=sandbox_tool_result,
                     document_tool_result=model_doc_tool_result,
+                    command_tool_result=model_cmd_tool_result,
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
@@ -6040,6 +7023,7 @@ def main():
                     orientation_tool_result=orientation_tool_result,
                     claimmap_tool_result=claimmap_tool_result,
                     methodmap_tool_result=methodmap_tool_result,
+                    command_tool_result=model_cmd_tool_result,
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
@@ -6092,6 +7076,7 @@ def main():
                     orientation_tool_result=orientation_tool_result,
                     claimmap_tool_result=model_claimmap_tool_result,
                     methodmap_tool_result=methodmap_tool_result,
+                    command_tool_result=model_cmd_tool_result,
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
@@ -6151,6 +7136,7 @@ def main():
                     orientation_tool_result=orientation_tool_result,
                     claimmap_tool_result=model_claimmap_tool_result or claimmap_tool_result,
                     methodmap_tool_result=model_methodmap_tool_result,
+                    command_tool_result=model_cmd_tool_result,
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
@@ -6164,21 +7150,23 @@ def main():
                     pre_formatted=True,
                     return_telemetry=True,
                 )
-            if model_probe_query and probes:
+            if model_probe_query and (probes or exposed_knobs):
                 # READ-ONLY self-measurement: the model may consult sensors the
-                # operator has exposed (:probe expose <name>) -- reading the
-                # instrument is allowed, shaping it is not (no minting,
-                # composing, dropping, or calibrating from its side). A
-                # candidate-text read scores hypothetical words without
-                # observing, crediting, or touching any rolling history.
+                # operator has exposed (:probe expose <name> or :expose <name>)
+                # and scalar knobs the operator exposed with :expose <knob>.
+                # Reading is allowed; shaping is not. Candidate-text reads score
+                # hypothetical words for probes only, without observing, crediting,
+                # or touching any rolling history.
                 name_part, _, cand_text = model_probe_query.partition("||")
                 cand_text = cand_text.strip()
                 req_names = [re.sub(r"[^a-z0-9_]", "_", n.strip().lower())[:40] for n in name_part.split(",") if n.strip()]
-                exposed_all = sorted(n for n in probes if probes[n].get("exposed"))
+                exposed_probe_all = sorted(n for n in probes if probes[n].get("exposed"))
+                exposed_knob_all = sorted(k for k in exposed_knobs if k in tuner.triggers and not _is_shadow_trigger(k, tuner))
                 if req_names == ["all"]:
-                    req_names = list(exposed_all)
+                    req_names = list(exposed_probe_all) + list(exposed_knob_all)
                 readable = [n for n in req_names if n in probes and probes[n].get("exposed")]
-                blocked = [n for n in req_names if n not in readable]
+                readable_knobs = [n for n in req_names if n in exposed_knob_all]
+                blocked = [n for n in req_names if n not in readable and n not in readable_knobs]
                 probe_lines = []
                 if cand_text and readable:
                     from invariants.engine import _inputs as _q_inputs, _hidden_states as _q_hidden, probe_score as _q_score
@@ -6208,15 +7196,45 @@ def main():
                                 seg += f", lift {p_st['lift']}"
                             seg += ")"
                         probe_lines.append(seg + ".")
+                for n in readable_knobs:
+                    trig = tuner.triggers.get(n)
+                    if trig is None:
+                        continue
+                    st = trig.stats()
+                    seg = f"- {n}: knob value {st['value']} ({st['kind']}"
+                    if st.get("kind") == "threshold":
+                        seg += f", fires when signal {st['comparator']} value"
+                        if st.get("fire_rate") is not None:
+                            seg += f", fire_rate {st['fire_rate']}"
+                    if st.get("observed"):
+                        seg += f", observed {st['observed']}"
+                    if st.get("lift") is not None:
+                        seg += f", lift {st['lift']}"
+                    seg += ")"
+                    if cand_text:
+                        seg += " Candidate words do not rescore knobs; this is current scalar state."
+                        probe_lines.append(seg)
+                    else:
+                        probe_lines.append(seg + ".")
                 for n in blocked:
                     probe_lines.append(f"- {n}: not a sensor I can consult.")
                 if not probe_lines:
+                    exposed_bits = []
+                    if exposed_probe_all:
+                        exposed_bits.append("probes: " + ", ".join(exposed_probe_all))
+                    if exposed_knob_all:
+                        exposed_bits.append("knobs: " + ", ".join(exposed_knob_all))
                     probe_lines.append(
                         "- No consultable sensors named. "
-                        + (f"I can consult: {', '.join(exposed_all)}." if exposed_all else "None are exposed to me.")
+                        + (f"I can consult {', '.join(exposed_bits)}." if exposed_bits else "None are exposed to me.")
                     )
+                consulted_parts = []
+                if readable:
+                    consulted_parts.append(f'{", ".join(readable)} probe(s)')
+                if readable_knobs:
+                    consulted_parts.append(f'{", ".join(readable_knobs)} knob(s)')
                 probe_cause = (
-                    f'consulted my {", ".join(readable)} sensor(s)' if readable else "reached for a sensor"
+                    "consulted my " + " and ".join(consulted_parts) if consulted_parts else "reached for a sensor"
                 ) + (" on candidate words" if cand_text and readable else "")
                 model_probe_tool_result = (
                     impact_note(probe_cause)
@@ -6224,14 +7242,14 @@ def main():
                 )
                 turn_impacts.append({
                     "cause": probe_cause,
-                    "effect": f"{len(readable)} reading(s) returned"
+                    "effect": f"{len(readable) + len(readable_knobs)} reading(s) returned"
                               + (f", {len(blocked)} refused" if blocked else ""),
                 })
                 memory.append_event(
                     "probe_tool_model_requested",
                     text=model_probe_tool_result,
                     tags=["probe", "probe_tool", "activation_measurement"],
-                    provenance={"query": model_probe_query[:240], "readable": readable, "blocked": blocked},
+                    provenance={"query": model_probe_query[:240], "readable": readable, "readable_knobs": readable_knobs, "blocked": blocked},
                 )
                 print(
                     Fore.CYAN
@@ -6247,6 +7265,7 @@ def main():
                     claimmap_tool_result=claimmap_tool_result or model_claimmap_tool_result,
                     methodmap_tool_result=methodmap_tool_result or model_methodmap_tool_result,
                     probe_tool_result=model_probe_tool_result,
+                    command_tool_result=model_cmd_tool_result,
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
@@ -6268,8 +7287,9 @@ def main():
                 active_document_tool_result = document_tool_result or model_doc_tool_result
                 active_sandbox_tool_result = sandbox_tool_result
                 active_probe_tool_result = model_probe_tool_result
+                active_command_tool_result = model_cmd_tool_result
                 if (
-                    (active_memory_tool_result or active_claimmap_tool_result or active_methodmap_tool_result or active_document_tool_result or active_probe_tool_result)
+                    (active_memory_tool_result or active_claimmap_tool_result or active_methodmap_tool_result or active_document_tool_result or active_probe_tool_result or active_command_tool_result)
                     and is_tool_only_response(response)
                 ):
                     memory.append_event(
@@ -6292,6 +7312,7 @@ def main():
                         sandbox_tool_result=active_sandbox_tool_result,
                         document_tool_result=active_document_tool_result,
                         probe_tool_result=active_probe_tool_result,
+                        command_tool_result=active_command_tool_result,
                         session_context=session_context if session_context_enabled else None,
                     )
                     print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
@@ -6314,6 +7335,7 @@ def main():
                     sandbox_tool_result=active_sandbox_tool_result,
                     document_tool_result=active_document_tool_result,
                     probe_tool_result=active_probe_tool_result,
+                    command_tool_result=active_command_tool_result,
                 )
                 if show_timestamps:
                     print(Fore.GREEN + Style.BRIGHT + f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] Me: " + Style.RESET_ALL)
@@ -6399,6 +7421,7 @@ def main():
                         "document_tool_result_provided": bool(active_document_tool_result),
                         "sandbox_tool_result_provided": bool(active_sandbox_tool_result),
                         "model_probe_tool_requested": bool(model_probe_tool_result),
+                        "model_command_tool_requested": bool(model_cmd_tool_result),
                     },
                 )
                 # The reading dialogue's reflection stream: only reply-mode
