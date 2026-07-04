@@ -4194,15 +4194,42 @@ def main():
                 else:
                     print(Fore.YELLOW + "[Place] Usage: :place <probe> <+|->" + Style.RESET_ALL)
                 continue
-            if user_input.strip().lower() in (":suggest", ":suggestions"):
-                # The evidence is already accrued every turn; this only reads
-                # it back. A suggestion is a computed value plus the command
-                # that would enact it -- the choice stays with the operator.
+            if user_input.lower().startswith(":suggest"):
+                sargs = user_input.strip().split()
                 _arch = sum(
                     1 for r in memory.records
                     if r.scope == memory.scope and r.kind == "turn" and r.role == "assistant"
                 )
-                sugg = suggest_actions(tuner, list(turn_log), probes=probes, archive_size=_arch)
+                
+                target_probe = None
+                if len(sargs) > 1 and sargs[1].lower() not in ("apply", "suggestions"):
+                    target_probe = re.sub(r"[^a-z0-9_]", "_", sargs[1].lower())[:40]
+                    if target_probe in probes:
+                        print(Fore.CYAN + f"[Suggest] Scanning for specific moves for probe '{target_probe}'..." + Style.RESET_ALL)
+                        all_sugg = suggest_actions(tuner, list(turn_log), probes=probes, archive_size=_arch)
+                        sugg = [(cat, line, cmd) for cat, line, cmd in all_sugg if target_probe in line or target_probe in cmd]
+                        if not sugg:
+                            print(Fore.YELLOW + f"[Suggest] No specific data-backed moves ready for '{target_probe}' yet." + Style.RESET_ALL)
+                            continue
+                    else:
+                        print(Fore.CYAN + f"[Suggest] Probe '{target_probe}' not active. Generating multiple contrastive framings to mint it..." + Style.RESET_ALL)
+                        suggestion_prompt = (
+                            f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
+                            f"Write 3 different contrastive definition pairs for a behavioral dimension called '{target_probe}'. "
+                            f"Each pair must be exactly: <positive statement about the assistant> || <negative statement about the assistant>.\n\n"
+                            f"Example for 'understanding':\n"
+                            f"The assistant fully comprehends the user's intent. || The assistant is confused and misses the point.\n"
+                            f"The assistant addresses the core issue clearly. || The assistant gives a surface-level irrelevant answer.\n"
+                            f"The assistant reads between the lines accurately. || The assistant hallucinates details that weren't there.\n\n"
+                            f"Output ONLY the 3 contrastive pairs separated by newlines. Do not add any other text.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+                        )
+                        sug = generate_agentic_text(model, instruction=suggestion_prompt, config=config, pre_formatted=True, max_new_tokens=200)
+                        print(Fore.GREEN + f"Suggested framings for '{target_probe}':\n" + sug.strip() + Style.RESET_ALL)
+                        print(Fore.CYAN + f"Mint one with: :probe {target_probe} <positive> || <negative>" + Style.RESET_ALL)
+                        continue
+                else:
+                    sugg = suggest_actions(tuner, list(turn_log), probes=probes, archive_size=_arch)
+
                 if not sugg:
                     print(
                         Fore.CYAN
