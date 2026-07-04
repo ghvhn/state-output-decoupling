@@ -125,6 +125,13 @@ class AgenticConfig:
     max_synthesis_steps: int = 60
     max_routing_events: int = 4
     max_tool_calls: int = 8
+    # Proven-expert routing: the ToT winner is chosen by branch entropy, but
+    # when this weight > 0 the choice is nudged by each expert's accrued route
+    # success rate (centered so unproven experts stay neutral). 0.0 = pure
+    # entropy, the historical behavior. expert_proof_scores is a runtime dict
+    # {expert_name: success_rate, "__mean__": overall} the shell refreshes each
+    # turn from the steer map; the engine only reads it.
+    expert_proof_weight: float = 0.0
     
     # High-Level Solver Logic
     max_rounds: int = 5

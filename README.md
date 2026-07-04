@@ -60,8 +60,13 @@ results. Highlights (full reference: [SHELL_COMMANDS.md](SHELL_COMMANDS.md)):
   `:calibrate <name> [...]` calibrates any knob by name behind a
   deterministic safety policy (circular and binary requests refused).
 - **Named-concept probes**: `:probe <name> <with it> || <without it>` mints
-  an activation sensor for any nameable concept; paired calibration runs
-  both ways (`:calibrate conversation_productive <probe>` or the reverse).
+  an activation sensor for any nameable concept; `:probe adopt` grabs stored
+  dimensions, `:probe compose` builds one from a signed mix of others, and
+  `:probe backfill` retro-scores the whole archive. Paired calibration runs
+  both ways and jointly over multiple anchors (`:calibrate curiosity
+  understanding+ambiguity`); `:suggest` lists the moves the evidence already
+  backs. `:probe expose` lets the model read (never shape) a sensor via
+  `<<PROBE: name>>`.
 - **Agency ledger**: `:impact` — which turns were genuinely caused by the
   model's own words, and whether experienced impact tracks better
   deliberation ([WORDS_HAVE_IMPACT.md](WORDS_HAVE_IMPACT.md)).
