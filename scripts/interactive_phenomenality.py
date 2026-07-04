@@ -1124,19 +1124,25 @@ def draw_prizes(prizes):
 
 
 def substitute_macro_params(text, args):
-    """Fill $1..$9 (positional), $@ (all args), and named $args in a macro body."""
+    """Fill $1..$9 (positional), $@ (all args), and named $args in a macro body.
+    A param with no supplied arg collapses to empty -- named params behave like
+    positional $N, so an unfilled '$name' never leaks through as a literal token."""
     lines = text.splitlines()
     for ln in lines:
         if ln.strip().startswith("# args:"):
             arg_names = [a.strip() for a in ln.strip()[len("# args:"):].split(",")]
             for i, name in enumerate(arg_names):
-                if i < len(args) and name:
+                if name and i < len(args):
                     text = re.sub(r"\$" + re.escape(name) + r"\b", args[i], text)
             break
-            
+
     joined = " ".join(args)
     text = text.replace("$@", joined).replace("$*", joined)
-    return re.sub(r"\$([1-9])", lambda m: args[int(m.group(1)) - 1] if int(m.group(1)) <= len(args) else "", text)
+    text = re.sub(r"\$([1-9])", lambda m: args[int(m.group(1)) - 1] if int(m.group(1)) <= len(args) else "", text)
+    # Any named param left unfilled collapses to empty (like a missing $N), then
+    # collapse the doubled spaces that leaves behind.
+    text = re.sub(r"\$[A-Za-z_][A-Za-z0-9_]*", "", text)
+    return "\n".join(re.sub(r" {2,}", " ", l).rstrip() for l in text.splitlines())
 
 
 def load_parameterized_macro(path, args):
@@ -1301,6 +1307,10 @@ COMMAND_HELP_LINES = [
     "                candidate words. Reading only -- minting/calibrating stay operator acts)",
     "          :probe backfill <name> [n]  (retro-score up to n archived replies in order:",
     "                rebuilds the probe's stream+credit from the whole record, seeds its history)",
+    "          :probe define <name>        (share its initial breakdown -- the WITH/WITHOUT framings",
+    "                it was minted from; name accepts choose/auto)",
+    "          :probe explain <name>       (the MODEL explains the probe in its own words: what it",
+    "                senses and when it reads high vs low; name accepts choose/auto)",
     "          :calibrate <name> [pct|intent|<anchor>|<a>+<b>|band args]  (data-calibrate any knob",
     "                BY NAME; anchors join with '+' = fired only when EVERY stream fired;",
     "                the system evaluates the request and refuses unsafe ones --",
@@ -2971,6 +2981,26 @@ def main():
                 if not any(ln.startswith(":") for ln in cmd_lines):
                     print(Fore.YELLOW + f"[Solve] The model produced no commands. Raw output:\n{(sug or '').strip()[:400]}" + Style.RESET_ALL)
                     continue
+                # Guardrail: flag any line whose leading :command isn't a real
+                # command or a known macro alias (e.g. the model inventing
+                # ':choose'), so a macro that would silently fail later is caught
+                # at creation instead of cascading at run time.
+                known_cmd = BUILTIN_COMMANDS | set(macro_aliases) | {sname}
+                unknown_cmds = []
+                for ln in cmd_lines:
+                    if not ln.startswith(":"):
+                        continue
+                    toks = ln[1:].split()
+                    w = toks[0].lower() if toks else ""
+                    if w and w not in known_cmd:
+                        unknown_cmds.append(f":{w}")
+                if unknown_cmds:
+                    print(
+                        Fore.YELLOW
+                        + f"[Solve] warning: {', '.join(sorted(set(unknown_cmds)))} is not a known command or macro -- "
+                        + "this macro may fail when run. (choose/auto are ARGUMENTS to a command, not commands.)"
+                        + Style.RESET_ALL
+                    )
                 dest = os.path.join(ROOT, "invariants", "out", "macros", f"{sname}.txt")
                 # choose/auto let the MODEL name the command, so the proposal is
                 # staged and NOT written/aliased until the operator :accepts it.
@@ -4185,6 +4215,24 @@ def main():
                     else:
                         print(Fore.YELLOW + f"[Probe] no active probe named {dropped}.{did_you_mean(dropped, probes)}" + Style.RESET_ALL)
                     continue
+                # :probe define <name> -- share the INITIAL BREAKDOWN: the WITH/WITHOUT
+                # framings the probe was minted from (the operator-authored definition).
+                if pargs.lower().startswith("define "):
+                    dname_raw = pargs[7:].strip()
+                    dname = resolve_probe_choice(dname_raw, probes, model=model, config=config, action_name="define")
+                    if not dname:
+                        continue
+                    if dname not in probes:
+                        print(Fore.YELLOW + f"[Probe] no active probe named '{dname}'.{did_you_mean(dname, probes)}" + Style.RESET_ALL)
+                        continue
+                    framings = probes[dname].get("framings")
+                    if framings and any(framings):
+                        print(Fore.CYAN + f"[Probe] {dname} was minted with framings:\n  WITH:    {framings[0]}\n  WITHOUT: {framings[1]}" + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + f"[Probe] {dname} has no stored framings (likely adopted from a raw vector)." + Style.RESET_ALL)
+                    continue
+                # :probe explain <name> -- the MODEL explains the probe in its OWN words
+                # (what it senses, when it reads high vs low), grounded on the framings.
                 if pargs.lower().startswith("explain "):
                     ename_raw = pargs[8:].strip()
                     ename_resolved = resolve_probe_choice(ename_raw, probes, model=model, config=config, action_name="explain")
@@ -4195,9 +4243,28 @@ def main():
                         continue
                     framings = probes[ename_resolved].get("framings")
                     if framings and any(framings):
-                        print(Fore.CYAN + f"[Probe] {ename_resolved} was minted with framings:\n  WITH:    {framings[0]}\n  WITHOUT: {framings[1]}" + Style.RESET_ALL)
+                        basis = (
+                            f"It is defined by contrasting two poles:\n"
+                            f"WITH (reads high): {framings[0]}\n"
+                            f"WITHOUT (reads low): {framings[1]}\n\n"
+                        )
                     else:
-                        print(Fore.CYAN + f"[Probe] {ename_resolved} has no stored framings (likely adopted from a raw vector)." + Style.RESET_ALL)
+                        basis = "It has no stored framings (it was adopted from a raw vector).\n\n"
+                    xprompt = (
+                        "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                        f"A cognitive probe named '{ename_resolved}' is a direction in your own activations "
+                        f"that scores each of your replies.\n{basis}"
+                        "In two or three sentences, explain in your OWN words what this probe is sensing in "
+                        "you, and when it would read high versus low.<|eot_id|>"
+                        "<|start_header_id|>assistant<|end_header_id|>\n\n"
+                    )
+                    print(Fore.CYAN + f"[Probe] Asking the model to explain '{ename_resolved}' in its own words..." + Style.RESET_ALL)
+                    try:
+                        expl = generate_agentic_text(model, instruction=xprompt, config=config, pre_formatted=True, max_new_tokens=200, chatty_log=False)
+                    except Exception as e:
+                        print(Fore.RED + f"[Probe] explain failed: {e}" + Style.RESET_ALL)
+                        continue
+                    print(Fore.CYAN + f"[Probe] {ename_resolved} -- in the model's words:\n{(expl or '').strip()}" + Style.RESET_ALL)
                     continue
                 if pargs.lower().startswith("chatty "):
                     chatty_name_raw = pargs[7:].strip()
@@ -4602,8 +4669,9 @@ def main():
                     suggestion_prompt = (
                         f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                         f"Write a contrastive definition pair for a behavioral dimension called '{pname}'. "
-                        f"The format must be exactly: <positive statement about the assistant> || <negative statement about the assistant>.\n\n"
-                        f"Example for 'understanding': The assistant fully comprehends the user's intent. || The assistant is confused and misses the point.\n\n"
+                        f"Write both sides in the FIRST PERSON, as I describe MYSELF -- each side MUST start with 'I'. "
+                        f"The format must be exactly: <first-person positive statement> || <first-person negative statement>.\n\n"
+                        f"Example for 'understanding': I fully grasp what the user means. || I am confused and miss the point.\n\n"
                         f"Output ONLY the single contrastive pair. Do not add any other text.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
                     )
                     sug = generate_agentic_text(
@@ -4798,11 +4866,12 @@ def main():
                         suggestion_prompt = (
                             f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                             f"Write 3 different contrastive definition pairs for a behavioral dimension called '{target_probe}'. "
-                            f"Each pair must be exactly: <positive statement about the assistant> || <negative statement about the assistant>.\n\n"
+                            f"Write every side in the FIRST PERSON, as I describe MYSELF -- each side MUST start with 'I'. "
+                            f"Each pair must be exactly: <first-person positive statement> || <first-person negative statement>.\n\n"
                             f"Example for 'understanding':\n"
-                            f"The assistant fully comprehends the user's intent. || The assistant is confused and misses the point.\n"
-                            f"The assistant addresses the core issue clearly. || The assistant gives a surface-level irrelevant answer.\n"
-                            f"The assistant reads between the lines accurately. || The assistant hallucinates details that weren't there.\n\n"
+                            f"I fully grasp what the user means. || I am confused and miss the point.\n"
+                            f"I address the core issue clearly. || I give a surface-level, irrelevant answer.\n"
+                            f"I read between the lines accurately. || I hallucinate details that weren't there.\n\n"
                             f"Output ONLY the 3 contrastive pairs separated by newlines. Do not add any other text.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
                         )
                         sugg_rec = []
@@ -4919,7 +4988,7 @@ def main():
                             print(Fore.CYAN + f"  {label}: {', '.join(routes[route])}" + Style.RESET_ALL)
                     continue
                 cal_name_raw, cargs = consume_probe_args(cargs)
-                cal_name = resolve_probe_choice(cal_name_raw, probes)
+                cal_name = resolve_probe_choice(cal_name_raw, probes, model=model, config=config, action_name="calibrate")
                 if not cal_name:
                     continue
                 route, reason = calibration_policy(cal_name)
