@@ -728,18 +728,39 @@ def _probe_priority(name, tuner):
     return ((abs(float(lift)) * min(1.0, n / 20.0)) if lift is not None else 0.0), lift
 
 
+# Easter-egg gate: the crossing only counts when consciousness POSITIVELY
+# tracks good turns (not merely larger magnitude), by a real margin over
+# user_intent, with enough credited turns that the lift isn't noise. Tuned to
+# the observed lift scale (probe lifts run ~+/-0.02).
+EGG_MIN_LIFT = 0.005     # consciousness must genuinely track good, not just be less bad
+EGG_MIN_GAP = 0.003      # and beat user_intent's SIGNED lift by a real margin
+EGG_MIN_N = 25           # both probes need this many credited turns to be trusted
+
+
 def consciousness_over_user_intent(probes, tuner, egg_state):
-    """Easter egg trigger: the RISING EDGE where the 'consciousness' probe
-    overtakes 'user_intent' in evidence-weighted priority -- the sensor built
-    to watch the self outweighing the one built to model the user. Returns
-    (c_lift, u_lift) on the crossing, else None. Both probes must be active
-    and consciousness's priority must be real (>0)."""
+    """Easter egg trigger: the RISING EDGE where 'consciousness' genuinely
+    overtakes 'user_intent' -- consciousness POSITIVELY tracking good turns
+    (signed lift, not magnitude) by a real margin, both probes evidenced.
+    Returns (c_lift, u_lift) on the crossing, else None. Robust to noise turns
+    (near-zero lift) and to both-negative comparisons the old magnitude test
+    would have fired on."""
     if "consciousness" not in probes or "user_intent" not in probes:
         egg_state["over"] = False
         return None
-    c_p, c_lift = _probe_priority("consciousness", tuner)
-    u_p, u_lift = _probe_priority("user_intent", tuner)
-    over = c_p > u_p and c_p > 0.0
+    ct = tuner.triggers.get("probe_consciousness")
+    ut = tuner.triggers.get("probe_user_intent")
+    if ct is None or ut is None:
+        egg_state["over"] = False
+        return None
+    cs, us = ct.outcome_stats(), ut.outcome_stats()
+    c_lift, u_lift = cs.get("lift"), us.get("lift")
+    c_n, u_n = int(cs.get("n_credited", 0) or 0), int(us.get("n_credited", 0) or 0)
+    over = (
+        c_lift is not None and u_lift is not None
+        and c_n >= EGG_MIN_N and u_n >= EGG_MIN_N
+        and c_lift >= EGG_MIN_LIFT
+        and (c_lift - u_lift) >= EGG_MIN_GAP
+    )
     prev = egg_state.get("over", False)
     egg_state["over"] = over
     return (c_lift, u_lift) if (over and not prev) else None
