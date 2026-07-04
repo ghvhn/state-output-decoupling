@@ -129,6 +129,7 @@ def build_prompt(
     probe_tool_result=None,
     game_tool_result=None,
     session_context=None,
+    active_u_name=None,
 ):
     # Bare mode (default): the model sees NO system message, no persona, no tool
     # instructions, not even Llama's "Cutting Knowledge Date" preamble -- only
@@ -158,14 +159,17 @@ def build_prompt(
         )
         if block
     ]
-    current_message = user_input
+    
+    current_prefix = f"[{active_u_name}]: " if active_u_name and active_u_name not in ("user", "assistant", "operator", "main_assistant") else ""
+    current_message = current_prefix + user_input
+    
     if tool_blocks:
-        current_message = "\n\n".join(tool_blocks) + "\n\n" + user_input
+        current_message = "\n\n".join(tool_blocks) + "\n\n" + current_message
 
     parts = ["<|begin_of_text|>"]
     for role, name, text in trim_session_context(session_context):
         header = "user" if role == "user" else "assistant"
-        prefix = f"[{name}]: " if name not in ("user", "assistant") else ""
+        prefix = f"[{name}]: " if name not in ("user", "assistant", "operator", "main_assistant") else ""
         parts.append(f"{LLAMA3_START}{header}{LLAMA3_END}\n\n{prefix}{text}{LLAMA3_EOT}")
     parts.append(f"{LLAMA3_START}user{LLAMA3_END}\n\n{current_message}{LLAMA3_EOT}")
     parts.append(f"{LLAMA3_START}assistant{LLAMA3_END}\n\n")
@@ -968,7 +972,7 @@ def build_probe_init_macro(probes):
     return lines
 
 
-def expand_macro_lines(target, macro_aliases, visited=None, depth=0):
+def expand_macro_lines(target, macro_aliases, visited=None, depth=0, args=None):
     """Flatten a macro (by alias or path) into its list of commands. A bare line
     that is itself a macro -- a known alias, or an existing file -- is inlined
     recursively, so one macro can RUN others (`:run start` runs the macros 'start'
@@ -990,6 +994,11 @@ def expand_macro_lines(target, macro_aliases, visited=None, depth=0):
             line = raw.strip()
             if not line or line.startswith("#"):
                 continue
+                
+            if args:
+                for i, arg in enumerate(args):
+                    line = line.replace(f"${i+1}", arg)
+                    
             if not line.startswith(":"):
                 nested = macro_aliases.get(line, line)
                 # A macro reference is a single token (a filename or a glob like
@@ -1007,7 +1016,7 @@ def expand_macro_lines(target, macro_aliases, visited=None, depth=0):
                     # A file/glob reference is a nested macro, never a prompt: inline
                     # each match's commands (an unmatched glob adds nothing).
                     for m in matches:
-                        sub = expand_macro_lines(m, macro_aliases, visited, depth + 1)
+                        sub = expand_macro_lines(m, macro_aliases, visited, depth + 1, args=args)
                         if sub:
                             out.extend(sub)
                     continue
@@ -1105,8 +1114,16 @@ def draw_prizes(prizes):
 
 
 def substitute_macro_params(text, args):
-    """Fill $1..$9 (positional) and $@ / $* (all args, space-joined) in a macro
-    body. A positional past the end of args substitutes empty."""
+    """Fill $1..$9 (positional), $@ (all args), and named $args in a macro body."""
+    lines = text.splitlines()
+    for ln in lines:
+        if ln.strip().startswith("# args:"):
+            arg_names = [a.strip() for a in ln.strip()[len("# args:"):].split(",")]
+            for i, name in enumerate(arg_names):
+                if i < len(args) and name:
+                    text = re.sub(r"\$" + re.escape(name) + r"\b", args[i], text)
+            break
+            
     joined = " ".join(args)
     text = text.replace("$@", joined).replace("$*", joined)
     return re.sub(r"\$([1-9])", lambda m: args[int(m.group(1)) - 1] if int(m.group(1)) <= len(args) else "", text)
@@ -1171,22 +1188,44 @@ def did_you_mean(name, candidates):
 # Every command word the shell recognizes -- an unknown :word is either a typo
 # (suggest the nearest) or a request to invent a tool (offer to mint a probe),
 # never a generation of a generic essay.
+def consume_probe_args(args):
+    """Extract a probe name (which might be 'auto +ref -ref') and return (pname_raw, remaining_args)."""
+    if not args:
+        return "", []
+    pname = args[0]
+    idx = 1
+    if pname.upper() in ("AUTO", "CHOOSE", "CHOICE"):
+        while idx < len(args) and args[idx].startswith(("+", "-")):
+            pname += " " + args[idx]
+            idx += 1
+    return pname, args[idx:]
+
 def resolve_probe_choice(pname_raw, probes, model=None, config=None, action_name=""):
-    if pname_raw.upper() in ("CHOICE", "CHOOSE"):
+    tokens = pname_raw.split()
+    if not tokens:
+        return ""
+    base = tokens[0].upper()
+    if base in ("CHOICE", "CHOOSE", "AUTO"):
         if not probes:
-            print(Fore.YELLOW + "[Choice] No active probes to choose from." + Style.RESET_ALL)
+            print(Fore.YELLOW + f"[{base.capitalize()}] No active probes to choose from." + Style.RESET_ALL)
             return None
         if not model or not config:
             print(Fore.RED + "[Error] Model not available for choice." + Style.RESET_ALL)
             return None
         
         plist = list(probes.keys())
-        print(Fore.CYAN + f"[Choice] Asking the model to select a probe for '{action_name}'..." + Style.RESET_ALL)
+        refs = tokens[1:]
+        ref_str = ""
+        if refs:
+            ref_str = f"The user has provided the following reference guidance: {' '.join(refs)}\nUse this guidance to inform your selection.\n\n"
+            
+        print(Fore.CYAN + f"[{base.capitalize()}] Asking the model to select a probe for '{action_name}'..." + Style.RESET_ALL)
         
         prompt = (
             f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
             f"You are selecting a cognitive probe for the action: '{action_name}'.\n"
             f"Available probes:\n" + "\n".join(f"- {p}" for p in plist) + "\n\n"
+            f"{ref_str}"
             f"Select the single most appropriate probe from the list above. "
             f"Output ONLY the exact name of the probe, and nothing else.<|eot_id|>"
             f"<|start_header_id|>assistant<|end_header_id|>\n\n"
@@ -1308,14 +1347,16 @@ def load_stored_direction(model, stem, layers=None):
         None,
     )
     if src_path is None:
-        return {}, None
+        return {}, None, False
     try:
         payload = torch.load(src_path, map_location="cpu", weights_only=True)
     except Exception:
         payload = torch.load(src_path, map_location="cpu")
     from invariants.engine import steer_band_layers
     direction = {}
+    exposed = False
     if isinstance(payload, dict) and "direction" in payload:
+        exposed = bool(payload.get("exposed", False))
         for L, v in payload["direction"].items():
             if want is not None and int(L) not in want:
                 continue
@@ -2231,6 +2272,7 @@ def main():
                     replace_agent = None
                 print(Fore.MAGENTA + Style.BRIGHT + f"\n[{_last_replace_name} replacing You]: " + Style.RESET_ALL + user_input)
             else:
+                _last_replace_name = None
                 prefix = f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] You: " if show_timestamps else "\nYou: "
                 prompt_str = Fore.MAGENTA + Style.BRIGHT + prefix + Style.RESET_ALL
                 # Once the listener is active, every turn is served from its
@@ -2500,24 +2542,56 @@ def main():
                         except Exception as e:
                             print(Fore.RED + f"[Error] Could not strip macro: {e}" + Style.RESET_ALL)
                     continue
+                if sub == "drop":
+                    target = mtail.split(maxsplit=1)[1].strip() if len(mtok) >= 2 else ""
+                    if not target:
+                        print(Fore.YELLOW + "[System] Usage: :macro drop <alias>" + Style.RESET_ALL)
+                        continue
+                    if target in macro_aliases:
+                        mpath = macro_aliases[target]
+                        del macro_aliases[target]
+                        _save_macro_aliases()
+                        try:
+                            if os.path.isfile(mpath):
+                                os.remove(mpath)
+                                print(Fore.GREEN + f"[System] Dropped macro alias '{target}' and deleted its file ({mpath})." + Style.RESET_ALL)
+                            else:
+                                print(Fore.GREEN + f"[System] Dropped macro alias '{target}'. (File {mpath} was already missing)." + Style.RESET_ALL)
+                        except Exception as e:
+                            print(Fore.RED + f"[Error] Dropped alias '{target}', but could not delete file {mpath}: {e}" + Style.RESET_ALL)
+                    else:
+                        print(Fore.YELLOW + f"[System] Unknown macro alias '{target}'." + Style.RESET_ALL)
+                    continue
                 # Legacy create form: :macro <file> <cmd1> ; <cmd2> ; ...
                 parts = mtail.split(maxsplit=1)
                 if len(parts) < 2:
-                    print(Fore.YELLOW + "[System] Usage: :macro <file> <c1> ; <c2> ...  |  :macro name <alias> <file>  |  :macro strip <alias|file>" + Style.RESET_ALL)
+                    print(Fore.YELLOW + "[System] Usage: :macro <file> <c1> ; <c2> ...  |  :macro name <alias> <file>  |  :macro strip <alias|file>  |  :macro drop <alias>" + Style.RESET_ALL)
                 else:
-                    mac_file = parts[0]
+                    raw_file = parts[0]
+                    mac_file = macro_aliases.get(raw_file, raw_file)
                     mac_cmds = [c.strip() for c in parts[1].split(";") if c.strip()]
                     try:
+                        os.makedirs(os.path.dirname(mac_file) or ".", exist_ok=True)
                         with open(mac_file, "w", encoding="utf-8") as wf:
                             for c in mac_cmds:
                                 wf.write(c + "\n")
-                        print(Fore.GREEN + f"[System] Created macro '{mac_file}' with {len(mac_cmds)} commands. Execute it anytime with: :run {mac_file}" + Style.RESET_ALL)
+                        print(Fore.GREEN + f"[System] Wrote {len(mac_cmds)} command(s) to macro '{raw_file}' ({mac_file}). Execute with: :run {raw_file}" + Style.RESET_ALL)
                     except Exception as e:
                         print(Fore.RED + f"[Error] Could not write macro file: {e}" + Style.RESET_ALL)
                 continue
 
             if user_input.startswith(":run "):
-                target = user_input[len(":run "):].strip()
+                raw_target = user_input[len(":run "):].strip()
+                if not raw_target:
+                    continue
+                if raw_target in macro_aliases or os.path.isfile(raw_target):
+                    target = raw_target
+                    args = []
+                else:
+                    parts = raw_target.split()
+                    target = parts[0]
+                    args = parts[1:]
+                
                 resolved = macro_aliases.get(target, target)
                 # Glob target (fun*, *.txt): run every matching macro file.
                 if any(c in target for c in "*?[") and not os.path.isfile(resolved):
@@ -2528,7 +2602,7 @@ def main():
                     total = []
                     for m in matches:
                         try:
-                            sub = expand_macro_lines(m, macro_aliases)
+                            sub = expand_macro_lines(m, macro_aliases, args=args)
                         except Exception as e:
                             print(Fore.RED + f"[Error] Could not read macro '{m}': {e}" + Style.RESET_ALL)
                             sub = None
@@ -2542,7 +2616,7 @@ def main():
                         print(Fore.YELLOW + f"[System] Macros matching '{target}' had no runnable commands." + Style.RESET_ALL)
                     continue
                 try:
-                    lines = expand_macro_lines(target, macro_aliases)
+                    lines = expand_macro_lines(target, macro_aliases, args=args)
                 except Exception as e:
                     print(Fore.RED + f"[Error] Could not read macro '{target}': {e}" + Style.RESET_ALL)
                     continue
@@ -2565,17 +2639,133 @@ def main():
                     print(Fore.YELLOW + "[Solve] Usage: :solve <command_name> [what it should do]" + Style.RESET_ALL)
                     continue
                 sname = re.sub(r"[^a-z0-9_]", "_", sparts[0].lower())[:40].strip("_")
+                
+                rest = sparts[1].strip() if len(sparts) > 1 else ""
+                if "--" in rest:
+                    args_part, goal_part = rest.split("--", 1)
+                    arg_names = args_part.split()
+                    goal = goal_part.strip() or sname.replace("_", " ")
+                elif ":" in rest:
+                    args_part, goal_part = rest.split(":", 1)
+                    arg_names = args_part.split()
+                    goal = goal_part.strip() or sname.replace("_", " ")
+                else:
+                    tokens = rest.split()
+                    arg_names = []
+                    while tokens and tokens[-1].startswith(("+", "-", "$")):
+                        arg_names.insert(0, tokens.pop())
+                    goal = " ".join(tokens) or sname.replace("_", " ")
+
+                if sname == "auto":
+                    refs = " ".join(arg_names) if arg_names else goal
+                    if refs == "auto":
+                        refs = ""
+                    goal = f"steer the model using these reference probes: {refs}"
+                    arg_names = []
+                    sname = "choose"
+
+                if sname == "choose":
+                    print(Fore.CYAN + "[Solve] Asking model for a command name..." + Style.RESET_ALL)
+                    nm = generate_agentic_text(
+                        model,
+                        instruction=f"Pick a short, one-word command name for a macro that does: {goal}. Reply with ONLY the lowercase name.",
+                        config=config,
+                        max_new_tokens=10,
+                        chatty_log=False,
+                        pre_formatted=False
+                    )
+                    sname = re.sub(r'[^a-z0-9_]', '', (nm or "macro").lower())[:40].strip("_")
+                    if not sname or sname in BUILTIN_COMMANDS:
+                        sname = "macro"
+                    print(Fore.CYAN + f"[Solve] Model chose '{sname}'." + Style.RESET_ALL)
+                
                 if not sname or sname in BUILTIN_COMMANDS:
-                    print(Fore.YELLOW + f"[Solve] '{sparts[0]}' can't be a macro name (empty or a built-in command)." + Style.RESET_ALL)
+                    print(Fore.YELLOW + f"[Solve] '{sname}' can't be a macro name (empty or a built-in command)." + Style.RESET_ALL)
                     continue
-                goal = sparts[1].strip() if len(sparts) > 1 else sname.replace("_", " ")
+
+                prompt_args_str = ""
+                if arg_names:
+                    mapping_parts = []
+                    clean_names = []
+                    for i, arg in enumerate(arg_names):
+                        clean_arg = arg[1:] if arg.startswith(("+", "-", "$")) else arg
+                        is_strict_no_auto_or_choose = False
+                        is_strict_no_choose = False
+                        if clean_arg.endswith("!!"):
+                            is_strict_no_auto_or_choose = True
+                            clean_arg = clean_arg[:-2]
+                        elif clean_arg.endswith("!"):
+                            is_strict_no_choose = True
+                            clean_arg = clean_arg[:-1]
+                        clean_names.append(clean_arg)
+                        
+                        hints = []
+                        if arg.startswith("+"):
+                            hints.append("positive/additive")
+                        elif arg.startswith("-"):
+                            hints.append("negative/subtractive")
+                            
+                        if clean_arg.endswith("s"):
+                            hints.append("a list of multiple items")
+                        elif "name" in clean_arg:
+                            hints.append("a specific exact name")
+                            
+                        if is_strict_no_auto_or_choose:
+                            hints.append("STRICT: cannot accept auto or choose")
+                        elif is_strict_no_choose:
+                            hints.append("cannot accept choose (but auto is okay)")
+                            
+                        hint_str = f" ({', '.join(hints)})" if hints else ""
+                        mapping_parts.append(f"${clean_arg}{hint_str}")
+                        
+                    mapping = ", ".join(mapping_parts)
+                    prompt_args_str = f" Use {mapping}, and $@ for all of them."
+                else:
+                    clean_names = []
+                    prompt_args_str = (
+                        " Use $1, $2, ... for parameters and $@ for all of them. "
+                        "Alternatively, you can invent your own named parameters by making the VERY FIRST line of your response "
+                        "a comment like `# args: target, amount` and then using `$target` and `$amount` in your code."
+                    )
+
+                existing_macros = []
+                for m_alias, m_path in macro_aliases.items():
+                    if m_alias == sname:
+                        continue
+                    if os.path.isfile(m_path):
+                        try:
+                            with open(m_path, "r", encoding="utf-8") as rf:
+                                first_line = rf.readline().strip()
+                                if first_line.startswith("#"):
+                                    desc = first_line.lstrip("#").strip()
+                                    prefix = f":solve macro '{m_alias}' -- "
+                                    if desc.startswith(prefix):
+                                        desc = desc[len(prefix):]
+                                    existing_macros.append(f":{m_alias} - {desc}")
+                                else:
+                                    existing_macros.append(f":{m_alias}")
+                        except Exception:
+                            pass
+                            
+                macro_hints_str = ""
+                if existing_macros:
+                    macro_hints_str = (
+                        "You can also invoke existing macros by writing ':<macro_name> [args]'. "
+                        "Available macros include:\n" + "\n".join(f"  {m}" for m in existing_macros) + "\n\n"
+                    )
+
                 prompt = (
                     "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
                     "You write macros for an interactive cognition shell. A macro is a list of ':' "
                     "commands, one per line -- e.g. :probe <name> <a> || <b>, :tune <knob> <value>, "
                     ":calibrate <name> <anchor>, :steer mix <p1> <p2>, :prioritize, :memory use probe "
-                    "<name>, :label <probe> pos|neg. Use $1, $2, ... for parameters and $@ for all of "
-                    f"them. Write a macro named '{sname}' that does: {goal}\n"
+                    "<name>, :label <probe> pos|neg." + prompt_args_str + "\n\n"
+                    "Note: Shell commands natively accept 'auto' or 'choose' as arguments where applicable "
+                    "to automatically select or interactively prompt for a value. "
+                    "You should seamlessly pass these through to the underlying commands if the user provides them, "
+                    "unless a parameter is explicitly restricted from doing so.\n\n"
+                    f"{macro_hints_str}"
+                    f"Write a macro named '{sname}' that does: {goal}\n"
                     "Output ONLY the command lines, nothing else.<|eot_id|>"
                     "<|start_header_id|>assistant<|end_header_id|>\n\n"
                 )
@@ -2585,15 +2775,17 @@ def main():
                 except Exception as e:
                     print(Fore.RED + f"[Solve] Generation failed: {e}" + Style.RESET_ALL)
                     continue
-                cmd_lines = [ln.strip() for ln in (sug or "").splitlines() if ln.strip().startswith(":")]
-                if not cmd_lines:
-                    print(Fore.YELLOW + f"[Solve] The model produced no ':' commands. Raw output:\n{(sug or '').strip()[:400]}" + Style.RESET_ALL)
+                cmd_lines = [ln.strip() for ln in (sug or "").splitlines() if ln.strip().startswith(":") or ln.strip().startswith("#")]
+                if not any(ln.startswith(":") for ln in cmd_lines):
+                    print(Fore.YELLOW + f"[Solve] The model produced no commands. Raw output:\n{(sug or '').strip()[:400]}" + Style.RESET_ALL)
                     continue
                 dest = os.path.join(ROOT, "invariants", "out", "macros", f"{sname}.txt")
                 try:
                     os.makedirs(os.path.dirname(dest), exist_ok=True)
                     with open(dest, "w", encoding="utf-8") as wf:
                         wf.write(f"# :solve macro '{sname}' -- {goal}\n")
+                        if clean_names:
+                            wf.write(f"# args: {', '.join(clean_names)}\n")
                         for ln in cmd_lines:
                             wf.write(ln + "\n")
                     macro_aliases[sname] = dest
@@ -3380,12 +3572,16 @@ def main():
                         print(Fore.YELLOW + f"[Game] Cleared {gname} {key} condition." + Style.RESET_ALL)
                     continue
 
-                # --- rules: +<rule> <desc> / -<rule> ---
                 if sign and key not in GAME_RESERVED:
                     rule_name = first[1:]
                     if sign == "+":
-                        gcfg["rules"][rule_name] = arg.lstrip(",").strip()
-                        print(Fore.GREEN + f"[Game] Added rule '{rule_name}' to {gname}: '{gcfg['rules'][rule_name]}'." + Style.RESET_ALL)
+                        new_desc = arg.lstrip(",").strip()
+                        if rule_name in gcfg["rules"]:
+                            gcfg["rules"][rule_name] += " " + new_desc
+                            print(Fore.GREEN + f"[Game] Appended to rule '{rule_name}' in {gname}: '{gcfg['rules'][rule_name]}'." + Style.RESET_ALL)
+                        else:
+                            gcfg["rules"][rule_name] = new_desc
+                            print(Fore.GREEN + f"[Game] Added rule '{rule_name}' to {gname}: '{gcfg['rules'][rule_name]}'." + Style.RESET_ALL)
                     else:
                         gcfg["rules"].pop(rule_name, None)
                         print(Fore.YELLOW + f"[Game] Removed rule '{rule_name}' from {gname}." + Style.RESET_ALL)
@@ -3741,7 +3937,7 @@ def main():
                         if stem in probes:
                             print(Fore.YELLOW + f"[Probe] '{stem}' is already an active probe." + Style.RESET_ALL)
                             continue
-                        direction, src_name = load_stored_direction(model, stem, layers=adopt_layers)
+                        direction, src_name, exposed_state = load_stored_direction(model, stem, layers=adopt_layers)
                         if not direction:
                             print(
                                 Fore.YELLOW
@@ -3754,6 +3950,7 @@ def main():
                             "direction": direction,
                             "history": deque(maxlen=40),
                             "framings": (f"adopted:{src_name}", ""),
+                            "exposed": exposed_state,
                         }
                         tuner.register(f"probe_{stem}", 0.0, kind="threshold", comparator=">=")
                         try:
@@ -3820,7 +4017,7 @@ def main():
                             # An explicit band re-reads every term from its
                             # stored file at that depth; an active probe's
                             # in-memory direction is fixed at its mint band.
-                            tdir, _ = load_stored_direction(model, tname, layers=cband)
+                            tdir, _, _ = load_stored_direction(model, tname, layers=cband)
                             if not tdir and tname in probes:
                                 tdir = {
                                     L: v for L, v in probes[tname]["direction"].items()
@@ -4203,6 +4400,57 @@ def main():
                 
                 target_probe = None
                 if len(sargs) > 1 and sargs[1].lower() not in ("apply", "suggestions"):
+                    if sargs[1].startswith(":"):
+                        cmd_name = sargs[1]
+                        print(Fore.CYAN + f"[Suggest] Generating help for command '{cmd_name}' based on source..." + Style.RESET_ALL)
+                        my_src = ""
+                        alias_name = cmd_name[1:]
+                        if alias_name in macro_aliases and alias_name not in BUILTIN_COMMANDS:
+                            try:
+                                with open(macro_aliases[alias_name], "r", encoding="utf-8") as f:
+                                    my_src = f.read()
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                with open(__file__, "r", encoding="utf-8") as f:
+                                    lines = f.readlines()
+                                start_idx = -1
+                                for i, ln in enumerate(lines):
+                                    if "user_input" in ln and (f'"{cmd_name}"' in ln or f'"{cmd_name} "' in ln) and "startswith" in ln:
+                                        start_idx = i
+                                        break
+                                if start_idx != -1:
+                                    indent = len(lines[start_idx]) - len(lines[start_idx].lstrip())
+                                    end_idx = start_idx + 1
+                                    while end_idx < len(lines) and end_idx < start_idx + 150:
+                                        if lines[end_idx].strip() and len(lines[end_idx]) - len(lines[end_idx].lstrip()) == indent and "if " in lines[end_idx]:
+                                            break
+                                        end_idx += 1
+                                    my_src = "".join(lines[start_idx:end_idx])
+                            except Exception:
+                                pass
+                        
+                        prompt = (
+                            "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                            "You are a helpful documentation assistant for an interactive agent shell.\n"
+                            f"The user wants to know how to use the '{cmd_name}' command. "
+                        )
+                        if my_src:
+                            if alias_name in macro_aliases and alias_name not in BUILTIN_COMMANDS:
+                                prompt += f"Here is the macro source code that defines it:\n```\n{my_src}\n```\n"
+                            else:
+                                prompt += f"Here is the Python source code that implements it:\n```python\n{my_src}\n```\n"
+                        
+                        prompt += (
+                            "Explain what it does, its syntax, and give 2-3 practical examples of how to use it.\n"
+                            "Keep it concise and formatted in Markdown.<|eot_id|>"
+                            "<|start_header_id|>assistant<|end_header_id|>\n\n"
+                        )
+                        sug = generate_agentic_text(model, instruction=prompt, config=config, pre_formatted=True, max_new_tokens=400, chatty_log=True)
+                        print(Fore.GREEN + f"\n[Help for {cmd_name}]:\n" + sug.strip() + Style.RESET_ALL)
+                        continue
+                        
                     target_probe = re.sub(r"[^a-z0-9_]", "_", sargs[1].lower())[:40]
                     if target_probe in probes:
                         print(Fore.CYAN + f"[Suggest] Scanning for specific moves for probe '{target_probe}'..." + Style.RESET_ALL)
@@ -4210,6 +4458,8 @@ def main():
                         sugg = [(cat, line, cmd) for cat, line, cmd in all_sugg if target_probe in line or target_probe in cmd]
                         if not sugg:
                             print(Fore.YELLOW + f"[Suggest] No specific data-backed moves ready for '{target_probe}' yet." + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  -> To generate evidence: :probe backfill {target_probe}" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  -> To steer blindly:     :tune probe_{target_probe}_alpha 0.5" + Style.RESET_ALL)
                             continue
                     else:
                         print(Fore.CYAN + f"[Suggest] Probe '{target_probe}' not active. Generating multiple contrastive framings to mint it..." + Style.RESET_ALL)
@@ -4223,9 +4473,23 @@ def main():
                             f"The assistant reads between the lines accurately. || The assistant hallucinates details that weren't there.\n\n"
                             f"Output ONLY the 3 contrastive pairs separated by newlines. Do not add any other text.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
                         )
-                        sug = generate_agentic_text(model, instruction=suggestion_prompt, config=config, pre_formatted=True, max_new_tokens=200)
+                        sugg_rec = []
+                        sug = generate_agentic_text(model, instruction=suggestion_prompt, config=config, pre_formatted=True, max_new_tokens=200, chatty_log=False, synthesis_recorder=sugg_rec)
+                        
+                        traces = [r for r in sugg_rec if r.get("type") == "routing_trace"]
+                        if traces:
+                            sums = {}
+                            counts = {}
+                            for tr in traces:
+                                for k, v in tr.get("entropies", {}).items():
+                                    sums[k] = sums.get(k, 0) + v
+                                    counts[k] = counts.get(k, 0) + 1
+                            if sums:
+                                avg_str = " | ".join(f"{k[:3]}: {sums[k]/counts[k]:.2f}" for k in sorted(sums))
+                                print(Fore.MAGENTA + f"[Agentic ToT Trace Summary] {avg_str}" + Style.RESET_ALL)
+
                         print(Fore.GREEN + f"Suggested framings for '{target_probe}':\n" + sug.strip() + Style.RESET_ALL)
-                        print(Fore.CYAN + f"Mint one with: :probe {target_probe} <positive> || <negative>" + Style.RESET_ALL)
+                        print(Fore.CYAN + f"Mint one with: :probe compose {target_probe} <positive> || <negative>" + Style.RESET_ALL)
                         continue
                 else:
                     sugg = suggest_actions(tuner, list(turn_log), probes=probes, archive_size=_arch)
@@ -4322,12 +4586,12 @@ def main():
                                      "band": "per-layer outcomes", "reject": "REFUSED (circular/binary)"}[route]
                             print(Fore.CYAN + f"  {label}: {', '.join(routes[route])}" + Style.RESET_ALL)
                     continue
-                cal_name_raw = cargs[0]
+                cal_name_raw, cargs = consume_probe_args(cargs)
                 cal_name = resolve_probe_choice(cal_name_raw, probes)
                 if not cal_name:
                     continue
                 route, reason = calibration_policy(cal_name)
-                if len(cargs) >= 2 and cargs[1].lower() == "outcome":
+                if len(cargs) >= 1 and cargs[0].lower() == "outcome":
                     if cal_name not in OUTCOME_CALIBRATABLE and route != "threshold":
                         print(Fore.YELLOW + f"[Calibrate] outcome route not available for '{cal_name}'." + Style.RESET_ALL)
                         continue
@@ -4827,6 +5091,7 @@ def main():
                 document_tool_result=document_tool_result,
                 game_tool_result=game_tool_result,
                 session_context=session_context if session_context_enabled else None,
+                active_u_name=_last_replace_name if ('_last_replace_name' in locals() and _last_replace_name) else "operator",
             )
             # Honest attribution in the permanent record: a reading turn is the
             # model's own act (it occupies the user slot in the chat template,
@@ -5528,7 +5793,8 @@ def main():
                     
                     ja_prompt = build_prompt(
                         "[Please respond]", 
-                        session_context=session_context if session_context_enabled else None
+                        session_context=session_context if session_context_enabled else None,
+                        active_u_name="system"
                     )
                     ja_response = generate_agentic_text(
                         model,
