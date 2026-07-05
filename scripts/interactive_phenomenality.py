@@ -1867,7 +1867,7 @@ COMMAND_HELP_LINES = [
     "                the panel, 'replace [N]' takes the operator slot for N turns.",
     "                Use @<name> :cmd to target a specific agent's tuning state)",
     "          :run <alias|file>            (queue and execute a macro's commands)",
-    "          :solve <name> [args :] <goal>  (model writes a parameterized macro for an",
+    "          :solve <name> <goal> [: args]  (model writes a parameterized macro for an",
     "                ad-hoc command; it is PROPOSED, then :accept adopts it (or :reject",
     "                drops it); after that :<name> <args> runs it, filling $1..$9 / $@.",
     "                Named args fill $name; optional/default specs are name?, [name],",
@@ -3701,12 +3701,12 @@ def main():
                     continue
                 sname = re.sub(r"[^a-z0-9_]", "_", sparts[0].lower())[:40].strip("_")
                 rest = sparts[1].strip() if len(sparts) > 1 else ""
-                if "--" in rest:
-                    args_part, goal_part = rest.split("--", 1)
+                if ":" in rest:
+                    goal_part, args_part = rest.rsplit(":", 1)
                     arg_names = args_part.split()
                     goal = goal_part.strip() or sname.replace("_", " ")
-                elif ":" in rest:
-                    args_part, goal_part = rest.split(":", 1)
+                elif "--" in rest:
+                    goal_part, args_part = rest.rsplit("--", 1)
                     arg_names = args_part.split()
                     goal = goal_part.strip() or sname.replace("_", " ")
                 else:
