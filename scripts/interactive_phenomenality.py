@@ -3480,8 +3480,15 @@ def main():
                         # :macro name self [file] -- regenerate the CURRENT shell
                         # state as replayable commands: probes, macro-command
                         # files/aliases, exposed command tools, and game configs.
-                        dest = mtail.split(maxsplit=2)[2].strip() if len(mtok) >= 3 else os.path.join(ROOT, "invariants", "out", "macros", "self.txt")
-                        if _hidden_overwrite_blocked("self", "System"):
+                        alias_name = mtail.split(maxsplit=2)[2].strip() if len(mtok) >= 3 else "self"
+                        # If they provided a name, map it to the standard macros folder
+                        if not alias_name.endswith(".txt") and not "/" in alias_name and not "\\" in alias_name:
+                            dest = os.path.join(ROOT, "invariants", "out", "macros", f"{alias_name}.txt")
+                        else:
+                            dest = alias_name # user provided an explicit path
+                            alias_name = os.path.splitext(os.path.basename(dest))[0]
+                            
+                        if _hidden_overwrite_blocked(alias_name, "System"):
                             continue
                         macro_lines, restore_stats = build_session_restore_macro(
                             probes,
@@ -3498,6 +3505,7 @@ def main():
                                 for l in macro_lines:
                                     wf.write(l + "\n")
                             macro_aliases["self"] = dest
+                            macro_aliases[alias_name] = dest
                             _save_macro_aliases()
                             print(
                                 Fore.GREEN
