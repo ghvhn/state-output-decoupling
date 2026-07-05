@@ -6247,9 +6247,9 @@ def main():
                         learning_rate = 0.15  # a noticeable nudge
                         updated_layers = 0
                         for L in list(probe_dir.keys()):
-                            L_str = str(L)
-                            if L_str in hs:
-                                mean_hs = hs[L_str].mean(dim=0).to(model.device).reshape(-1)
+                            L_int = int(L)
+                            if 0 <= L_int < hs.size(0):
+                                mean_hs = hs[L_int].mean(dim=0).to(model.device).reshape(-1)
                                 if mean_hs.norm().item() > 0:
                                     mean_hs = mean_hs / mean_hs.norm()
                                     current_dir = probe_dir[L].to(model.device).reshape(-1)
@@ -6319,9 +6319,9 @@ def main():
                         sim_sum = 0.0
                         layers_counted = 0
                         for L in list(probe_dir.keys()):
-                            L_str = str(L)
-                            if L_str in hs:
-                                mean_hs = hs[L_str].mean(dim=0).to(model.device).reshape(-1)
+                            L_int = int(L)
+                            if 0 <= L_int < hs.size(0):
+                                mean_hs = hs[L_int].mean(dim=0).to(model.device).reshape(-1)
                                 if mean_hs.norm().item() > 0:
                                     mean_hs = mean_hs / mean_hs.norm()
                                     p_dir = probe_dir[L].to(model.device).reshape(-1)
