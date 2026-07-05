@@ -1228,6 +1228,7 @@ def expand_macro_lines(target, macro_aliases, visited=None, depth=0, args=None):
             if args:
                 for i, arg in enumerate(args):
                     line = line.replace(f"${i+1}", arg)
+                line = line.replace("$@", " ".join(args))
                     
             if not line.startswith(":"):
                 nested = macro_aliases.get(line, line)
