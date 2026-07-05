@@ -5838,9 +5838,8 @@ def main():
                             + Style.RESET_ALL
                         )
                         continue
-                    if cname in probes:
-                        print(Fore.YELLOW + f"[Probe] '{cname}' is already an active probe (:probe drop {cname} first)." + Style.RESET_ALL)
-                        continue
+                    # Removed: if cname in probes: ... continue 
+                    # so that users can overwrite/augment a probe using itself (e.g. compose amb amb + new)
                     expr, cband = strip_band_suffix(expr)
                     terms, perr = parse_compose_expr(expr)
                     if perr is not None:
