@@ -1750,7 +1750,7 @@ def resolve_probe_choice(pname_raw, options, model=None, config=None, action_nam
         print(Fore.CYAN + f"[{base.capitalize()}] Asking the model to select a target for '{action_name}'..." + Style.RESET_ALL)
         
         prompt = (
-            f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+            f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
             f"You are selecting a target parameter/probe for the action: '{action_name}'.\n"
             f"Available options:\n" + "\n".join(f"- {p}" for p in plist) + "\n\n"
             f"{ref_str}"
@@ -3376,7 +3376,7 @@ def main():
                 elif sargs[0] == "choose":
                     print(Fore.CYAN + "[System] Asking model to pick a persona/macro..." + Style.RESET_ALL)
                     prompt = (
-                        f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                        f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                         f"You are selecting a persona/macro to initialize.\n"
                         f"Available options:\n" + "\n".join(f"- {p}" for p in sorted(macro_aliases.keys())) + "\n\n"
                         f"Select the single most appropriate persona/macro from the list. "
@@ -3945,7 +3945,7 @@ def main():
                     print(Fore.CYAN + "[Solve] Passing your 'because' rationale to the model." + Style.RESET_ALL)
 
                 prompt = (
-                    "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                    "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                     "You write macros for an interactive cognition shell. A macro is a list of ':' "
                     "commands, one per line." + prompt_args_str + "\n\n"
                     f"{command_hints_str}"
@@ -4501,7 +4501,7 @@ def main():
                         print(Fore.YELLOW + f"[Doc Rewrite] {exc}" + Style.RESET_ALL)
                         continue
                     prompt = (
-                        "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                        "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                         "Rewrite the file below into a better version, guided by the operator's reason. "
                         "Preserve factual meaning, important details, headings, lists, links, code fences, and code syntax when present. "
                         "Do not explain what you changed. Output ONLY the complete rewritten file content.\n\n"
@@ -5722,7 +5722,7 @@ def main():
                     else:
                         basis = "It has no stored framings (it was adopted from a raw vector).\n\n"
                     xprompt = (
-                        "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                        "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                         f"A cognitive probe named '{ename_resolved}' is a direction in your own activations "
                         f"that scores each of your replies.\n{basis}"
                         "In two or three sentences, explain in your OWN words what this probe is sensing in "
@@ -6299,7 +6299,7 @@ def main():
                             continue
                     else:
                         print(Fore.CYAN + f"[Suggest] Probe '{target_probe}' not active. Generating multiple contrastive framings to mint it..." + Style.RESET_ALL)
-                        reason_str = f" The user wants this dimension because: '{command_because}'. Tailor the definitions to this intent.\n" if command_because else "\n"
+                        reason_str = f" I want this dimension because: '{command_because}'. Tailor the definitions to my intent.\n" if command_because else "\n"
                         suggestion_prompt = (
                             f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                             f"Write 3 different contrastive definition pairs for a behavioral dimension called '{target_probe}'.{reason_str}"
@@ -6333,8 +6333,8 @@ def main():
                     print(Fore.CYAN + f"[Suggest] Generating a new behavioral dimension based on your reason..." + Style.RESET_ALL)
                     suggestion_prompt = (
                         f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
-                        f"The user wants to steer the model's behavior. Their reason is: '{command_because}'.\n"
-                        f"Invent a short, 1-word name for a behavioral dimension that captures this intent, and write 3 different contrastive definition pairs for it.\n"
+                        f"I want to steer the model's behavior. My reason is: '{command_because}'.\n"
+                        f"Invent a short, 1-word name for a behavioral dimension that captures my intent, and write 3 different contrastive definition pairs for it.\n"
                         f"Write every side in the FIRST PERSON, as I describe MYSELF -- each side MUST start with 'I'.\n"
                         f"The format must be exactly:\n"
                         f"Name: <word>\n"
@@ -6890,7 +6890,7 @@ def main():
                         if targs[1].upper() in ("CHOICE", "CHOOSE"):
                             print(Fore.CYAN + f"[Choice] Asking the model to select a value for '{targs[0]}'..." + Style.RESET_ALL)
                             prompt = (
-                                f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                                f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                                 f"You are configuring the cognitive tuning parameter '{targs[0]}'.\n"
                                 f"Select an appropriate numerical value (float). Output ONLY the number and nothing else.<|eot_id|>"
                                 f"<|start_header_id|>assistant<|end_header_id|>\n\n"
