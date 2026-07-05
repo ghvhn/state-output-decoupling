@@ -3370,7 +3370,45 @@ def main():
                 if not sargs:
                     print(Fore.YELLOW + "[System] Usage: :self <name> | :self choose | :self save <name>" + Style.RESET_ALL)
                     continue
-                if sargs[0] in ("save", "create"):
+                if sargs[0] == "create":
+                    if len(sargs) < 2:
+                        print(Fore.YELLOW + "[System] Usage: :self create <name>" + Style.RESET_ALL)
+                        continue
+                    alias = sargs[1]
+                    print(Fore.CYAN + f"[System] Asking model to invent a '{alias}' persona..." + Style.RESET_ALL)
+                    prompt = (
+                        f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
+                        f"The operator wants to create a cognitive persona named '{alias}'.\n"
+                        f"Write a short shell macro (3 to 6 lines) using :probe commands to define this persona.\n"
+                        f"Use the syntax `:probe <concept_name> <framing with it> || <framing without it>`.\n"
+                        f"You can also use `:probe compose ...` if you want to combine concepts.\n"
+                        f"Output ONLY the commands, one per line. Do not use markdown blocks.<|eot_id|>"
+                        f"<|start_header_id|>assistant<|end_header_id|>\n\n"
+                    )
+                    raw = generate_agentic_text(
+                        model, instruction=prompt, config=config,
+                        max_new_tokens=200, chatty_log=False, pre_formatted=True
+                    )
+                    lines = [ln.strip() for ln in (raw or "").splitlines() if ln.strip().startswith(":")]
+                    if not lines:
+                        print(Fore.YELLOW + f"[System] Model failed to generate commands for '{alias}'." + Style.RESET_ALL)
+                        continue
+                    
+                    dest = os.path.join(ROOT, "invariants", "out", "macros", f"{alias}.txt")
+                    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+                    try:
+                        with open(dest, "w", encoding="utf-8") as wf:
+                            for ln in lines:
+                                wf.write(ln + "\n")
+                        macro_aliases[alias] = dest
+                        _save_macro_aliases()
+                        print(Fore.GREEN + f"[System] Generated and saved '{alias}' persona ({len(lines)} commands). Loading it now..." + Style.RESET_ALL)
+                        user_input = f":{alias}"
+                    except Exception as e:
+                        print(Fore.RED + f"[Error] Could not save macro: {e}" + Style.RESET_ALL)
+                        continue
+
+                elif sargs[0] == "save":
                     alias = sargs[1] if len(sargs) > 1 else "choose"
                     user_input = f":save self {alias}"
                 elif sargs[0] == "choose":
