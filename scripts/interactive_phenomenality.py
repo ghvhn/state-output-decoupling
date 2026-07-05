@@ -122,6 +122,54 @@ from invariants.trigger_tuner import TriggerTuner
 from dataclasses import dataclass, field
 import typing
 
+def _split_macro_commands(raw_str):
+    cmds = []
+    curr = []
+    i = 0
+    while i < len(raw_str):
+        if raw_str[i] == '\\' and i+1 < len(raw_str):
+            nxt = raw_str[i+1]
+            if nxt == '|' and i+2 < len(raw_str) and raw_str[i+2] == '|':
+                curr.append('||')
+                i += 3
+                continue
+            elif nxt in (';', '\\'):
+                curr.append(nxt)
+                i += 2
+                continue
+        elif raw_str[i] == ';':
+            cmds.append("".join(curr).strip())
+            curr = []
+            i += 1
+            continue
+        curr.append(raw_str[i])
+        i += 1
+    if curr:
+        cmds.append("".join(curr).strip())
+    return [c for c in cmds if c]
+
+def _partition_unescaped_pipes(raw_str):
+    curr = []
+    i = 0
+    while i < len(raw_str):
+        if raw_str[i] == '\\' and i+1 < len(raw_str):
+            nxt = raw_str[i+1]
+            if nxt == '|' and i+2 < len(raw_str) and raw_str[i+2] == '|':
+                curr.append('||')
+                i += 3
+                continue
+            elif nxt in (';', '\\'):
+                curr.append(nxt)
+                i += 2
+                continue
+        elif raw_str[i:i+2] == '||':
+            rest_str = raw_str[i+2:].strip().replace(r'\|\|', '||').replace(r'\;', ';').replace(r'\\\\', '\\')
+            return "".join(curr).strip(), '||', rest_str
+        
+        curr.append(raw_str[i])
+        i += 1
+    return "".join(curr).strip(), "", ""
+
 @dataclass
 class AgentState:
     name: str
@@ -1647,39 +1695,37 @@ def consume_probe_args(args):
             idx += 1
     return pname, args[idx:]
 
-def resolve_probe_choice(pname_raw, probes, model=None, config=None, action_name=""):
+def resolve_probe_choice(pname_raw, options, model=None, config=None, action_name=""):
     tokens = pname_raw.split()
     if not tokens:
         return ""
     base = tokens[0].upper()
     if base in ("CHOICE", "CHOOSE", "AUTO"):
-        if not probes:
-            print(Fore.YELLOW + f"[{base.capitalize()}] No active probes to choose from." + Style.RESET_ALL)
+        if not options:
+            print(Fore.YELLOW + f"[{base.capitalize()}] No active options to choose from." + Style.RESET_ALL)
             return None
         if not model or not config:
             print(Fore.RED + "[Error] Model not available for choice." + Style.RESET_ALL)
             return None
         
-        plist = list(probes.keys())
+        plist = list(options.keys()) if isinstance(options, dict) else list(options)
         refs = tokens[1:]
         ref_str = ""
         if refs:
             ref_str = f"The user has provided the following reference guidance: {' '.join(refs)}\nUse this guidance to inform your selection.\n\n"
             
-        print(Fore.CYAN + f"[{base.capitalize()}] Asking the model to select a probe for '{action_name}'..." + Style.RESET_ALL)
+        print(Fore.CYAN + f"[{base.capitalize()}] Asking the model to select a target for '{action_name}'..." + Style.RESET_ALL)
         
         prompt = (
             f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
-            f"You are selecting a cognitive probe for the action: '{action_name}'.\n"
-            f"Available probes:\n" + "\n".join(f"- {p}" for p in plist) + "\n\n"
+            f"You are selecting a target parameter/probe for the action: '{action_name}'.\n"
+            f"Available options:\n" + "\n".join(f"- {p}" for p in plist) + "\n\n"
             f"{ref_str}"
-            f"Select the single most appropriate probe from the list above. "
-            f"Output ONLY the exact name of the probe, and nothing else.<|eot_id|>"
+            f"Select the single most appropriate target from the list above. "
+            f"Output ONLY the exact name of the target, and nothing else.<|eot_id|>"
             f"<|start_header_id|>assistant<|end_header_id|>\n\n"
         )
 
-        # generate_agentic_text is imported at module level; no local import (it
-        # would make the name function-local and risk UnboundLocalError).
         sug = generate_agentic_text(
             model,
             instruction=prompt,
@@ -1688,11 +1734,11 @@ def resolve_probe_choice(pname_raw, probes, model=None, config=None, action_name
             max_new_tokens=20
         )
         sug = sug.strip()
-        if sug in probes:
+        if sug in options:
             print(Fore.GREEN + f"[Choice] The model chose: {sug}" + Style.RESET_ALL)
             return sug
         else:
-            print(Fore.YELLOW + f"[Choice] Model selected invalid probe '{sug}'. Aborting." + Style.RESET_ALL)
+            print(Fore.YELLOW + f"[Choice] Model selected invalid target '{sug}'. Aborting." + Style.RESET_ALL)
             return None
             
     return pname_raw.replace("probe_", "") if pname_raw.startswith("probe_") else pname_raw
@@ -3543,7 +3589,7 @@ def main():
                     if _hidden_overwrite_blocked(raw_file, "System"):
                         continue
                     mac_file = macro_aliases.get(raw_file, raw_file)
-                    mac_cmds = [c.strip() for c in parts[1].split(";") if c.strip()]
+                    mac_cmds = _split_macro_commands(parts[1])
                     try:
                         os.makedirs(os.path.dirname(mac_file) or ".", exist_ok=True)
                         with open(mac_file, "w", encoding="utf-8") as wf:
@@ -4062,9 +4108,9 @@ def main():
             if user_input.startswith(":consider"):
                 payload = user_input[len(":consider"):].strip()
                 try:
-                    if "||" not in payload:
+                    if "||" not in payload and r"\||" not in payload:
                         raise ValueError("Usage: :consider <trigger_metric> <tool_name> <positive text> || <negative text>")
-                    left_side, _, b_text = payload.partition("||")
+                    left_side, _, b_text = _partition_unescaped_pipes(payload)
                     left_parts = left_side.strip().split(" ", 2)
                     if len(left_parts) < 3:
                         raise ValueError("Usage: :consider <trigger_metric> <tool_name> <positive text> || <negative text>")
@@ -5908,7 +5954,7 @@ def main():
                     continue
                 pname, _, framings = pargs.partition(" ")
                 pname = re.sub(r"[^a-z0-9_]", "_", pname.lower())[:40]
-                if "||" not in framings:
+                if "||" not in framings and r"\||" not in framings:
                     print(Fore.CYAN + f"[Probe] Suggesting contrastive framings for '{pname}'..." + Style.RESET_ALL)
                     suggestion_prompt = (
                         f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
@@ -5928,7 +5974,7 @@ def main():
                     sug = sug.strip()
                     print(Fore.GREEN + f"\n[Probe Suggestion] Try running this:\n:probe {pname} {sug}\n" + Style.RESET_ALL)
                     continue
-                a_text, _, b_text = framings.partition("||")
+                a_text, _, b_text = _partition_unescaped_pipes(framings)
                 a_text, b_text = a_text.strip(), b_text.strip()
                 b_text, mint_layers = strip_band_suffix(b_text)
                 from invariants.engine import _inputs, _hidden_states, probe_direction, steer_band_layers
@@ -6192,7 +6238,7 @@ def main():
                             print(Fore.CYAN + f"  {label}: {', '.join(routes[route])}" + Style.RESET_ALL)
                     continue
                 cal_name_raw, cargs = consume_probe_args(cargs)
-                cal_name = resolve_probe_choice(cal_name_raw, probes, model=model, config=config, action_name="calibrate")
+                cal_name = resolve_probe_choice(cal_name_raw, calibratable_names(tuner), model=model, config=config, action_name="calibrate")
                 if not cal_name:
                     continue
                 route, reason = calibration_policy(cal_name)
@@ -6392,6 +6438,11 @@ def main():
                     #            :probe compose (e.g. +ambiguity-consensus). Each turn
                     #            the target = mult * Sigma(weight * stream) over the mix.
                     parts = user_input[len(":tune"):].strip().split()
+                    if parts and parts[0].upper() in ("CHOICE", "CHOOSE", "AUTO"):
+                        resolved = resolve_probe_choice(parts[0], calibratable_names(tuner), model=model, config=config, action_name="tune")
+                        if not resolved:
+                            continue
+                        parts[0] = resolved
                     try:
                         dyn_idx = [p.lower() for p in parts].index("dynamic")
                     except ValueError:
@@ -6465,6 +6516,11 @@ def main():
                         continue
 
                 targs = user_input[len(":tune"):].split()
+                if targs and targs[0].upper() in ("CHOICE", "CHOOSE", "AUTO"):
+                    resolved = resolve_probe_choice(targs[0], calibratable_names(tuner), model=model, config=config, action_name="tune")
+                    if not resolved:
+                        continue
+                    targs[0] = resolved
                 if not targs:
                     rows = tuner.summary()
                     if not rows:
@@ -7286,7 +7342,7 @@ def main():
                 # Reading is allowed; shaping is not. Candidate-text reads score
                 # hypothetical words for probes only, without observing, crediting,
                 # or touching any rolling history.
-                name_part, _, cand_text = model_probe_query.partition("||")
+                name_part, _, cand_text = _partition_unescaped_pipes(model_probe_query)
                 cand_text = cand_text.strip()
                 req_names = [re.sub(r"[^a-z0-9_]", "_", n.strip().lower())[:40] for n in name_part.split(",") if n.strip()]
                 exposed_probe_all = sorted(n for n in probes if probes[n].get("exposed"))
