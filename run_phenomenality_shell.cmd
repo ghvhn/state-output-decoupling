@@ -27,15 +27,16 @@ if defined HF_TOKEN (
     goto :auth_ok
 )
 "%PY%" -c "import sys; from huggingface_hub import get_token; sys.exit(0 if get_token() else 1)" >nul 2>&1
-if errorlevel 1 (
-    echo.
-    echo   No Hugging Face token found. The shell may fall back to smaller open models
-    echo   or fail if you explicitly request a gated model without logging in.
-    echo   To log in once: %PY% -c "from huggingface_hub import login; login()"
-    echo.
-) else (
-    echo Hugging Face token detected.
-)
+if errorlevel 1 goto :auth_missing
+echo Hugging Face token detected.
+goto :auth_ok
+
+:auth_missing
+echo.
+echo   No Hugging Face token found. The shell may fall back to smaller open models
+echo   or fail if you explicitly request a gated model without logging in.
+echo   To log in once: %PY% -c "from huggingface_hub import login; login()"
+echo.
 
 :auth_ok
 echo.
