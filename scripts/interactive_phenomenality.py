@@ -3390,13 +3390,46 @@ def main():
                         f"You can also use `:probe compose ...` to combine existing probes.\n"
                         f"Output ONLY the commands, one per line. Do not use markdown blocks or conversational text."
                     )
-                    raw = generate_agentic_text(
-                        model, instruction=prompt, config=config,
-                        max_new_tokens=200, chatty_log=False, pre_formatted=False
-                    )
-                    lines = [ln.strip() for ln in (raw or "").splitlines() if ln.strip().startswith(":")]
+                    
+                    lines = []
+                    for attempt in range(3):
+                        raw = generate_agentic_text(
+                            model, instruction=prompt, config=config,
+                            max_new_tokens=200, chatty_log=False, pre_formatted=False
+                        )
+                        lines = [ln.strip() for ln in (raw or "").splitlines() if ln.strip().startswith(":")]
+                        if not lines:
+                            print(Fore.YELLOW + f"[System] Model failed to generate commands for '{alias}'." + Style.RESET_ALL)
+                            break
+                            
+                        errors = []
+                        for i, ln in enumerate(lines):
+                            parts = ln.split()
+                            cmd = parts[0][1:]
+                            if cmd not in BUILTIN_COMMANDS and cmd not in macro_aliases and cmd not in probes and cmd != alias:
+                                errors.append(f"Line {i+1}: ':{cmd}' is not a recognized command.")
+                                continue
+                            if cmd == "probe":
+                                if len(parts) > 1 and parts[1] == "compose":
+                                    if "||" in ln:
+                                        errors.append(f"Line {i+1}: ':probe compose' uses '+' and '-' to combine existing probes, not '||'.")
+                                elif len(parts) > 1 and parts[1] not in ("adopt", "compose", "backfill", "save", "load", "strip", "name", "list"):
+                                    if "||" not in ln:
+                                        errors.append(f"Line {i+1}: When defining a new probe, you must use '||' to separate the positive and negative framings.")
+                                    elif ln.count("||") > 1:
+                                        errors.append(f"Line {i+1}: A probe definition can only contain one '||' separator.")
+                        
+                        if not errors:
+                            break
+                            
+                        if attempt < 2:
+                            print(Fore.YELLOW + f"[System] Model generated invalid commands. Retrying ({attempt+1}/3)..." + Style.RESET_ALL)
+                            prompt += f"\n\nYour previous attempt generated:\n{raw}\n\nBut it contained the following errors:\n" + "\n".join(errors) + "\n\nPlease rewrite it correctly."
+                        else:
+                            print(Fore.RED + f"[System] Model failed to generate valid commands after 3 attempts." + Style.RESET_ALL)
+                            lines = []
+                            
                     if not lines:
-                        print(Fore.YELLOW + f"[System] Model failed to generate commands for '{alias}'." + Style.RESET_ALL)
                         continue
                     
                     dest = os.path.join(ROOT, "invariants", "out", "macros", f"{alias}.txt")
