@@ -3288,13 +3288,17 @@ def main():
                 related = set()
                 # Check for probes
                 for p in probes:
-                    if re.search(r'\b' + re.escape(p) + r'\b', command_because, re.IGNORECASE):
-                        related.add(f"probe:{p}")
+                    match = re.search(r'(?<!\w)([+-]?)' + re.escape(p) + r'\b', command_because, re.IGNORECASE)
+                    if match:
+                        prefix = match.group(1) or ""
+                        related.add(f"{prefix}probe:{p}")
                 # Check for knobs (triggers)
                 for k in tuner.triggers:
                     k_name = k[len("probe_"):] if k.startswith("probe_") else k
-                    if re.search(r'\b' + re.escape(k_name) + r'\b', command_because, re.IGNORECASE):
-                        related.add(f"knob:{k_name}")
+                    match = re.search(r'(?<!\w)([+-]?)' + re.escape(k_name) + r'\b', command_because, re.IGNORECASE)
+                    if match:
+                        prefix = match.group(1) or ""
+                        related.add(f"{prefix}knob:{k_name}")
                         
                 mem_prov = {"command": user_input.split()[0] if user_input else "", "because": command_because}
                 if related:
