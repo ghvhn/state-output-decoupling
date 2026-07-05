@@ -6299,9 +6299,10 @@ def main():
                             continue
                     else:
                         print(Fore.CYAN + f"[Suggest] Probe '{target_probe}' not active. Generating multiple contrastive framings to mint it..." + Style.RESET_ALL)
+                        reason_str = f" The user wants this dimension because: '{command_because}'. Tailor the definitions to this intent.\n" if command_because else "\n"
                         suggestion_prompt = (
                             f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
-                            f"Write 3 different contrastive definition pairs for a behavioral dimension called '{target_probe}'. "
+                            f"Write 3 different contrastive definition pairs for a behavioral dimension called '{target_probe}'.{reason_str}"
                             f"Write every side in the FIRST PERSON, as I describe MYSELF -- each side MUST start with 'I'. "
                             f"Each pair must be exactly: <first-person positive statement> || <first-person negative statement>.\n\n"
                             f"Example for 'understanding':\n"
@@ -6328,6 +6329,25 @@ def main():
                         print(Fore.GREEN + f"Suggested framings for '{target_probe}':\n" + sug.strip() + Style.RESET_ALL)
                         print(Fore.CYAN + f"Mint one with: :probe compose {target_probe} <positive> || <negative>" + Style.RESET_ALL)
                         continue
+                elif len(sargs) == 1 and command_because:
+                    print(Fore.CYAN + f"[Suggest] Generating a new behavioral dimension based on your reason..." + Style.RESET_ALL)
+                    suggestion_prompt = (
+                        f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
+                        f"The user wants to steer the model's behavior. Their reason is: '{command_because}'.\n"
+                        f"Invent a short, 1-word name for a behavioral dimension that captures this intent, and write 3 different contrastive definition pairs for it.\n"
+                        f"Write every side in the FIRST PERSON, as I describe MYSELF -- each side MUST start with 'I'.\n"
+                        f"The format must be exactly:\n"
+                        f"Name: <word>\n"
+                        f"<first-person positive statement> || <first-person negative statement>\n"
+                        f"<first-person positive statement> || <first-person negative statement>\n"
+                        f"<first-person positive statement> || <first-person negative statement>\n\n"
+                        f"Output ONLY the name and the 3 pairs. Do not add any other text.<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+                    )
+                    sugg_rec = []
+                    sug = generate_agentic_text(model, instruction=suggestion_prompt, config=config, pre_formatted=True, max_new_tokens=200, chatty_log=False, synthesis_recorder=sugg_rec)
+                    print(Fore.GREEN + f"Suggested new dimension:\n" + sug.strip() + Style.RESET_ALL)
+                    print(Fore.CYAN + f"Mint it with: :probe <name> <positive> || <negative>" + Style.RESET_ALL)
+                    continue
                 else:
                     sugg = suggest_actions(tuner, list(turn_log), probes=probes, archive_size=_arch)
 
