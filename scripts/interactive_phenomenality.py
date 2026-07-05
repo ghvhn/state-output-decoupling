@@ -6357,6 +6357,8 @@ def main():
                             continue
                         print(Fore.CYAN + Style.BRIGHT + f"  [{labels[cat]}]" + Style.RESET_ALL)
                         for line, cmd in group[:8]:
+                            if command_because:
+                                cmd += f" because {command_because}"
                             print(Fore.CYAN + f"    {line}" + Style.RESET_ALL)
                             print(Fore.GREEN + f"      -> {cmd}" + Style.RESET_ALL)
                 continue
