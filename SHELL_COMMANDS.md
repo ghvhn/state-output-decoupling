@@ -163,8 +163,10 @@ Knobs you'll actually touch:
   as the next turn's input. Opt-in: until `:listen on`, input is the plain
   unchanged path. (The reader thread, once started, stays for the session.)
 - **`:clock`** — generation cost sensor. Every turn prints a `[Clock]` line
-  (wall-time for the reply, tok/s, and VRAM: live allocation / total
-  reserved / this turn's peak). `:clock` on its own shows the current
+  (wall-time for the reply, tok/s, and memory: live allocation / total
+  reserved / this turn's peak). Memory is VRAM on a CUDA box and this
+  process's resident RAM on a CPU-only box, so the sensor is live either way
+  — CPU-only runs are not stuck at zero. `:clock` on its own shows the current
   footprint, the last turn's timing, and the accrued distributions. The
   wall-time and reserved-GB are observed as the streams `generation_seconds`
   and `vram_gb` — so they anchor and calibrate like any sensor
