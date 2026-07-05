@@ -2007,6 +2007,9 @@ def load_stored_direction(model, stem, layers=None):
     want = set(int(x) for x in layers) if layers is not None else None
     src_path = next(
         (p for p in (
+            os.path.join(ROOT, "invariants", f"{stem}_d{model.d_model}_vector.pt"),
+            os.path.join(ROOT, "invariants", f"{stem}_d{model.d_model}.pt"),
+            os.path.join(ROOT, "invariants", "out", "probes", f"{stem}_d{model.d_model}.pt"),
             os.path.join(ROOT, "invariants", f"{stem}_vector.pt"),
             os.path.join(ROOT, "invariants", f"{stem}.pt"),
             os.path.join(ROOT, "invariants", "out", "probes", f"{stem}.pt"),
@@ -2028,6 +2031,8 @@ def load_stored_direction(model, stem, layers=None):
             if want is not None and int(L) not in want:
                 continue
             v = v.to(model.device).float().reshape(-1)
+            if v.shape[0] != model.d_model:
+                continue
             n = v.norm()
             if n.item() > 0:
                 direction[int(L)] = v / n
@@ -2041,19 +2046,22 @@ def load_stored_direction(model, stem, layers=None):
                 keep = sorted(band & set(raw_vecs)) or sorted(raw_vecs)
             for L in keep:
                 v = raw_vecs[L].to(model.device).float().reshape(-1)
+                if v.shape[0] != model.d_model:
+                    continue
                 n = v.norm()
                 if n.item() > 0:
                     direction[int(L)] = v / n
     elif hasattr(payload, "reshape"):
         v = payload.to(model.device).float().reshape(-1)
-        n = v.norm()
-        if n.item() > 0:
-            unit = v / n
-            n_layers = int(model.model.config.num_hidden_layers)
-            targets = sorted(want) if want is not None else steer_band_layers(n_layers)
-            for L in targets:
-                if 0 <= int(L) < n_layers:
-                    direction[int(L)] = unit.clone()
+        if v.shape[0] == model.d_model:
+            n = v.norm()
+            if n.item() > 0:
+                unit = v / n
+                n_layers = int(model.model.config.num_hidden_layers)
+                targets = sorted(want) if want is not None else steer_band_layers(n_layers)
+                for L in targets:
+                    if 0 <= int(L) < n_layers:
+                        direction[int(L)] = unit.clone()
     return direction, os.path.basename(src_path)
 
 
@@ -2310,6 +2318,21 @@ def _sync_steer_tunables(tuner, config):
     config._synthesis_events_used = 0
 
 
+def get_hardware_appropriate_model():
+    if not torch.cuda.is_available():
+        return "Qwen/Qwen2.5-1.5B-Instruct"
+    try:
+        vram = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+    except Exception:
+        return DEFAULT_MODEL
+    
+    if vram >= 16.0:
+        return DEFAULT_MODEL
+    elif vram >= 8.0:
+        return "meta-llama/Llama-3.2-3B-Instruct"
+    else:
+        return "Qwen/Qwen2.5-1.5B-Instruct"
+
 def main():
     os.chdir(ROOT)
     print(Fore.CYAN + Style.BRIGHT + "================================================")
@@ -2318,23 +2341,35 @@ def main():
     
     # Model is configurable so the egg shell honors whatever model earned the egg
     # (env EGG_MODEL set by the benchmark, or argv[1] for a manual launch).
-    model_name = os.environ.get("EGG_MODEL") or (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MODEL)
+    model_name = os.environ.get("EGG_MODEL")
+    if not model_name:
+        if len(sys.argv) > 1:
+            model_name = sys.argv[1]
+        else:
+            model_name = get_hardware_appropriate_model()
+            
     is_default = (model_name == DEFAULT_MODEL)
 
     print(Fore.YELLOW + f"[System] Loading {model_name}..." + Style.RESET_ALL)
     model = load_model(model_name, local_files_only=is_default)
 
     config = AgenticConfig()
-    # The organic correction vector is calibrated for the default model's geometry;
-    # skip it on a swapped model rather than inject a dimension-mismatched steer.
-    if is_default:
-        try:
-            config.organic_correction_vector = torch.load(ORGANIC_VECTOR_PATH, map_location=model.device)
-            print(Fore.GREEN + "[System] Successfully loaded organic_correction_vector.pt!" + Style.RESET_ALL)
-        except Exception as e:
+    organic_path = os.path.join(ROOT, "invariants", f"organic_correction_vector_d{model.d_model}.pt")
+    if not os.path.isfile(organic_path):
+        organic_path = ORGANIC_VECTOR_PATH
+
+    try:
+        payload = torch.load(organic_path, map_location=model.device)
+        if isinstance(payload, torch.Tensor) and payload.reshape(-1).shape[0] != model.d_model:
+            print(Fore.YELLOW + f"[System] Skipping organic vector: dimension mismatch (model d_model={model.d_model})." + Style.RESET_ALL)
+        else:
+            config.organic_correction_vector = payload
+            print(Fore.GREEN + f"[System] Successfully loaded {os.path.basename(organic_path)}!" + Style.RESET_ALL)
+    except Exception as e:
+        if is_default:
             print(Fore.RED + f"[System] Warning: Could not load organic vector: {e}" + Style.RESET_ALL)
-    else:
-        print(Fore.YELLOW + "[System] Skipping organic vector (calibrated for the default model)." + Style.RESET_ALL)
+        else:
+            pass # Non-default models might simply not have an organic vector minted yet
 
     cache_file = CACHE_FILE
     try:
@@ -5819,7 +5854,8 @@ def main():
                 tuner.register(f"probe_{pname}", 0.0, kind="threshold", comparator=">=")
                 try:
                     os.makedirs(PROBE_DIR, exist_ok=True)
-                    torch.save({"direction": direction, "framings": (a_text, b_text)}, os.path.join(PROBE_DIR, f"{pname}.pt"))
+                    save_name = pname if getattr(model.model.config, "_name_or_path", "") == DEFAULT_MODEL else f"{pname}_d{model.d_model}"
+                    torch.save({"direction": direction, "framings": (a_text, b_text)}, os.path.join(PROBE_DIR, f"{save_name}.pt"))
                 except Exception:
                     pass
                 memory.append_event(
