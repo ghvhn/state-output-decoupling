@@ -939,7 +939,7 @@ def generate_agentic_text(
                     break
             chunk_tokens = min(max_new_tokens - tokens_generated, 24)
             start_length = current_inputs["input_ids"].shape[1]
-            stopping_criteria = [ToolStoppingCriteria(M.tok, start_length=start_length)]
+            stopping_criteria = [ToolStoppingCriteria(M.tok, start_length=start_length), MemoryStoppingCriteria()]
             if stop_after_final_answer:
                 stopping_criteria.append(FinalAnswerStoppingCriteria(M.tok, start_length=start_length))
             if stop_after_verifier_answer:
@@ -967,6 +967,10 @@ def generate_agentic_text(
                 out = M.model.generate(**generate_kwargs)
             except GenerationBudgetExceeded:
                 print("    [Agentic ToT] Generation budget reached; returning partial output.", flush=True)
+                full = current_inputs["input_ids"]
+                break
+            except MemoryError as e:
+                print(f"    [Agentic ToT] {e} Returning partial output.", flush=True)
                 full = current_inputs["input_ids"]
                 break
             except NeedsDisambiguationError as e:

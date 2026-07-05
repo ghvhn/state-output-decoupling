@@ -3378,21 +3378,21 @@ def main():
                     print(Fore.CYAN + f"[System] Asking model to invent a '{alias}' persona..." + Style.RESET_ALL)
                     existing_personas = ", ".join(sorted(macro_aliases.keys())) or "None"
                     active_probes = ", ".join(sorted(probes.keys())) or "None"
+                    available_cmds = ", ".join(sorted([c for c in BUILTIN_COMMANDS if c]))
                     
                     prompt = (
-                        f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                         f"The operator wants to create a cognitive persona named '{alias}'.\n"
-                        f"Write a short shell macro (3 to 6 lines) using :probe commands to define this persona.\n"
+                        f"Write a short shell macro (3 to 6 lines) using any mix of commands to define this persona.\n"
+                        f"Available system commands: {available_cmds}\n"
                         f"Existing personas you could invoke (by adding `:<name>`): {existing_personas}\n"
                         f"Currently active probes you could compose: {active_probes}\n"
                         f"Use the syntax `:probe <concept_name> <framing with it> || <framing without it>` to define new dimensions.\n"
                         f"You can also use `:probe compose ...` to combine existing probes.\n"
-                        f"Output ONLY the commands, one per line. Do not use markdown blocks.<|eot_id|>"
-                        f"<|start_header_id|>assistant<|end_header_id|>\n\n"
+                        f"Output ONLY the commands, one per line. Do not use markdown blocks or conversational text."
                     )
                     raw = generate_agentic_text(
                         model, instruction=prompt, config=config,
-                        max_new_tokens=200, chatty_log=False, pre_formatted=True
+                        max_new_tokens=200, chatty_log=False, pre_formatted=False
                     )
                     lines = [ln.strip() for ln in (raw or "").splitlines() if ln.strip().startswith(":")]
                     if not lines:
@@ -3407,8 +3407,7 @@ def main():
                                 wf.write(ln + "\n")
                         macro_aliases[alias] = dest
                         _save_macro_aliases()
-                        print(Fore.GREEN + f"[System] Generated and saved '{alias}' persona ({len(lines)} commands). Loading it now..." + Style.RESET_ALL)
-                        user_input = f":{alias}"
+                        print(Fore.GREEN + f"[System] Generated and saved '{alias}' persona ({len(lines)} commands). You can load it with :{alias}" + Style.RESET_ALL)
                     except Exception as e:
                         print(Fore.RED + f"[Error] Could not save macro: {e}" + Style.RESET_ALL)
                         continue
@@ -3419,16 +3418,14 @@ def main():
                 elif sargs[0] == "choose":
                     print(Fore.CYAN + "[System] Asking model to pick a persona/macro..." + Style.RESET_ALL)
                     prompt = (
-                        f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                         f"You are selecting a persona/macro to initialize.\n"
                         f"Available options:\n" + "\n".join(f"- {p}" for p in sorted(macro_aliases.keys())) + "\n\n"
                         f"Select the single most appropriate persona/macro from the list. "
-                        f"Output ONLY the exact name, and nothing else.<|eot_id|>"
-                        f"<|start_header_id|>assistant<|end_header_id|>\n\n"
+                        f"Output ONLY the exact name, and nothing else."
                     )
                     nm = generate_agentic_text(
                         model, instruction=prompt, config=config,
-                        max_new_tokens=20, chatty_log=False, pre_formatted=True
+                        max_new_tokens=20, chatty_log=False, pre_formatted=False
                     )
                     alias = (nm or "").strip()
                     if alias in macro_aliases:

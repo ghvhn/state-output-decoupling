@@ -76,6 +76,18 @@ class TimeStoppingCriteria(StoppingCriteria):
         return time.time() >= self.deadline
 
 
+class MemoryStoppingCriteria(StoppingCriteria):
+    def __init__(self, max_ram_percent: float = 95.0):
+        self.max_ram_percent = max_ram_percent
+
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
+        import psutil
+        if not torch.cuda.is_available():
+            if psutil.virtual_memory().percent >= self.max_ram_percent:
+                raise MemoryError(f"System RAM usage exceeded {self.max_ram_percent}% during generation.")
+        return False
+
+
 def _format_sympy_solution(value) -> str:
     try:
         import sympy as sp
