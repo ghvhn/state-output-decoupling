@@ -112,7 +112,9 @@ from invariants.agentic_engine import generate_agentic_text as _engine_generate,
 _ACTIVE_PROBES = None
 _ACTIVE_MODEL = None
 _ACTIVE_TUNER = None
-_PROBES_ON_ALL_ACTIONS = False
+_PROBES_SHOW_ACT = False
+_PROBES_SHOW_TALK = True
+_last_completion = None
 
 def score_probes_on_text(model, text, probes, tuner, turn_row=None, turn_sense=None, label_prefix="Probe Score"):
     if not probes or not text:
@@ -136,12 +138,16 @@ def score_probes_on_text(model, text, probes, tuner, turn_row=None, turn_sense=N
 
 def generate_agentic_text(*args, **kwargs):
     res = _engine_generate(*args, **kwargs)
-    if _PROBES_ON_ALL_ACTIONS and _ACTIVE_PROBES and _ACTIVE_MODEL and _ACTIVE_TUNER:
+    
+    is_talk = kwargs.get("chatty_log", False)
+    should_print = (_PROBES_SHOW_TALK and is_talk) or (_PROBES_SHOW_ACT and not is_talk)
+    
+    if should_print and _ACTIVE_PROBES and _ACTIVE_MODEL and _ACTIVE_TUNER:
         # Don't double-print for the main chatty loop which handles it manually
-        if not kwargs.get("chatty_log", False):
+        if not is_talk:
             text = res[0] if isinstance(res, tuple) else res
             if text and isinstance(text, str):
-                score_probes_on_text(_ACTIVE_MODEL, text, _ACTIVE_PROBES, _ACTIVE_TUNER, label_prefix="Bg Probe")
+                score_probes_on_text(_ACTIVE_MODEL, text, _ACTIVE_PROBES, _ACTIVE_TUNER, label_prefix="Act Probe")
     return res
 from invariants.config import AgenticConfig
 from invariants.cognitive_cache import CACHE_FILE, model_cache_file, DEFAULT_MODEL
@@ -1823,7 +1829,7 @@ KNOWN_COMMANDS = (
 # macro alias runs directly as ':<alias> args'.
 BUILTIN_COMMANDS = {c[1:] for c in KNOWN_COMMANDS} | {
     "macro", "run", "game", "solve", "refresh", "place", "consider",
-    "exit", "quit", "timestamps", "bgprobes", "listen", "history", "accept", "reject", "help", "expose", "hide",
+    "exit", "quit", "timestamps", "listen", "history", "accept", "reject", "help", "expose", "hide", "show",
 }
 
 # Single source of truth for the command reference: the shell prints these lines
@@ -2539,6 +2545,7 @@ def get_hardware_appropriate_model():
         return "Qwen/Qwen2.5-1.5B-Instruct"
 
 def main():
+    global _last_completion
     os.chdir(ROOT)
     print(Fore.CYAN + Style.BRIGHT + "================================================")
     print("      HUMBLE SYNTHESIS - INTERACTIVE SHELL      ")
@@ -4170,18 +4177,7 @@ def main():
                 else:
                     print(Fore.YELLOW + f"[System] Timestamps are currently {'on' if show_timestamps else 'off'}." + Style.RESET_ALL)
                 continue
-            if user_input.startswith(":bgprobes"):
-                parts = user_input.split()
-                global _PROBES_ON_ALL_ACTIONS
-                if len(parts) > 1 and parts[1] == "on":
-                    _PROBES_ON_ALL_ACTIONS = True
-                    print(Fore.GREEN + "[System] Background probe scoring enabled." + Style.RESET_ALL)
-                elif len(parts) > 1 and parts[1] == "off":
-                    _PROBES_ON_ALL_ACTIONS = False
-                    print(Fore.GREEN + "[System] Background probe scoring disabled." + Style.RESET_ALL)
-                else:
-                    print(Fore.YELLOW + f"[System] Background probe scoring is currently {'on' if _PROBES_ON_ALL_ACTIONS else 'off'}." + Style.RESET_ALL)
-                continue
+
             if user_input.startswith(":listen"):
                 arg = user_input[len(":listen"):].strip().lower()
                 if arg == "off":
@@ -5083,6 +5079,15 @@ def main():
                     except Exception as e:
                         print(Fore.RED + f"[Accept] Could not save macro: {e}" + Style.RESET_ALL)
                     continue
+                global _last_completion
+                if _last_completion is not None:
+                    if verb == ":accept":
+                        print(Fore.GREEN + f"[Accept] Queued autocomplete: {_last_completion}" + Style.RESET_ALL)
+                        input_queue.append(_last_completion)
+                    elif verb == ":reject":
+                        print(Fore.YELLOW + f"[Reject] Discarded autocomplete: {_last_completion}" + Style.RESET_ALL)
+                    _last_completion = None
+                    continue
                 if not pending_accept_commands:
                     print(Fore.CYAN + "[Accept] Nothing is staged for acceptance." + Style.RESET_ALL)
                     continue
@@ -5868,35 +5873,34 @@ def main():
                         continue
                     print(Fore.CYAN + f"[Probe] {ename_resolved} -- in the model's words:\n{(expl or '').strip()}" + Style.RESET_ALL)
                     continue
-                if pargs.lower().startswith("chatty "):
-                    chatty_name_raw = pargs[7:].strip().lower()
+                if pargs.lower().startswith("show ") or pargs.lower().startswith("hide "):
+                    is_show = pargs.lower().startswith("show ")
+                    target = pargs[5:].strip().lower()
                     
-                    if chatty_name_raw.startswith("all"):
-                        parts = chatty_name_raw.split()
-                        set_to = None
-                        if len(parts) > 1:
-                            if parts[1] == "on": set_to = True
-                            elif parts[1] == "off": set_to = False
-                        
-                        count = 0
+                    if target == "talk":
+                        global _PROBES_SHOW_TALK
+                        _PROBES_SHOW_TALK = is_show
+                        print(Fore.CYAN + f"[Probe] Probes will {'now' if is_show else 'no longer'} print during main conversation (talk)." + Style.RESET_ALL)
+                        continue
+                    elif target == "act":
+                        global _PROBES_SHOW_ACT
+                        _PROBES_SHOW_ACT = is_show
+                        print(Fore.CYAN + f"[Probe] Probes will {'now' if is_show else 'no longer'} print during background actions (act)." + Style.RESET_ALL)
+                        continue
+                    elif target == "all":
+                        _PROBES_SHOW_TALK = is_show
+                        _PROBES_SHOW_ACT = is_show
                         for pname in probes:
-                            current = probes[pname].get("chatty", True)
-                            new_val = set_to if set_to is not None else not current
-                            probes[pname]["chatty"] = new_val
-                            count += 1
-                            
-                        state_str = "toggled" if set_to is None else ("ON" if set_to else "OFF")
-                        print(Fore.CYAN + f"[Probe] {count} active probe(s) console print set to {state_str}." + Style.RESET_ALL)
+                            probes[pname]["chatty"] = is_show
+                        print(Fore.CYAN + f"[Probe] Global modes (talk, act) and all {len(probes)} probes set to {'SHOW' if is_show else 'HIDE'}." + Style.RESET_ALL)
                         continue
                         
-                    chatty_name = resolve_probe_choice(chatty_name_raw, probes, model=model, config=config, action_name="chatty")
+                    chatty_name = resolve_probe_choice(target, probes, model=model, config=config, action_name="show/hide")
                     if not chatty_name:
                         continue
                     if chatty_name in probes:
-                        current = probes[chatty_name].get("chatty", True)
-                        probes[chatty_name]["chatty"] = not current
-                        state_str = "ON" if not current else "OFF"
-                        print(Fore.CYAN + f"[Probe] {chatty_name} console print {state_str}." + Style.RESET_ALL)
+                        probes[chatty_name]["chatty"] = is_show
+                        print(Fore.CYAN + f"[Probe] {chatty_name} console print {'SHOW' if is_show else 'HIDE'}." + Style.RESET_ALL)
                     else:
                         print(Fore.YELLOW + f"[Probe] no active probe named {chatty_name}.{did_you_mean(chatty_name, probes)}" + Style.RESET_ALL)
                     continue
@@ -6344,6 +6348,12 @@ def main():
                 )
                 continue
             if user_input.strip().lower() == ":suggest apply" or user_input.strip().lower().startswith(":suggest apply "):
+                if _last_completion:
+                    print(Fore.GREEN + f"[Suggest Apply] Auto-queueing AI completion: {_last_completion}" + Style.RESET_ALL)
+                    input_queue.append(_last_completion)
+                    _last_completion = None
+                    continue
+                    
                 _arch = sum(
                     1 for r in memory.records
                     if r.scope == memory.scope and r.kind == "turn" and r.role == "assistant"
@@ -6432,9 +6442,39 @@ def main():
                         print(Fore.CYAN + "[Suggest] Showing command help via :help." + Style.RESET_ALL)
                         continue
                     if sargs[1].startswith(":"):
-                        cmd_name = sargs[1]
-                        input_queue.insert(0, f":help {cmd_name}")
-                        print(Fore.CYAN + f"[Suggest] Showing command help via :help {cmd_name}." + Style.RESET_ALL)
+                        prefix_cmd = user_input[len(":suggest"):].strip()
+                        active_probes = ", ".join(probes.keys()) if probes else "None"
+                        active_steers = ", ".join(k for k in tuner.triggers.keys() if k.startswith("steer_") or "_alpha" in k)
+                        prompt = (
+                            f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
+                            f"You are a command autocomplete assistant for an interactive agent shell.\n"
+                            f"The user has started typing a command: '{prefix_cmd}'\n"
+                            f"Currently active probes: {active_probes}\n"
+                            f"Active steers: {active_steers}\n"
+                            f"Please provide exactly ONE valid completion for this command based on the available shell capabilities. "
+                            f"Output only the full completed command string (starting with '{prefix_cmd}'), and nothing else.<|eot_id|>"
+                            f"<|start_header_id|>assistant<|end_header_id|>\n\n"
+                        )
+                        print(Fore.CYAN + f"[Suggest] Asking model to complete '{prefix_cmd}'..." + Style.RESET_ALL)
+                        completion = generate_agentic_text(
+                            model,
+                            instruction=prompt,
+                            config=config,
+                            pre_formatted=True,
+                            max_new_tokens=40,
+                            chatty_log=False
+                        )
+                        completion = (completion or "").strip()
+                        if completion.startswith(prefix_cmd):
+                            print(Fore.GREEN + f"[Suggest] Auto-completion:\n  {completion}" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  -> Press UP and copy it, or run: :suggest apply" + Style.RESET_ALL)
+                            # We can stash this completion so `:suggest apply` could pick it up, 
+                            # but for now we just print it. If they run `:suggest apply` it won't 
+                            # run this specifically unless we save it.
+                            # We'll save it to a global/local variable `_last_completion`
+                            _last_completion = completion
+                        else:
+                            print(Fore.YELLOW + f"[Suggest] Model failed to complete the command (returned: {completion})" + Style.RESET_ALL)
                         continue
                         
                     target_probe = re.sub(r"[^a-z0-9_]", "_", sargs[1].lower())[:40]
