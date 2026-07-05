@@ -4751,7 +4751,9 @@ def main():
                     elif q in macro_aliases:
                         # Generate dynamic help for macros
                         mpath = macro_aliases[q]
-                        print(Fore.CYAN + f":{q} -- Macro aliased to {mpath}" + Style.RESET_ALL)
+                        exists = os.path.isfile(mpath)
+                        status = "" if exists else " (FILE MISSING)"
+                        print(Fore.CYAN + f":{q} -- Macro aliased to {mpath}{status}" + Style.RESET_ALL)
                         
                         # Check if it's a solve-macro with a known goal
                         for _n, _d, _a in list_solve_macros():
@@ -4761,7 +4763,7 @@ def main():
                                 break
                                 
                         # Show the first few lines of the macro
-                        if os.path.isfile(mpath):
+                        if exists:
                             print(Fore.CYAN + "  Contents:" + Style.RESET_ALL)
                             try:
                                 with open(mpath, "r", encoding="utf-8") as rf:
@@ -4773,6 +4775,8 @@ def main():
                                         print(Fore.CYAN + f"    ... and {len(cmds) - 5} more." + Style.RESET_ALL)
                             except Exception as e:
                                 print(Fore.RED + f"    (Could not read macro file: {e})" + Style.RESET_ALL)
+                        else:
+                            print(Fore.RED + f"  (The file {mpath} does not exist or was deleted!)" + Style.RESET_ALL)
                     else:
                         print(Fore.YELLOW + f"[Help] No help entry for '{q}'.{did_you_mean(q, BUILTIN_COMMANDS | set(macro_aliases))}" + Style.RESET_ALL)
                     continue
