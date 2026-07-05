@@ -1183,7 +1183,39 @@ def build_probe_init_macro(probes):
     probe re-composes its recipe. Exposed probes get a trailing :probe expose.
     Reconstructs the sensors from text -- no binary weights needed to share."""
     lines = ["# Regenerates this session's probes. Replay with :run self (or its alias)."]
-    for name in sorted(probes):
+    
+    deps = {}
+    for name in probes:
+        deps[name] = set()
+        fr = probes[name].get("framings") or ("", "")
+        a = fr[0] if len(fr) > 0 else ""
+        if a.startswith("composed:"):
+            recipe = a.split(":", 1)[1].strip()
+            terms, _ = parse_compose_expr(recipe)
+            for _, tname in terms:
+                if tname in probes:
+                    deps[name].add(tname)
+                    
+    sorted_probes = []
+    visited = set()
+    temp_mark = set()
+    
+    def visit(n):
+        if n in temp_mark:
+            return
+        if n not in visited:
+            temp_mark.add(n)
+            for m in sorted(deps.get(n, set())):
+                visit(m)
+            temp_mark.remove(n)
+            visited.add(n)
+            sorted_probes.append(n)
+            
+    for name in sorted(probes.keys()):
+        if name not in visited:
+            visit(name)
+            
+    for name in sorted_probes:
         fr = probes[name].get("framings") or ("", "")
         a = fr[0] if len(fr) > 0 else ""
         b = fr[1] if len(fr) > 1 else ""
@@ -6161,17 +6193,23 @@ def main():
                     + Style.RESET_ALL
                 )
                 continue
-            if user_input.strip().lower() == ":suggest apply":
+            if user_input.strip().lower() == ":suggest apply" or user_input.strip().lower().startswith(":suggest apply "):
                 _arch = sum(
                     1 for r in memory.records
                     if r.scope == memory.scope and r.kind == "turn" and r.role == "assistant"
                 )
                 sugg = suggest_actions(tuner, list(turn_log), probes=probes, archive_size=_arch)
                 safe = [(cat, line, cmd) for cat, line, cmd in sugg if cat in SUGGEST_APPLY_SAFE]
+                
+                # Forward the because clause to the queued commands
+                apply_because = None
+                if command_because:
+                    apply_because = f" because {command_because}"
+                    
                 if not safe:
                     print(Fore.CYAN + "[Suggest Apply] nothing safe to auto-run (explore/expose stay manual)." + Style.RESET_ALL)
                 else:
-                    cmds = [cmd for _, _, cmd in safe]
+                    cmds = [cmd + (apply_because if apply_because else "") for _, _, cmd in safe]
                     input_queue.extend(cmds)
                     print(Fore.GREEN + f"[Suggest Apply] Auto-queued {len(cmds)} measurement/calibration action(s)." + Style.RESET_ALL)
                 continue
