@@ -266,14 +266,20 @@ def load_model(name: str = "meta-llama/Llama-3.1-8B-Instruct", local_files_only:
 
 # --- model interaction ----------------------------------------------------
 
-def _inputs(M: HF, instruction: str, pre_formatted: bool = False):
+def _inputs(M: HF, instruction: str, pre_formatted: bool = False, system_prompt: str = None):
     # pre_formatted: the caller already built the exact native prompt string
     # (bare mode -- no injected system/date preamble). Tokenize it raw so nothing
     # is added around it. Otherwise wrap the instruction in one native user turn.
     if pre_formatted:
         return M.tok(instruction, return_tensors="pt", add_special_tokens=False).to(M.device)
+    
+    messages = []
+    if system_prompt is not None:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": instruction})
+    
     return M.tok.apply_chat_template(
-        [{"role": "user", "content": instruction}],
+        messages,
         add_generation_prompt=True, return_tensors="pt", return_dict=True,
     ).to(M.device)
 

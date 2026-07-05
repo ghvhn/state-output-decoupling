@@ -3395,7 +3395,8 @@ def main():
                     for attempt in range(3):
                         raw = generate_agentic_text(
                             model, instruction=prompt, config=config,
-                            max_new_tokens=200, chatty_log=False, pre_formatted=False
+                            max_new_tokens=200, chatty_log=False, pre_formatted=False,
+                            system_prompt=""
                         )
                         lines = [ln.strip() for ln in (raw or "").splitlines() if ln.strip().startswith(":")]
                         if not lines:
@@ -3458,7 +3459,8 @@ def main():
                     )
                     nm = generate_agentic_text(
                         model, instruction=prompt, config=config,
-                        max_new_tokens=20, chatty_log=False, pre_formatted=False
+                        max_new_tokens=20, chatty_log=False, pre_formatted=False,
+                        system_prompt=""
                     )
                     alias = (nm or "").strip()
                     if alias in macro_aliases:
@@ -3487,7 +3489,8 @@ def main():
                             config=config,
                             max_new_tokens=10,
                             chatty_log=False,
-                            pre_formatted=False
+                            pre_formatted=False,
+                            system_prompt=""
                         )
                         alias = re.sub(r'[^a-z0-9]', '', (nm or "agent").lower())[:20]
                         if not alias: alias = "agent"

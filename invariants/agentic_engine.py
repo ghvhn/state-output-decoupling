@@ -819,6 +819,7 @@ def generate_agentic_text(
     pre_formatted=False,
     mid_chunk_hook=None,
     return_telemetry=False,
+    system_prompt=None,
     **legacy_overrides,
 ):
     from invariants.config import AgenticConfig
@@ -853,7 +854,7 @@ def generate_agentic_text(
     else:
         original_chatty_log = config.chatty_log
 
-    inputs = _inputs(M, instruction, pre_formatted=pre_formatted)
+    inputs = _inputs(M, instruction, pre_formatted=pre_formatted, system_prompt=system_prompt)
     original_plen = inputs["input_ids"].shape[1]
     
     # We still allow max_new_tokens override here because it's per-generation
