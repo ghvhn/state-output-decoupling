@@ -5818,7 +5818,26 @@ def main():
                     print(Fore.CYAN + f"[Probe] {ename_resolved} -- in the model's words:\n{(expl or '').strip()}" + Style.RESET_ALL)
                     continue
                 if pargs.lower().startswith("chatty "):
-                    chatty_name_raw = pargs[7:].strip()
+                    chatty_name_raw = pargs[7:].strip().lower()
+                    
+                    if chatty_name_raw.startswith("all"):
+                        parts = chatty_name_raw.split()
+                        set_to = None
+                        if len(parts) > 1:
+                            if parts[1] == "on": set_to = True
+                            elif parts[1] == "off": set_to = False
+                        
+                        count = 0
+                        for pname in probes:
+                            current = probes[pname].get("chatty", True)
+                            new_val = set_to if set_to is not None else not current
+                            probes[pname]["chatty"] = new_val
+                            count += 1
+                            
+                        state_str = "toggled" if set_to is None else ("ON" if set_to else "OFF")
+                        print(Fore.CYAN + f"[Probe] {count} active probe(s) console print set to {state_str}." + Style.RESET_ALL)
+                        continue
+                        
                     chatty_name = resolve_probe_choice(chatty_name_raw, probes, model=model, config=config, action_name="chatty")
                     if not chatty_name:
                         continue
