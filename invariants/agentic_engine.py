@@ -892,6 +892,7 @@ def generate_agentic_text(
             TimeStoppingCriteria,
             ToolStoppingCriteria,
             VerifierStoppingCriteria,
+            MemoryStoppingCriteria,
             iter_tool_calls,
             evaluate_python_expression,
         )
