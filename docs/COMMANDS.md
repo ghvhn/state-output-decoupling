@@ -41,7 +41,7 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:expose <probe|knob> [off]` -- without leading ':', expose a probe sensor or tuner knob to the model's <<PROBE: name>> tool
 - `:hide <command> [off]` -- hide a command from model-facing help, suggestions, exposed-command discovery, and <<CMD>> hints; also unexposes it. Operator help and execution still work
 - `:impact` -- consequence trail: what its words caused, and whether experienced impact tracks better deliberation
-- `:clock` -- last turn's generation time + tok/s and memory (VRAM on GPU, process RAM on CPU-only); sensed every turn as generation_seconds / vram_gb streams
+- `:clock` -- last turn's generation time + tok/s and memory; VRAM on GPU, process RAM on CPU-only, both sensed every turn as generation_seconds / vram_gb streams
 - `:prioritize` -- rank probes by evidence-weighted lift; steer toward the top each turn via prioritize_alpha -- signed by lift, off at 0
 - `:release <tool> [prob]` -- decouple a tool's firing from its signal for that fraction of turns -- separates causality so credit lift can be trusted
 - `:listen on|off|status` -- speak mid-reply: lines you type while it generates are ingested at the next chunk seam and appended to the live stream -- the model chooses to redirect or fold in; never dropped
@@ -49,7 +49,7 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:save self <name> | choose` -- alias for :macro name self; 'choose' asks the model to generate a name based on the current tuning state
 - `:spawn <name> join|replace|drop` -- multi-agent support. 'join' adds to the panel, 'replace [N]' takes the operator slot for N turns. Use @<name> :cmd to target a specific agent's tuning state
 - `:run <alias|file>` -- queue and execute a macro's commands
-- `:solve <name> [args --] <goal>` -- model writes a parameterized macro for an ad-hoc command; it is PROPOSED, then :accept adopts it (or :reject drops it); after that :<name> <args> runs it, filling $1..$9 / $@. Named args fill $name; optional/default specs are name?, [name], name=default, or [name=default]. All non-hidden commands are available; context staged with :memory use is folded into the request
+- `:solve <name> [args :] <goal>` -- model writes a parameterized macro for an ad-hoc command; it is PROPOSED, then :accept adopts it (or :reject drops it); after that :<name> <args> runs it, filling $1..$9 / $@. Named args fill $name; optional/default specs are name?, [name], name=default, or [name=default]. All non-hidden commands are available; context staged with :memory use is folded into the request
 - `:<macro-name> <args>` -- run any aliased macro directly, args -> $1..$9
 - `<any :command> because <reason>` -- logs why you issued it as provenance
 - `:memory use probe <name> | :memory choice probe <name>` -- stage the memories where probe <name> reads furthest from 0

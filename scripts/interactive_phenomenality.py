@@ -1867,7 +1867,7 @@ COMMAND_HELP_LINES = [
     "                the panel, 'replace [N]' takes the operator slot for N turns.",
     "                Use @<name> :cmd to target a specific agent's tuning state)",
     "          :run <alias|file>            (queue and execute a macro's commands)",
-    "          :solve <name> [args --] <goal>  (model writes a parameterized macro for an",
+    "          :solve <name> [args :] <goal>  (model writes a parameterized macro for an",
     "                ad-hoc command; it is PROPOSED, then :accept adopts it (or :reject",
     "                drops it); after that :<name> <args> runs it, filling $1..$9 / $@.",
     "                Named args fill $name; optional/default specs are name?, [name],",
