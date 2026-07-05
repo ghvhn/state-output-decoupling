@@ -17,6 +17,95 @@ if ROOT not in sys.path:
 
 ORGANIC_VECTOR_PATH = os.path.join(ROOT, "invariants", "organic_correction_vector.pt")
 
+
+# --- clock memory sensor: GPU or CPU ---------------------------------------
+# The clock stream ("how much memory did this turn cost?") reads VRAM on a
+# CUDA box. On a CPU-only box there is no VRAM, so rather than let the stream
+# flatline at zero -- which strips the sensor from CPU-only runs -- we read the
+# process's resident-set size (RSS). Same feature, same calibratable stream,
+# just sourced from system RAM. No hard dependency: psutil if present, else the
+# OS's own accounting, else a graceful zero.
+_CPU_PEAK_BASELINE = {"gb": 0.0}
+
+
+def _cpu_rss_gb():
+    """Current resident-set size of this process, in GB. Cross-platform, best
+    effort: returns 0.0 only if no accounting path is available."""
+    _gb = 1024 ** 3
+    try:
+        import psutil  # optional; used if the user happens to have it
+        return psutil.Process().memory_info().rss / _gb
+    except Exception:
+        pass
+    try:  # Linux/most Unix: resident pages from /proc/self/statm
+        with open("/proc/self/statm") as fh:
+            resident_pages = int(fh.read().split()[1])
+        return resident_pages * os.sysconf("SC_PAGE_SIZE") / _gb
+    except Exception:
+        pass
+    try:  # Windows: WorkingSetSize via GetProcessMemoryInfo
+        import ctypes
+        from ctypes import wintypes
+
+        class _PMC(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        counters = _PMC()
+        counters.cb = ctypes.sizeof(counters)
+        handle = ctypes.windll.kernel32.GetCurrentProcess()
+        if ctypes.windll.psapi.GetProcessMemoryInfo(
+            handle, ctypes.byref(counters), counters.cb
+        ):
+            return counters.WorkingSetSize / _gb
+    except Exception:
+        pass
+    try:  # last resort: peak RSS from resource (KB on Linux, bytes on macOS)
+        import resource
+        maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return (maxrss if sys.platform == "darwin" else maxrss * 1024) / _gb
+    except Exception:
+        return 0.0
+
+
+def _reset_memory_peak():
+    """Open a fresh peak-memory window for this turn's clock reading."""
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
+    else:
+        _CPU_PEAK_BASELINE["gb"] = _cpu_rss_gb()
+
+
+def _memory_footprint_gb():
+    """(live, reserved, peak, label) memory footprint for the clock sensor.
+
+    CUDA present -> VRAM allocated / reserved / peak. CPU-only -> process RSS
+    (live == reserved), with peak the high-water mark since the last window
+    opened by :reset_memory_peak. Keeps the memory-cost stream meaningful on
+    CPU instead of a constant zero, so CPU-only runs sense footprint the same
+    way GPU runs do."""
+    _gb = 1024 ** 3
+    if torch.cuda.is_available():
+        return (
+            torch.cuda.memory_allocated() / _gb,
+            torch.cuda.memory_reserved() / _gb,
+            torch.cuda.max_memory_allocated() / _gb,
+            "VRAM",
+        )
+    rss = _cpu_rss_gb()
+    peak = max(rss, _CPU_PEAK_BASELINE["gb"])
+    return (rss, rss, peak, "RAM")
+
 from invariants.engine import load_model
 from invariants.agentic_engine import generate_agentic_text, _global_cache
 from invariants.config import AgenticConfig
@@ -1709,8 +1798,9 @@ COMMAND_HELP_LINES = [
     "                unexposes it. Operator help and execution still work)",
     "          :impact                      (consequence trail: what its words caused,",
     "                and whether experienced impact tracks better deliberation)",
-    "          :clock                       (last turn's generation time + tok/s and VRAM;",
-    "                sensed every turn as generation_seconds / vram_gb streams)",
+    "          :clock                       (last turn's generation time + tok/s and memory;",
+    "                VRAM on GPU, process RAM on CPU-only, both sensed every turn",
+    "                as generation_seconds / vram_gb streams)",
     "          :prioritize                  (rank probes by evidence-weighted lift; steer toward",
     "                the top each turn via prioritize_alpha -- signed by lift, off at 0)",
     "          :release <tool> [prob]       (decouple a tool's firing from its signal for that",
@@ -2372,10 +2462,12 @@ def main():
     # steer that injects the retrieval is OFF by default (opt-in, capped).
     tuner.register("memory_need", 0.05, kind="threshold", comparator=">=")
     tuner.register("memory_alpha", 0.0, kind="coefficient")
-    # Clock sensor: this turn's generation wall-time and VRAM footprint,
+    # Clock sensor: this turn's generation wall-time and memory footprint,
     # observed every turn like any other stream (so they can be anchored:
-    # "did slow / memory-heavy turns cohere worse?"). Threshold-kind with a
-    # 0 bar until you calibrate one; observation-only, never a knob you set.
+    # "did slow / memory-heavy turns cohere worse?"). vram_gb carries VRAM on a
+    # CUDA box and process RSS on CPU-only, so CPU runs keep the same stream.
+    # Threshold-kind with a 0 bar until you calibrate one; observation-only,
+    # never a knob you set.
     tuner.register("generation_seconds", 0.0, kind="threshold", comparator=">=")
     tuner.register("vram_gb", 0.0, kind="threshold", comparator=">=")
     # The steering envelope itself is a live surface: every additive push is
@@ -4365,23 +4457,23 @@ def main():
                     print(Fore.CYAN + f"  because it {event['cause']} -> {event['effect']}" + Style.RESET_ALL)
                 continue
             if user_input.startswith(":clock"):
-                # On-demand readout of the last turn's generation time + VRAM,
+                # On-demand readout of the last turn's generation time + memory,
                 # plus the current live/reserved footprint and the accrued
-                # distributions of both sensed streams.
-                if torch.cuda.is_available():
-                    _gb = 1024 ** 3
-                    now_alloc = torch.cuda.memory_allocated() / _gb
-                    now_reserved = torch.cuda.memory_reserved() / _gb
-                    print(Fore.CYAN + f"[Clock] VRAM now: {now_alloc:.2f}GB live / {now_reserved:.2f}GB reserved." + Style.RESET_ALL)
+                # distributions of both sensed streams. Memory is VRAM on a CUDA
+                # box and process RAM on CPU-only, so this reads out either way.
+                now_alloc, now_reserved, _now_peak, _now_label = _memory_footprint_gb()
+                if now_reserved > 0:
+                    _src = "VRAM" if _now_label == "VRAM" else "RAM (CPU-only; no CUDA)"
+                    print(Fore.CYAN + f"[Clock] {_src} now: {now_alloc:.2f}GB live / {now_reserved:.2f}GB reserved." + Style.RESET_ALL)
                 else:
-                    print(Fore.CYAN + "[Clock] CUDA not available; VRAM readings are 0." + Style.RESET_ALL)
+                    print(Fore.CYAN + "[Clock] memory readings unavailable on this platform." + Style.RESET_ALL)
                 if last_clock:
                     lc = last_clock
                     print(
                         Fore.CYAN
                         + f"[Clock] last turn ({lc['ts']}): {lc['generation_seconds']:.1f}s"
                         + (f", {lc['tokens_generated']} tok @ {lc['tokens_per_sec']:.1f} tok/s" if lc['tokens_per_sec'] else "")
-                        + f", peak {lc['vram_peak_gb']:.2f}GB."
+                        + f", peak {lc['vram_peak_gb']:.2f}GB {lc.get('mem_label', 'VRAM')}."
                         + Style.RESET_ALL
                     )
                 else:
@@ -6781,12 +6873,12 @@ def main():
                         )
             # Clock start: wall-time for THIS turn's generation (all
             # regenerations included), snapshotted before probe-scoring so the
-            # reading reflects generation, not instrumentation. Peak VRAM is
-            # reset here so max_memory_allocated captures this turn's spike.
+            # reading reflects generation, not instrumentation. The peak-memory
+            # window is reset here so it captures this turn's spike (VRAM on
+            # CUDA, process RSS on CPU-only).
             import time as _time
             _gen_t0 = _time.perf_counter()
-            if torch.cuda.is_available():
-                torch.cuda.reset_peak_memory_stats()
+            _reset_memory_peak()
             try:
                 response, telemetry = generate_agentic_text(
                     model,
@@ -7505,16 +7597,11 @@ def main():
                 }
                 turn_row["sense"] = float(turn_sense)
             # Clock sensor: measured here, before the probe-scoring passes, so
-            # generation_seconds is generation time only. VRAM in GB (live
-            # allocation, total reserved footprint, and this turn's peak).
+            # generation_seconds is generation time only. Memory in GB (live
+            # allocation, total reserved footprint, and this turn's peak) --
+            # VRAM on CUDA, process RSS on CPU-only, so the stream is never dead.
             gen_seconds = _time.perf_counter() - _gen_t0
-            if torch.cuda.is_available():
-                _gb = 1024 ** 3
-                vram_alloc = torch.cuda.memory_allocated() / _gb
-                vram_reserved = torch.cuda.memory_reserved() / _gb
-                vram_peak = torch.cuda.max_memory_allocated() / _gb
-            else:
-                vram_alloc = vram_reserved = vram_peak = 0.0
+            vram_alloc, vram_reserved, vram_peak, mem_label = _memory_footprint_gb()
             tps = (tokens_generated / gen_seconds) if (gen_seconds > 0 and tokens_generated) else 0.0
             tuner.observe("generation_seconds", gen_seconds)
             tuner.observe("vram_gb", vram_reserved)
@@ -7531,13 +7618,14 @@ def main():
                 "vram_alloc_gb": vram_alloc,
                 "vram_reserved_gb": vram_reserved,
                 "vram_peak_gb": vram_peak,
+                "mem_label": mem_label,
                 "ts": datetime.datetime.now().strftime("%H:%M:%S"),
             }
             print(
                 Fore.CYAN
                 + f"  [Clock] {gen_seconds:.1f}s"
                 + (f" | {tps:.1f} tok/s" if tps else "")
-                + f" | VRAM {vram_alloc:.2f}GB live / {vram_reserved:.2f}GB reserved"
+                + (f" | {mem_label} {vram_alloc:.2f}GB live / {vram_reserved:.2f}GB reserved" if vram_reserved else "")
                 + (f" / {vram_peak:.2f}GB peak" if vram_peak else "")
                 + Style.RESET_ALL,
                 flush=True,
