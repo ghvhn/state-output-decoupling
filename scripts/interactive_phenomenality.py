@@ -3888,6 +3888,11 @@ def main():
                     )
                     pending_memory_tool_result = None
                     print(Fore.CYAN + "[Solve] Folding in the memory you staged with :memory use." + Style.RESET_ALL)
+                    
+                because_ctx = ""
+                if command_because:
+                    because_ctx = f"The operator provided the following underlying reason/rationale for this macro:\n{command_because}\nMake sure your generated macro commands strongly reflect this rationale.\n\n"
+                    print(Fore.CYAN + "[Solve] Passing your 'because' rationale to the model." + Style.RESET_ALL)
 
                 prompt = (
                     "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
@@ -3900,6 +3905,7 @@ def main():
                     "unless a parameter is explicitly restricted from doing so.\n\n"
                     f"{macro_hints_str}"
                     f"{staged_ctx}"
+                    f"{because_ctx}"
                     f"Write a macro named '{sname}' that does: {goal}\n"
                     "Output ONLY the command lines, nothing else.<|eot_id|>"
                     "<|start_header_id|>assistant<|end_header_id|>\n\n"
