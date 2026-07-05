@@ -107,7 +107,42 @@ def _memory_footprint_gb():
     return (rss, rss, peak, "RAM")
 
 from invariants.engine import load_model
-from invariants.agentic_engine import generate_agentic_text, _global_cache
+from invariants.agentic_engine import generate_agentic_text as _engine_generate, _global_cache
+
+_ACTIVE_PROBES = None
+_ACTIVE_MODEL = None
+_ACTIVE_TUNER = None
+_PROBES_ON_ALL_ACTIONS = False
+
+def score_probes_on_text(model, text, probes, tuner, turn_row=None, turn_sense=None, label_prefix="Probe Score"):
+    if not probes or not text:
+        return
+    from colorama import Fore, Style
+    from invariants.engine import _inputs as _p_inputs, _hidden_states as _p_hidden, probe_score
+    p_ids = _p_inputs(model, text[:600])
+    p_hs = _p_hidden(model, p_ids["input_ids"], p_ids.get("attention_mask"))
+    for pname, pdata in probes.items():
+        raw = probe_score(p_hs, pdata["direction"])
+        hist = pdata["history"]
+        sig = raw - (sum(hist) / len(hist)) if hist else 0.0
+        hist.append(raw)
+        tuner.observe(f"probe_{pname}", sig)
+        if turn_row is not None:
+            turn_row[f"probe_{pname}"] = float(sig)
+        if pdata.get("chatty", True):
+            print(Fore.CYAN + f"  [{label_prefix}] {pname}: {sig:+.3f}" + Style.RESET_ALL, flush=True)
+        if turn_sense is not None:
+            tuner.credit(f"probe_{pname}", sig, turn_sense)
+
+def generate_agentic_text(*args, **kwargs):
+    res = _engine_generate(*args, **kwargs)
+    if _PROBES_ON_ALL_ACTIONS and _ACTIVE_PROBES and _ACTIVE_MODEL and _ACTIVE_TUNER:
+        # Don't double-print for the main chatty loop which handles it manually
+        if not kwargs.get("chatty_log", False):
+            text = res[0] if isinstance(res, tuple) else res
+            if text and isinstance(text, str):
+                score_probes_on_text(_ACTIVE_MODEL, text, _ACTIVE_PROBES, _ACTIVE_TUNER, label_prefix="Bg Probe")
+    return res
 from invariants.config import AgenticConfig
 from invariants.cognitive_cache import CACHE_FILE, model_cache_file, DEFAULT_MODEL
 from invariants.claimmap import (
@@ -1788,7 +1823,7 @@ KNOWN_COMMANDS = (
 # macro alias runs directly as ':<alias> args'.
 BUILTIN_COMMANDS = {c[1:] for c in KNOWN_COMMANDS} | {
     "macro", "run", "game", "solve", "refresh", "place", "consider",
-    "exit", "quit", "timestamps", "listen", "history", "accept", "reject", "help", "expose", "hide",
+    "exit", "quit", "timestamps", "bgprobes", "listen", "history", "accept", "reject", "help", "expose", "hide",
 }
 
 # Single source of truth for the command reference: the shell prints these lines
@@ -2908,6 +2943,10 @@ def main():
     recent_responses = deque(maxlen=4)  # reflection stream for reply-mode thread returns
     prev_unsettledness = None  # ambiguity+disagreement of the previous turn (intent axis)
     probes = {}  # name -> {direction, history, framings}; minted concept sensors (unvalidated until outcomes accrue)
+    global _ACTIVE_PROBES, _ACTIVE_MODEL, _ACTIVE_TUNER
+    _ACTIVE_PROBES = probes
+    _ACTIVE_MODEL = model
+    _ACTIVE_TUNER = tuner
     PROBE_DIR = os.path.join(ROOT, "invariants", "out", "probes")
     try:
         if os.path.isdir(PROBE_DIR):
@@ -4130,6 +4169,18 @@ def main():
                     print(Fore.GREEN + "[System] Timestamps disabled." + Style.RESET_ALL)
                 else:
                     print(Fore.YELLOW + f"[System] Timestamps are currently {'on' if show_timestamps else 'off'}." + Style.RESET_ALL)
+                continue
+            if user_input.startswith(":bgprobes"):
+                parts = user_input.split()
+                global _PROBES_ON_ALL_ACTIONS
+                if len(parts) > 1 and parts[1] == "on":
+                    _PROBES_ON_ALL_ACTIONS = True
+                    print(Fore.GREEN + "[System] Background probe scoring enabled." + Style.RESET_ALL)
+                elif len(parts) > 1 and parts[1] == "off":
+                    _PROBES_ON_ALL_ACTIONS = False
+                    print(Fore.GREEN + "[System] Background probe scoring disabled." + Style.RESET_ALL)
+                else:
+                    print(Fore.YELLOW + f"[System] Background probe scoring is currently {'on' if _PROBES_ON_ALL_ACTIONS else 'off'}." + Style.RESET_ALL)
                 continue
             if user_input.startswith(":listen"):
                 arg = user_input[len(":listen"):].strip().lower()
