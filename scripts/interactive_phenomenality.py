@@ -2329,7 +2329,7 @@ def get_hardware_appropriate_model():
     if vram >= 16.0:
         return DEFAULT_MODEL
     elif vram >= 8.0:
-        return "meta-llama/Llama-3.2-3B-Instruct"
+        return "Qwen/Qwen2.5-3B-Instruct"
     else:
         return "Qwen/Qwen2.5-1.5B-Instruct"
 
