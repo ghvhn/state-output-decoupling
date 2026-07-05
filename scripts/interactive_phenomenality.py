@@ -5528,6 +5528,12 @@ def main():
                         continue
                     # otherwise margs[1] is the knob to match to
                     knob = margs[1]
+                    if knob.upper() in ("CHOICE", "CHOOSE", "AUTO"):
+                        valid_knobs = list(knobs) + ["steer_cap_fraction", "steer_band"]
+                        resolved_knob = resolve_probe_choice(knob, valid_knobs, model=model, config=config, action_name="match_target")
+                        if not resolved_knob:
+                            continue
+                        knob = resolved_knob
                     if knob not in knobs and f"probe_{knob}" not in tuner.triggers and knob not in ("steer_cap_fraction", "steer_band"):
                         print(Fore.YELLOW + f"[Match] '{knob}' isn't a known knob.{did_you_mean(knob, knobs)}" + Style.RESET_ALL)
                         continue
