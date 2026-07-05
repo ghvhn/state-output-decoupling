@@ -3395,7 +3395,11 @@ def main():
                         print(Fore.YELLOW + f"[System] Model selected invalid macro '{alias}'. Aborting." + Style.RESET_ALL)
                         continue
                 else:
-                    user_input = f":{sargs[0]}"
+                    target_alias = sargs[0]
+                    if target_alias not in macro_aliases and target_alias not in BUILTIN_COMMANDS:
+                        print(Fore.YELLOW + f"[System] No persona/macro named '{target_alias}' found." + Style.RESET_ALL)
+                        continue
+                    user_input = f":{target_alias}"
 
             if user_input.startswith(":save self"):
                 # Alias for :macro name self <name>
