@@ -41,7 +41,7 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:expose <probe|knob> [off]` -- without leading ':', expose a probe sensor or tuner knob to the model's <<PROBE: name>> tool
 - `:hide <command> [off]` -- hide a command from model-facing help, suggestions, exposed-command discovery, and <<CMD>> hints; also unexposes it. Operator help and execution still work
 - `:impact` -- consequence trail: what its words caused, and whether experienced impact tracks better deliberation
-- `:clock` -- last turn's generation time + tok/s and VRAM; sensed every turn as generation_seconds / vram_gb streams
+- `:clock` -- last turn's generation time + tok/s and memory (VRAM on GPU, process RAM on CPU-only); sensed every turn as generation_seconds / vram_gb streams
 - `:prioritize` -- rank probes by evidence-weighted lift; steer toward the top each turn via prioritize_alpha -- signed by lift, off at 0
 - `:release <tool> [prob]` -- decouple a tool's firing from its signal for that fraction of turns -- separates causality so credit lift can be trusted
 - `:listen on|off|status` -- speak mid-reply: lines you type while it generates are ingested at the next chunk seam and appended to the live stream -- the model chooses to redirect or fold in; never dropped
