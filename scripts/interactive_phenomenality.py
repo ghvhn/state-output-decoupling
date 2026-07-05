@@ -2326,7 +2326,7 @@ def get_hardware_appropriate_model():
     except Exception:
         return DEFAULT_MODEL
     
-    if vram >= 16.0:
+    if vram >= 14.5:
         return DEFAULT_MODEL
     elif vram >= 8.0:
         return "Qwen/Qwen2.5-3B-Instruct"
