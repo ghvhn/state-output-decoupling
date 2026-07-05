@@ -3237,6 +3237,24 @@ def main():
                 print(Fore.MAGENTA + Style.BRIGHT + f"\n[{_last_replace_name} replacing You]: " + Style.RESET_ALL + user_input)
             else:
                 _last_replace_name = None
+                if getattr(config, "auto_probe_readings", False) and _sys_probes:
+                    recent = []
+                    for row in reversed(list(turn_log)):
+                        v = {}
+                        for p in _sys_probes:
+                            if f"probe_{p}" in row:
+                                try:
+                                    v[p] = float(row[f"probe_{p}"])
+                                except (TypeError, ValueError):
+                                    pass
+                        if v:
+                            recent.append(v)
+                            break
+                    if recent:
+                        print(Fore.CYAN + "[Auto Probe Readings]" + Style.RESET_ALL)
+                        for pname, val in recent[0].items():
+                            print(Fore.CYAN + f"  {pname}: {val:+.3f}" + Style.RESET_ALL)
+                            
                 prefix = f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] You: " if show_timestamps else "\nYou: "
                 prompt_str = Fore.MAGENTA + Style.BRIGHT + prefix + Style.RESET_ALL
                 # Once the listener is active, every turn is served from its
@@ -5437,6 +5455,20 @@ def main():
                         exposed_note = ", exposed to the model" if pdata.get("exposed") else ""
                         print(Fore.CYAN + f"[Probe] {pname}: {len(pdata['direction'])} layers, {n_pairs} paired turns{exposed_note}." + Style.RESET_ALL)
                     continue
+                if pargs.lower().startswith("auto"):
+                    vparts = pargs.split()
+                    if len(vparts) > 1:
+                        state = vparts[1].lower()
+                        if state == "on":
+                            config.auto_probe_readings = True
+                            print(Fore.CYAN + "[Probe] Auto-readings enabled. Will print values before every input prompt." + Style.RESET_ALL)
+                        else:
+                            config.auto_probe_readings = False
+                            print(Fore.CYAN + "[Probe] Auto-readings disabled." + Style.RESET_ALL)
+                    else:
+                        print(Fore.YELLOW + "[Probe] Usage: :probe auto [on|off]" + Style.RESET_ALL)
+                    continue
+
                 if pargs.lower() in ("values", "value", "recent", "last") or pargs.lower().startswith(("values ", "value ", "recent ", "last ")):
                     vparts = pargs.split()
                     rest = vparts[1:]
