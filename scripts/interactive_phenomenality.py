@@ -2092,7 +2092,8 @@ def load_stored_direction(model, stem, layers=None):
     layer; a saved probe payload ({direction, framings}) reuses its
     direction; a bare tensor broadcasts one direction across the band.
     `layers` (explicit indices) overrides the live band -- reading depth
-    need not follow steering depth. Returns ({}, None) when nothing usable
+    need not follow steering depth. Always returns a 3-tuple
+    (direction, src_name, exposed); ({}, None, False) when nothing usable
     exists."""
     want = set(int(x) for x in layers) if layers is not None else None
     src_path = next(
@@ -2144,7 +2145,7 @@ def load_stored_direction(model, stem, layers=None):
             for L in targets:
                 if 0 <= int(L) < n_layers:
                     direction[int(L)] = unit.clone()
-    return direction, os.path.basename(src_path)
+    return direction, os.path.basename(src_path), exposed
 
 
 def parse_compose_expr(expr):
