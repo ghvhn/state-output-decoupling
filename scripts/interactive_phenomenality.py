@@ -3376,12 +3376,17 @@ def main():
                         continue
                     alias = sargs[1]
                     print(Fore.CYAN + f"[System] Asking model to invent a '{alias}' persona..." + Style.RESET_ALL)
+                    existing_personas = ", ".join(sorted(macro_aliases.keys())) or "None"
+                    active_probes = ", ".join(sorted(probes.keys())) or "None"
+                    
                     prompt = (
                         f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                         f"The operator wants to create a cognitive persona named '{alias}'.\n"
                         f"Write a short shell macro (3 to 6 lines) using :probe commands to define this persona.\n"
-                        f"Use the syntax `:probe <concept_name> <framing with it> || <framing without it>`.\n"
-                        f"You can also use `:probe compose ...` if you want to combine concepts.\n"
+                        f"Existing personas you could invoke (by adding `:<name>`): {existing_personas}\n"
+                        f"Currently active probes you could compose: {active_probes}\n"
+                        f"Use the syntax `:probe <concept_name> <framing with it> || <framing without it>` to define new dimensions.\n"
+                        f"You can also use `:probe compose ...` to combine existing probes.\n"
                         f"Output ONLY the commands, one per line. Do not use markdown blocks.<|eot_id|>"
                         f"<|start_header_id|>assistant<|end_header_id|>\n\n"
                     )
