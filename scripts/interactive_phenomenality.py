@@ -3439,13 +3439,6 @@ def main():
                 for vname, vval in _shell_vars.items():
                     # Safely replace $vname if it's not part of a larger word
                     user_input = re.sub(r"\$" + re.escape(vname) + r"\b", lambda _m, v=vval: v, user_input)
-            
-            # If this turn came from a queue (macro file or inline chain) and starts with a known command word, auto-prefix it.
-            if reading_turn_source and not user_input.startswith(":"):
-                _first = user_input.split()[0].lower() if user_input.split() else ""
-                if _first in BUILTIN_COMMANDS or _first in macro_aliases:
-                    user_input = ":" + user_input
-
             if user_input.startswith(":") and ";" in user_input and not command_keeps_semicolons(user_input):
                 cmds = [c.strip() for c in user_input.split(";") if c.strip()]
                 if len(cmds) > 1:
@@ -3735,7 +3728,52 @@ def main():
                     except Exception as e:
                         print(Fore.RED + f"[Error] Could not restore macro: {e}" + Style.RESET_ALL)
                     continue
+                if sub == "install":
+                    if len(mtok) < 2:
+                        print(Fore.YELLOW + "[System] Usage: :macro install <alias> [file] [goal]" + Style.RESET_ALL)
+                        continue
+                    a_name = mtok[1].lower()
+                    
+                    if len(mtok) >= 3 and os.path.isfile(mtok[2]):
+                        src_file = mtok[2]
+                        goal_text = " ".join(mtok[3:]) if len(mtok) > 3 else "Manually installed macro."
+                        args_to_scan = mtok[3:]
+                    else:
+                        src_file = macro_aliases.get(a_name, mtok[2] if len(mtok) >= 3 else f"{a_name}.txt")
+                        goal_text = " ".join(mtok[2:]) if len(mtok) > 2 else "Manually installed macro."
+                        args_to_scan = mtok[2:]
 
+                    if not os.path.isfile(src_file):
+                        print(Fore.RED + f"[Error] File not found: {src_file}. Please provide the file path." + Style.RESET_ALL)
+                        continue
+                    if _hidden_overwrite_blocked(a_name, "System"):
+                        continue
+                    arg_names = []
+                    seen_args = set()
+                    for tok in args_to_scan:
+                        idx = tok.find("$")
+                        if idx >= 0:
+                            clean = tok[idx+1:].rstrip(".,;:\"'()!]")
+                            if clean and clean not in seen_args:
+                                arg_names.append(clean)
+                                seen_args.add(clean)
+                    dest = os.path.join(ROOT, "invariants", "out", "macros", f"{a_name}.txt")
+                    try:
+                        os.makedirs(os.path.dirname(dest), exist_ok=True)
+                        with open(src_file, "r", encoding="utf-8") as rf:
+                            content = rf.read().strip()
+                        with open(dest, "w", encoding="utf-8") as wf:
+                            wf.write(f"# :solve macro '{a_name}' -- {goal_text}\n")
+                            if arg_names:
+                                wf.write(f"# args: {', '.join(arg_names)}\n")
+                            if content:
+                                wf.write(content + "\n")
+                        macro_aliases[a_name] = dest
+                        _save_macro_aliases()
+                        print(Fore.GREEN + f"[System] Installed macro ':{a_name}' to {dest}. Run it with :{a_name} <args>." + Style.RESET_ALL)
+                    except Exception as e:
+                        print(Fore.RED + f"[Error] Could not install macro: {e}" + Style.RESET_ALL)
+                    continue
                 if sub == "name":
                     kind = mtok[1].lower() if len(mtok) >= 2 else ""
                     if kind == "self":
