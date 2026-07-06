@@ -3650,7 +3650,7 @@ def main():
                         "Respond ONLY with a series of lines starting with :probe, :tune, :steer, or :label to configure this persona. "
                         "You can use :probe to define custom cognitive probes, and :steer to prioritize them. "
                         "For example: ':probe creativity I invent new ideas || I repeat standard answers\\n:steer creativity 1.5\\n:tune response_tokens 128'. "
-                        "Output no other text."
+                        "Output no other text. Do not leave trailing colons or unfinished commands at the end."
                     )
                     g_prompt = load_prompt("spawn", default_spawn_prompt, a_name=a_name)
                     queue_macro_text(g_prompt, input_queue)
