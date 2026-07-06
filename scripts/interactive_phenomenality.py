@@ -3163,8 +3163,21 @@ def main():
         path = os.path.join(ROOT, "invariants", "out", "agents", _agent_slug(name), "trigger_tuner.json")
         agent_tuner = TriggerTuner(path=path)
         for _tn, _tr in tuner.triggers.items():
-            agent_tuner.register(_tn, _tr.value, kind=_tr.kind, comparator=_tr.comparator)
+            if _tn in agent_tuner.triggers:
+                continue
+            try:
+                agent_tuner.triggers[_tn] = type(_tr).from_dict(_tn, _tr.to_dict())
+            except Exception:
+                agent_tuner.register(_tn, _tr.value, kind=_tr.kind, comparator=_tr.comparator)
+        agent_tuner.save()
         return agent_tuner
+
+    SPAWN_FAKE_KNOBS = {
+        "embedding_size", "hidden_layers", "batch_size", "learning_rate",
+        "optimizer", "cpu_cycles_per_second", "accuracy", "precision",
+        "recall", "general_knowledge", "common_sense", "problem_solving",
+        "adaptability", "consistency", "memory_access",
+    }
 
     def _spawn_profile_runnable_lines(raw_lines, base_tuner):
         """Keep spawn profiles executable without imposing a workflow whitelist.
@@ -3174,12 +3187,7 @@ def main():
         queued items are future-runnable commands; semantics belong to the
         worker prompt and the real command handlers.
         """
-        forbidden_tunes = {
-            "embedding_size", "hidden_layers", "batch_size", "learning_rate",
-            "optimizer", "cpu_cycles_per_second", "accuracy", "precision",
-            "recall", "general_knowledge", "common_sense", "problem_solving",
-            "adaptability", "consistency", "memory_access",
-        }
+        forbidden_tunes = SPAWN_FAKE_KNOBS
         probe_subcommands = {
             "adopt", "compose", "expose", "backfill", "drop", "match", "define",
             "explain", "show", "hide", "values", "value", "recent", "last", "auto",
@@ -3349,6 +3357,88 @@ def main():
                 runnable.append(s)
 
         return runnable, skipped
+
+    def _spawn_state_report(agent_name, active_tuner=None, active_probes=None, *, max_macros=40):
+        """Compact hook map for spawn workers/agents: what exists and what has evidence."""
+        active_tuner = active_tuner or tuner
+        active_probes = active_probes if active_probes is not None else probes
+
+        def _vals(items, limit=8):
+            vals = sorted({round(float(x), 4) for x in items})
+            if len(vals) > limit:
+                return vals[:limit] + ["..."]
+            return vals
+
+        lines = [f"[Spawn State: {agent_name}]"]
+        lines.append("Known tunable hooks (exact names for :tune/:calibrate; value=current, history=what has been observed/tried):")
+        for name in sorted(n for n in active_tuner.triggers if not n.startswith("probe_") and n not in SPAWN_FAKE_KNOBS):
+            trig = active_tuner.triggers[name]
+            st = trig.stats()
+            tried = _vals((sig for sig, _out in trig.outcomes))
+            parts = [
+                f"- {name}: kind={st.get('kind')}",
+                f"value={st.get('value')}",
+                f"cmp={st.get('comparator')}",
+                f"signals={st.get('n_signals')}",
+            ]
+            if st.get("signal_med") is not None:
+                parts.append(f"signal_range={st.get('signal_min')}/{st.get('signal_med')}/{st.get('signal_max')}")
+            if st.get("n_credited"):
+                parts.append(f"credited={st.get('n_credited')}")
+                parts.append(f"lift={st.get('lift')}")
+            if tried:
+                parts.append(f"tried={tried}")
+            lines.append(" ".join(parts))
+
+        if active_probes:
+            lines.append("Active probe hooks (bare name drives probe_<name>; framings show what each sensor means):")
+            ranked = {r["name"]: r for r in rank_probes(active_probes, active_tuner)}
+            for pname in sorted(active_probes):
+                pdata = active_probes[pname]
+                trig = active_tuner.triggers.get(f"probe_{pname}")
+                st = trig.stats() if trig else {}
+                r = ranked.get(pname, {})
+                framings = pdata.get("framings") or ("", "")
+                a = " ".join(str(framings[0] if len(framings) > 0 else "").split())[:90]
+                b = " ".join(str(framings[1] if len(framings) > 1 else "").split())[:90]
+                lines.append(
+                    f"- {pname}: trigger=probe_{pname} value={st.get('value')} "
+                    f"signals={st.get('n_signals')} credited={st.get('n_credited')} "
+                    f"lift={r.get('lift')} priority={round(float(r.get('priority') or 0.0), 4)} "
+                    f"exposed={bool(pdata.get('exposed'))} framings={a} || {b}"
+                )
+        else:
+            lines.append("Active probe hooks: none in this agent yet; mint/adopt/compose probes in the profile if needed.")
+
+        if doc_library:
+            docs = []
+            for d in doc_library[:12]:
+                read = len(d.get("read") or ())
+                docs.append(f"{d.get('source_name')}({read}/{d.get('chunk_count')} read)")
+            lines.append("Loaded documents: " + ", ".join(docs))
+        else:
+            lines.append("Loaded documents: none")
+
+        if queued_calibrations:
+            lines.append("Queued calibration retries: " + "; ".join(f":calibrate {q}" for q in queued_calibrations[:12]))
+        if queued_commands:
+            lines.append("Queued future commands: " + "; ".join(queued_commands[:12]))
+
+        visible_cmds = sorted(_all_shell_commands() - hidden_commands)
+        hidden = sorted(hidden_commands)
+        exposed = [f":{w}({m})" for w, m in sorted(exposed_commands.items())]
+        exposed_probe_names = sorted(n for n, p in (active_probes or {}).items() if p.get("exposed"))
+        lines.append("Visible commands/macros: " + ", ".join(f":{c}" for c in visible_cmds[:80]) + (" ..." if len(visible_cmds) > 80 else ""))
+        if hidden:
+            lines.append("Hidden from model-facing discovery: " + ", ".join(f":{c}" for c in hidden[:40]))
+        lines.append("Model-callable command tools: " + (", ".join(exposed[:40]) if exposed else "none"))
+        if exposed_probe_names or exposed_knobs:
+            lines.append("Model-readable probes/knobs: " + ", ".join(exposed_probe_names + sorted(exposed_knobs)))
+        else:
+            lines.append("Model-readable probes/knobs: none")
+        macros = sorted(macro_aliases)
+        lines.append("Macro aliases: " + (", ".join(macros[:max_macros]) + (" ..." if len(macros) > max_macros else "") if macros else "none"))
+        return "\n".join(lines)
 
     def _priority_steer_handles(active_probes, active_tuner, active_pin):
         handles = []
@@ -3721,8 +3811,9 @@ def main():
                             doc_autoread = None
 
                 # Generate user input autonomously
+                agent_state_report = _spawn_state_report(replace_agent.name, tuner, probes)
                 r_prompt = build_prompt(
-                    "[Your turn to respond]",
+                    agent_state_report + "\n\n[Your turn to respond]",
                     document_tool_result=agent_document_tool_result,
                     session_context=session_context if session_context_enabled else None
                 )
@@ -4089,18 +4180,13 @@ def main():
                         because_ctx = f"The operator provided the following rationale for this profile:\n{command_because}\nMake sure your generated profile strongly reflects this rationale.\n\n"
                         print(Fore.CYAN + "[Spawn] Passing your 'because' rationale to the model." + Style.RESET_ALL)
 
-                    invalid_spawn_knobs = {
-                        "embedding_size", "hidden_layers", "batch_size", "learning_rate",
-                        "optimizer", "cpu_cycles_per_second", "accuracy", "precision",
-                        "recall", "general_knowledge", "common_sense", "problem_solving",
-                        "adaptability", "consistency", "memory_access",
-                    }
-                    valid_knobs = ", ".join(sorted(k for k in tuner.triggers if not k.startswith("probe_") and k not in invalid_spawn_knobs))
+                    valid_knobs = ", ".join(sorted(k for k in tuner.triggers if not k.startswith("probe_") and k not in SPAWN_FAKE_KNOBS))
                     command_reference = render_commands_md(COMMAND_HELP_LINES)
+                    spawn_state_report = _spawn_state_report(a_name, new_agent.tuner, new_agent.probes)
 
                     default_spawn_prompt = (
                         ":expect file invariants/out/macros/$a_name.txt\n"
-                        "# SPAWN_PROFILE_V4_AGENT_DOCS_AND_QUEUE\n"
+                        "# SPAWN_PROFILE_V5_STATE_REPORT\n"
                         ":probe profile_author I am generating a tuning profile composed of exact shell configuration commands || I am generating conversational text\n"
                         ":probe backfill profile_author\n"
                         ":steer profile_author 1.5\n"
@@ -4108,6 +4194,8 @@ def main():
                         f"{because_ctx}"
                         "The full shell command reference is loaded below so you can reason from the actual command surface, not guesses.\n"
                         "$command_reference\n\n"
+                        "The live hook/evidence report is loaded below. It is the map of what the spawned agent can hook onto, current/default-ish values, observed/tried values, active probes, macros, command exposure, documents, and queued work.\n"
+                        "$spawn_state_report\n\n"
                         "Output ONLY runnable shell commands or macro invocations, one per line; no prose, headings, bullets, markdown, or explanations. "
                         "The command reference is authoritative: use any known command/macro that serves the spawned agent's setup, context, calibration, or future workflow. "
                         "If access should be narrowed, use explicit shell controls such as :expose off :command, :expose off <probe_or_knob>, or :hide :command; reveal with :hide off :command. Do not rely on hidden spawn-loader filtering. "
@@ -4132,7 +4220,7 @@ def main():
                         "Now output the profile for '$a_name'.\n"
                         ":steer profile_author 0"
                     )
-                    g_prompt = load_prompt("spawn", default_spawn_prompt, required_substring="SPAWN_PROFILE_V4_AGENT_DOCS_AND_QUEUE", a_name=a_name, command_reference=command_reference)
+                    g_prompt = load_prompt("spawn", default_spawn_prompt, required_substring="SPAWN_PROFILE_V5_STATE_REPORT", a_name=a_name, command_reference=command_reference, spawn_state_report=spawn_state_report)
                     queue_macro_text(g_prompt, input_queue)
                     print(Fore.YELLOW + f"        -> Run ':spawn {a_name} {mode}' again after generation completes." + Style.RESET_ALL)
                     continue
@@ -8741,8 +8829,9 @@ def main():
                             if doc_autoread["remaining"] <= 0:
                                 doc_autoread = None
 
+                    agent_state_report = _spawn_state_report(ja.name, tuner, probes)
                     ja_prompt = build_prompt(
-                        "[Please respond]",
+                        agent_state_report + "\n\n[Please respond]",
                         document_tool_result=agent_document_tool_result,
                         session_context=session_context if session_context_enabled else None,
                         active_u_name="system"
