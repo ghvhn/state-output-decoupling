@@ -271,7 +271,10 @@ def _inputs(M: HF, instruction: str, pre_formatted: bool = False, system_prompt:
     # (bare mode -- no injected system/date preamble). Tokenize it raw so nothing
     # is added around it. Otherwise wrap the instruction in one native user turn.
     if pre_formatted:
-        return M.tok(instruction, return_tensors="pt", add_special_tokens=False).to(M.device)
+        d = M.tok(instruction, return_tensors="pt", add_special_tokens=False)
+        if hasattr(d, "to"):
+            return d.to(M.device)
+        return {k: v.to(M.device) if hasattr(v, "to") else v for k, v in d.items()}
     
     messages = []
     if system_prompt is not None:
