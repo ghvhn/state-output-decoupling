@@ -2030,6 +2030,8 @@ COMMAND_HELP_LINES = [
     "          :refresh prompts             (reload instructions from invariants/out/prompts)",
     "          :refresh commands            (reload commands from shell_commands.md)",
     "          :refresh macros              (reload available macro aliases)",
+    "          :place <probe> <+|->         (nudge a probe's direction toward (+) or away from (-)",
+    "                the hidden state of the model's LAST response; useful for manual calibration)",
     "          :<macro-name> <args>         (run any aliased macro directly, args -> $1..$9)",
     "          <any :command> because <reason>   (logs why you issued it as provenance)",
     "          :memory use probe <name> | :memory choice probe <name>",
