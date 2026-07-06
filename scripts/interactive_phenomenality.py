@@ -2004,7 +2004,7 @@ COMMAND_HELP_LINES = [
     "                off works for commands, probes, and knobs with the same order)",
     "          :expose <probe|knob> [off]  (without leading ':', expose a probe sensor",
     "                or tuner knob to the model's <<PROBE: name>> tool)",
-    "          :hide <command> [off]       (hide a command from model-facing help,",
+    "          :hide <command> | :hide off <command>  (hide/reveal a command from model-facing help,",
     "                suggestions, exposed-command discovery, and <<CMD>> hints; also",
     "                unexposes it. Operator help and execution still work)",
     "          :impact                      (consequence trail: what its words caused,",
@@ -3477,7 +3477,7 @@ def main():
             print(
                 Fore.YELLOW
                 + f"[{surface}] Refusing to overwrite hidden command ':{blocked_name}'. "
-                + f"Reveal it first with ':hide :{blocked_name} off' if you mean to reuse that name."
+                + f"Reveal it first with ':hide off :{blocked_name}' if you mean to reuse that name."
                 + Style.RESET_ALL
             )
             return True
@@ -4110,7 +4110,7 @@ def main():
                         "$command_reference\n\n"
                         "Output ONLY runnable shell commands or macro invocations, one per line; no prose, headings, bullets, markdown, or explanations. "
                         "The command reference is authoritative: use any known command/macro that serves the spawned agent's setup, context, calibration, or future workflow. "
-                        "If access should be narrowed, use explicit shell controls such as :expose off :command, :expose off <probe_or_knob>, or :hide :command; do not rely on hidden spawn-loader filtering. "
+                        "If access should be narrowed, use explicit shell controls such as :expose off :command, :expose off <probe_or_knob>, or :hide :command; reveal with :hide off :command. Do not rely on hidden spawn-loader filtering. "
                         "Use trailing because-clauses to record purpose for context or side-effect commands. "
                         "Use :doc when the spawned agent needs a document as working context; for example :doc readings because <purpose>, followed by :doc read/:doc next/:doc inject when useful. "
                         "Use :queue <future command> for commands that should run later when they become useful or when enough evidence exists; queued commands must still be runnable shell commands. "
@@ -5687,8 +5687,13 @@ def main():
                     if hidden_commands:
                         print(Fore.CYAN + "[Hide] Hidden from the model: " + ", ".join(f":{w}" for w in sorted(hidden_commands)) + Style.RESET_ALL)
                     else:
-                        print(Fore.CYAN + "[Hide] No commands are hidden. Use ':hide <command>' to hide one from model-facing help/discovery, or ':hide <command> off' to reveal it." + Style.RESET_ALL)
+                        print(Fore.CYAN + "[Hide] No commands are hidden. Use ':hide <command>' to hide one from model-facing help/discovery, or ':hide off <command>' to reveal it." + Style.RESET_ALL)
                     continue
+                if hargs[0].lower() in ("off", "show", "reveal", "visible"):
+                    if len(hargs) < 2:
+                        print(Fore.YELLOW + "[Hide] Usage: :hide off <command>" + Style.RESET_ALL)
+                        continue
+                    hargs = [hargs[1], "off"] + hargs[2:]
                 word = hargs[0].lstrip(":").lower()
                 mode_arg = hargs[1].lower() if len(hargs) > 1 else ""
                 all_shell_commands = _all_shell_commands()
@@ -5704,7 +5709,7 @@ def main():
                     print(Fore.YELLOW + f"[Hide] ':{word}' isn't a command.{did_you_mean(word, all_shell_commands)}" + Style.RESET_ALL)
                     continue
                 if mode_arg and mode_arg not in ("on", "hide", "hidden"):
-                    print(Fore.YELLOW + f"[Hide] Unknown mode '{mode_arg}'. Use ':hide <command>' or ':hide <command> off'." + Style.RESET_ALL)
+                    print(Fore.YELLOW + f"[Hide] Unknown mode '{mode_arg}'. Use ':hide <command>' or ':hide off <command>'." + Style.RESET_ALL)
                     continue
                 hidden_commands.add(word)
                 was_exposed = exposed_commands.pop(word, None) is not None
@@ -5781,7 +5786,7 @@ def main():
                     print(Fore.RED + "[Expose] refusing to expose ':expose' itself -- the model could then self-grant any command." + Style.RESET_ALL)
                     continue
                 if word in hidden_commands:
-                    print(Fore.YELLOW + f"[Expose] ':{word}' is hidden from model-facing discovery. Reveal it first with ':hide :{word} off'." + Style.RESET_ALL)
+                    print(Fore.YELLOW + f"[Expose] ':{word}' is hidden from model-facing discovery. Reveal it first with ':hide off :{word}'." + Style.RESET_ALL)
                     continue
                 known_exposable = _known_model_commands()
                 if word not in known_exposable:
