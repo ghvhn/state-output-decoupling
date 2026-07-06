@@ -191,6 +191,11 @@ def score_probes_on_text(model, text, probes, tuner, turn_row=None, turn_sense=N
             tuner.credit(f"probe_{pname}", sig, turn_sense)
 
 def generate_agentic_text(*args, **kwargs):
+    if "vecs" not in kwargs and _ACTIVE_PROBES:
+        vecs = {pname: pdata["direction"] for pname, pdata in _ACTIVE_PROBES.items() if "direction" in pdata}
+        if vecs:
+            kwargs["vecs"] = vecs
+            
     res = _engine_generate(*args, **kwargs)
     
     is_talk = kwargs.get("chatty_log", False)
