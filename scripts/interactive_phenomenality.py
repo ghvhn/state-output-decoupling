@@ -3605,7 +3605,7 @@ def main():
                 new_agent = AgentState(name=a_name, tuner=TriggerTuner())
                 # Load profile if macro exists
                 macro_path = macro_aliases.get(a_name, a_name)
-                if os.path.isfile(macro_path) or os.path.isfile(os.path.join(ROOT, "invariants", "out", "macros", f"{a_name}.txt")):
+                if mode not in ("create", "generate") and (os.path.isfile(macro_path) or os.path.isfile(os.path.join(ROOT, "invariants", "out", "macros", f"{a_name}.txt"))):
                     real_path = macro_path if os.path.isfile(macro_path) else os.path.join(ROOT, "invariants", "out", "macros", f"{a_name}.txt")
                     try:
                         with open(real_path, "r", encoding="utf-8") as rf:
