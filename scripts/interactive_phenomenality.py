@@ -4085,9 +4085,8 @@ def main():
                         "Available macros include:\n" + "\n".join(f"  {m}" for m in existing_macros) + "\n\n"
                     )
                 command_hints_str = (
-                    "All non-hidden shell commands may be used in generated macros, solves, and games. "
-                    "Available command words now are:\n  "
-                    + _visible_command_reference()
+                    "Here is the reference for the shell commands you can use:\n\n"
+                    + render_commands_md(COMMAND_HELP_LINES)
                     + "\n\n"
                 )
 
