@@ -1998,9 +1998,10 @@ COMMAND_HELP_LINES = [
     "          :game no | decline           (decline the game the model just proposed)",
     "          :accept [n|all] | :reject [n|all]  (a game may STAGE a command instead of",
     "                running it; nothing a game chose runs until you accept it here)",
-    "          :expose :<command> [stage|direct|off]  (make a built-in command or",
+    "          :expose :<command> [stage|direct] | :expose off <target>  (make a command or",
     "                macro command callable by the model as <<CMD: :command args>>;",
-    "                bare/default = staged for :accept, direct = queued immediately)",
+    "                bare/default = staged for :accept, direct = queued immediately;",
+    "                off works for commands, probes, and knobs with the same order)",
     "          :expose <probe|knob> [off]  (without leading ':', expose a probe sensor",
     "                or tuner knob to the model's <<PROBE: name>> tool)",
     "          :hide <command> [off]       (hide a command from model-facing help,",
@@ -4109,6 +4110,7 @@ def main():
                         "$command_reference\n\n"
                         "Output ONLY runnable shell commands or macro invocations, one per line; no prose, headings, bullets, markdown, or explanations. "
                         "The command reference is authoritative: use any known command/macro that serves the spawned agent's setup, context, calibration, or future workflow. "
+                        "If access should be narrowed, use explicit shell controls such as :expose off :command, :expose off <probe_or_knob>, or :hide :command; do not rely on hidden spawn-loader filtering. "
                         "Use trailing because-clauses to record purpose for context or side-effect commands. "
                         "Use :doc when the spawned agent needs a document as working context; for example :doc readings because <purpose>, followed by :doc read/:doc next/:doc inject when useful. "
                         "Use :queue <future command> for commands that should run later when they become useful or when enough evidence exists; queued commands must still be runnable shell commands. "
@@ -5727,6 +5729,11 @@ def main():
                     if exposed_knobs:
                         print(Fore.CYAN + "[Expose] knobs: " + ", ".join(sorted(exposed_knobs)) + Style.RESET_ALL)
                     continue
+                if eargs[0].lower() in ("off", "hide", "unexpose"):
+                    if len(eargs) < 2:
+                        print(Fore.YELLOW + "[Expose] Usage: :expose off <probe|knob|:command>" + Style.RESET_ALL)
+                        continue
+                    eargs = [eargs[1], "off"] + eargs[2:]
                 target = eargs[0]
                 mode_arg = eargs[1].lower() if len(eargs) > 1 else ""
                 if not target.startswith(":"):
