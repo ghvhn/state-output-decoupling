@@ -4121,6 +4121,10 @@ def main():
                     "${staged_ctx}"
                     "${because_ctx}"
                     "Write a macro named '${sname}' that does: ${goal}\n"
+                    "Output ONLY the commands, one per line. Do not use markdown blocks or conversational text. "
+                    "Do not leave trailing colons or unfinished commands at the end.\n"
+                    ":steer macro_author 0\n"
+                    ":steer solve_goal 0"
                 )
                 prompt = load_prompt(
                     "solve", 
