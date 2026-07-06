@@ -116,6 +116,30 @@ _PROBES_SHOW_ACT = False
 _PROBES_SHOW_TALK = True
 _last_completion = None
 
+def load_prompt(name, default_template, **kwargs):
+    import os, string
+    prompt_dir = os.path.join(ROOT, "invariants", "out", "prompts")
+    prompt_path = os.path.join(prompt_dir, f"{name}.txt")
+    if not os.path.isdir(prompt_dir):
+        try: os.makedirs(prompt_dir, exist_ok=True)
+        except: pass
+    if not os.path.isfile(prompt_path):
+        try:
+            with open(prompt_path, "w", encoding="utf-8") as wf:
+                wf.write(default_template)
+        except: pass
+        template = default_template
+    else:
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as rf:
+                template = rf.read()
+        except:
+            template = default_template
+    try:
+        return string.Template(template).safe_substitute(**kwargs)
+    except:
+        return default_template
+
 def score_probes_on_text(model, text, probes, tuner, turn_row=None, turn_sense=None, label_prefix="Probe Score"):
     if not probes or not text:
         return
@@ -3426,15 +3450,23 @@ def main():
                     active_probes = ", ".join(sorted(probes.keys())) or "None"
                     available_cmds = ", ".join(sorted([c for c in BUILTIN_COMMANDS if c]))
                     
-                    prompt = (
-                        f"The operator wants to create a cognitive persona named '{alias}'.\n"
-                        f"Write a short shell macro (3 to 6 lines) using any mix of commands to define this persona.\n"
-                        f"Available system commands: {available_cmds}\n"
-                        f"Existing personas you could invoke (by adding `:<name>`): {existing_personas}\n"
-                        f"Currently active probes you could compose: {active_probes}\n"
-                        f"Use the syntax `:probe <concept_name> <framing with it> || <framing without it>` to define new dimensions.\n"
-                        f"You can also use `:probe compose ...` to combine existing probes.\n"
-                        f"Output ONLY the commands, one per line. Do not use markdown blocks or conversational text."
+                    default_self_create = (
+                        "The operator wants to create a cognitive persona named '$alias'.\n"
+                        "Write a short shell macro (3 to 6 lines) using any mix of commands to define this persona.\n"
+                        "Available system commands: $available_cmds\n"
+                        "Existing personas you could invoke (by adding `:<name>`): $existing_personas\n"
+                        "Currently active probes you could compose: $active_probes\n"
+                        "Use the syntax `:probe <concept_name> <framing with it> || <framing without it>` to define new dimensions.\n"
+                        "You can also use `:probe compose ...` to combine existing probes.\n"
+                        "Output ONLY the commands, one per line. Do not use markdown blocks or conversational text."
+                    )
+                    prompt = load_prompt(
+                        "self_create",
+                        default_self_create,
+                        alias=alias,
+                        available_cmds=available_cmds,
+                        existing_personas=existing_personas,
+                        active_probes=active_probes
                     )
                     
                     lines = []
@@ -3497,11 +3529,17 @@ def main():
                     user_input = f":save self {alias}"
                 elif sargs[0] == "choose":
                     print(Fore.CYAN + "[System] Asking model to pick a persona/macro..." + Style.RESET_ALL)
-                    prompt = (
-                        f"You are selecting a persona/macro to initialize.\n"
-                        f"Available options:\n" + "\n".join(f"- {p}" for p in sorted(macro_aliases.keys())) + "\n\n"
-                        f"Select the single most appropriate persona/macro from the list. "
-                        f"Output ONLY the exact name, and nothing else."
+                    options = "\n".join(f"- {p}" for p in sorted(macro_aliases.keys()))
+                    default_self_choose = (
+                        "You are selecting a persona/macro to initialize.\n"
+                        "Available options:\n$options\n\n"
+                        "Select the single most appropriate persona/macro from the list. "
+                        "Output ONLY the exact name, and nothing else."
+                    )
+                    prompt = load_prompt(
+                        "self_choose",
+                        default_self_choose,
+                        options=options
                     )
                     nm = generate_agentic_text(
                         model, instruction=prompt, config=config,
@@ -3603,12 +3641,13 @@ def main():
                         print(Fore.RED + f"[Spawn] Failed to load profile for '{a_name}': {e}" + Style.RESET_ALL)
                 else:
                     print(Fore.CYAN + f"[Spawn] No saved profile found for '{a_name}'. Generating profile based on name..." + Style.RESET_ALL)
-                    g_prompt = (
-                        f"You are generating a tuning profile for an agent named '{a_name}'. "
+                    default_spawn_prompt = (
+                        "You are generating a tuning profile for an agent named '$a_name'. "
                         "Respond ONLY with a series of lines starting with :tune, :steer, or :label to configure this persona. "
                         "For example: ':tune response_tokens 128\\n:steer accuracy 0.5'. "
                         "Output no other text."
                     )
+                    g_prompt = load_prompt("spawn", default_spawn_prompt, a_name=a_name)
                     g_out = generate_agentic_text(
                         model, instruction=g_prompt, config=config,
                         max_new_tokens=200, chatty_log=False, pre_formatted=False
@@ -4070,21 +4109,32 @@ def main():
                     because_ctx = f"The operator provided the following underlying reason/rationale for this macro:\n{command_because}\nMake sure your generated macro commands strongly reflect this rationale.\n\n"
                     print(Fore.CYAN + "[Solve] Passing your 'because' rationale to the model." + Style.RESET_ALL)
 
-                prompt = (
+                default_solve_prompt = (
                     "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                     "You write macros for an interactive cognition shell. A macro is a list of ':' "
-                    "commands, one per line." + prompt_args_str + "\n\n"
-                    f"{command_hints_str}"
+                    "commands, one per line.$prompt_args_str\n\n"
+                    "$command_hints_str"
                     "Note: Shell commands natively accept 'auto' or 'choose' as arguments where applicable "
                     "to automatically select or interactively prompt for a value. "
                     "You should seamlessly pass these through to the underlying commands if the user provides them, "
                     "unless a parameter is explicitly restricted from doing so.\n\n"
-                    f"{macro_hints_str}"
-                    f"{staged_ctx}"
-                    f"{because_ctx}"
-                    f"Write a macro named '{sname}' that does: {goal}\n"
+                    "$macro_hints_str"
+                    "$staged_ctx"
+                    "$because_ctx"
+                    "Write a macro named '$sname' that does: $goal\n"
                     "Output ONLY the command lines, nothing else.<|eot_id|>"
                     "<|start_header_id|>assistant<|end_header_id|>\n\n"
+                )
+                prompt = load_prompt(
+                    "solve", 
+                    default_solve_prompt, 
+                    prompt_args_str=prompt_args_str,
+                    command_hints_str=command_hints_str,
+                    macro_hints_str=macro_hints_str,
+                    staged_ctx=staged_ctx,
+                    because_ctx=because_ctx,
+                    sname=sname,
+                    goal=goal
                 )
                 print(Fore.CYAN + f"[Solve] Asking the model to write macro ':{sname}' for: {goal}" + Style.RESET_ALL)
                 try:
@@ -4640,19 +4690,23 @@ def main():
                     except (OSError, ValueError) as exc:
                         print(Fore.YELLOW + f"[Doc Rewrite] {exc}" + Style.RESET_ALL)
                         continue
-                    prompt = (
+                    default_doc_rewrite = (
                         "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                         "Rewrite the file below into a better version, guided by the operator's reason. "
                         "Preserve factual meaning, important details, headings, lists, links, code fences, and code syntax when present. "
                         "Do not explain what you changed. Output ONLY the complete rewritten file content.\n\n"
-                        f"Source filename: {os.path.basename(path_str)}\n"
-                        f"Output filename: {os.path.basename(out_path)}\n"
-                        f"Reason: {reason}\n\n"
-                        "----- ORIGINAL FILE START -----\n"
-                        f"{original_text}\n"
-                        "----- ORIGINAL FILE END -----<|eot_id|>"
-                        "<|start_header_id|>assistant<|end_header_id|>\n\n"
+                        "Source filename: $basename_in\n"
+                        "Output filename: $basename_out\n"
+                        "Reason: $reason\n\n"
+                        "=== ORIGINAL DOCUMENT START ===\n"
                     )
+                    prompt = load_prompt(
+                        "doc_rewrite",
+                        default_doc_rewrite,
+                        basename_in=os.path.basename(path_str),
+                        basename_out=os.path.basename(out_path),
+                        reason=reason
+                    ) + f"{original_text}\n=== ORIGINAL DOCUMENT END ===<|eot_id|>\n<|start_header_id|>assistant<|end_header_id|>\n\n"
                     print(Fore.CYAN + f"[Doc Rewrite] Rewriting {os.path.basename(path_str)} because {reason}..." + Style.RESET_ALL)
                     try:
                         rewritten = generate_agentic_text(
@@ -5306,9 +5360,13 @@ def main():
                     if minus:
                         gcfg2["rules"]["avoid"] = f"reduce {', '.join(minus)} while doing so."
                     try:
+                        default_premise_prompt = (
+                            "In one vivid sentence, describe a short cooperative game whose whole point is for you to increase your own $focus. Reply with ONLY that sentence."
+                        )
+                        premise_prompt = load_prompt("game_premise", default_premise_prompt, focus=focus)
                         premise = generate_agentic_text(
                             model,
-                            instruction=f"In one vivid sentence, describe a short cooperative game whose whole point is for you to increase your own {focus}. Reply with ONLY that sentence.",
+                            instruction=premise_prompt,
                             config=config, max_new_tokens=60, chatty_log=False, pre_formatted=False,
                         )
                         if premise and premise.strip():
@@ -5870,13 +5928,19 @@ def main():
                         )
                     else:
                         basis = "It has no stored framings (it was adopted from a raw vector).\n\n"
-                    xprompt = (
+                    default_explain_prompt = (
                         "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
-                        f"A cognitive probe named '{ename_resolved}' is a direction in your own activations "
-                        f"that scores each of your replies.\n{basis}"
+                        "A cognitive probe named '$ename_resolved' is a direction in your own activations "
+                        "that scores each of your replies.\n$basis"
                         "In two or three sentences, explain in your OWN words what this probe is sensing in "
                         "you, and when it would read high versus low.<|eot_id|>"
                         "<|start_header_id|>assistant<|end_header_id|>\n\n"
+                    )
+                    xprompt = load_prompt(
+                        "probe_explain",
+                        default_explain_prompt,
+                        ename_resolved=ename_resolved,
+                        basis=basis
                     )
                     print(Fore.CYAN + f"[Probe] Asking the model to explain '{ename_resolved}' in its own words..." + Style.RESET_ALL)
                     try:
@@ -6458,15 +6522,22 @@ def main():
                         prefix_cmd = user_input[len(":suggest"):].strip()
                         active_probes = ", ".join(probes.keys()) if probes else "None"
                         active_steers = ", ".join(k for k in tuner.triggers.keys() if k.startswith("steer_") or "_alpha" in k)
-                        prompt = (
-                            f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
-                            f"You are a command autocomplete assistant for an interactive agent shell.\n"
-                            f"The user has started typing a command: '{prefix_cmd}'\n"
-                            f"Currently active probes: {active_probes}\n"
-                            f"Active steers: {active_steers}\n"
-                            f"Please provide exactly ONE valid completion for this command based on the available shell capabilities. "
-                            f"Output only the full completed command string (starting with '{prefix_cmd}'), and nothing else.<|eot_id|>"
-                            f"<|start_header_id|>assistant<|end_header_id|>\n\n"
+                        default_suggest_prompt = (
+                            "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
+                            "You are a command autocomplete assistant for an interactive agent shell.\n"
+                            "The user has started typing a command: '$prefix_cmd'\n"
+                            "Currently active probes: $active_probes\n"
+                            "Active steers: $active_steers\n"
+                            "Please provide exactly ONE valid completion for this command based on the available shell capabilities. "
+                            "Output only the full completed command string (starting with '$prefix_cmd'), and nothing else.<|eot_id|>"
+                            "<|start_header_id|>assistant<|end_header_id|>\n\n"
+                        )
+                        prompt = load_prompt(
+                            "suggest_autocomplete",
+                            default_suggest_prompt,
+                            prefix_cmd=prefix_cmd,
+                            active_probes=active_probes,
+                            active_steers=active_steers
                         )
                         print(Fore.CYAN + f"[Suggest] Asking model to complete '{prefix_cmd}'..." + Style.RESET_ALL)
                         completion = generate_agentic_text(
