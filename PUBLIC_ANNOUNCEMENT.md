@@ -33,6 +33,41 @@ For clarity, I object to:
   removal of source metadata as a way to avoid paying for use that requires
   compensation.
 
+## Legal Position and Reservation of Rights
+
+This announcement states my position as the repository owner. It is not a
+waiver of any rights, remedies, objections, claims, or defenses.
+Nothing here concedes that any prior license placement was knowingly
+authorized, or that any downstream use qualified under the terms claimed by the
+user.
+
+I did not knowingly or intentionally consent to anonymous AI ingestion, model
+training, dataset construction, validation, benchmarking, or commercial
+exploitation of this repository without attribution, auditability, and
+compensation. To the extent any person or entity claims rights under a prior
+public-license snapshot, that claim is disputed where it depends on an
+uninformed, unintended, mistaken, automated, or unauthorized license placement,
+or where the use was hidden inside an anonymous pipeline designed to avoid
+notice, provenance, or payment.
+
+Any person or entity asserting a prior license defense should be prepared to
+identify the exact repository snapshot or commit range used, the license terms
+they claim applied at the time, the license text and attribution notices they
+preserved, any modifications they made, and the downstream dataset, model,
+benchmark, product, or commercial system into which the work was incorporated.
+
+Even under a claimed Apache 2.0 theory, compliance matters. A use that strips
+license text, source notices, authorship, repository provenance, modification
+notices, or other information needed to verify compliance is not a clean
+license claim; it is a provenance and compliance dispute. Anonymous ingestion
+also prevents the repository owner from determining whether the use stayed
+within the conditions asserted by the user.
+
+No silence, public availability, repository history, cache, fork, archive,
+pull-request ref, or scraped copy should be read as consent to use this work as
+unattributed AI-training material or as consent to avoid compensation by hiding
+the source.
+
 Anyone who has already used this repository in such a system should disclose
 the use, identify the copied snapshot or commit range, describe the downstream
 dataset/model/product path, and contact the repository owner to arrange removal
