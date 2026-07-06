@@ -2007,7 +2007,9 @@ COMMAND_HELP_LINES = [
     "                :macro name self [file] writes a macro that REGENERATES probes,",
     "                macros/commands, hidden/exposed command tools, and game configs;",
     "                :macro strip <alias|file> drops display-only lines in place,",
-    "                :macro name strip <src> [dest] writes a stripped copy)",
+    "                :macro name strip <src> [dest] writes a stripped copy;",
+    "                :macro install <alias> <file> [goal] converts a manual text file into",
+    "                a parameterized built-in command with proper solve/args headers)",
     "          :save self <name> | choose   (alias for :macro name self; 'choose' asks",
     "                the model to generate a name based on the current tuning state)",
     "          :spawn <name> join|replace|drop|generate  ('join' adds to panel, 'replace'",
@@ -2015,13 +2017,13 @@ COMMAND_HELP_LINES = [
     "                [N]' takes the operator slot for N turns.",
     "                Use @<name> :cmd to target a specific agent's tuning state)",
     "          :run <alias|file>            (queue and execute a macro's commands)",
-    "          :solve <name> <goal> [: args]  (model writes a parameterized macro for an",
-    "                ad-hoc command; it is PROPOSED, then :accept adopts it (or :reject",
-    "                drops it); after that :<name> <args> runs it, filling $1..$9 / $@.",
-    "                Named args fill $name; optional/default specs are name?, [name],",
-    "                name=default, or [name=default].",
-    "                All non-hidden commands are available; context staged with",
-    "                :memory use is folded into the request)",
+    "          :solve [dynamic] <name> <goal> [args]  (model writes a parameterized macro",
+    "                for an ad-hoc command; it is PROPOSED, then :accept adopts it;",
+    "                after that :<name> <args> runs it, filling $1..$9 / $@. Named args",
+    "                fill $name; extract them automatically by writing $name in the goal",
+    "                or list them at the end. 'dynamic' extracts $args from the 'because'",
+    "                clause as well. All non-hidden commands are available; context",
+    "                staged with :memory use is folded into the request)",
     "          :expect <name>               (intercept the model's next output and save it",
     "                as a macro <name>; :expect file <path> writes to a file; :expect autocomplete",
     "                suggests a completion; :expect var <name> saves to a shell variable)",
@@ -3724,6 +3726,52 @@ def main():
                     except Exception as e:
                         print(Fore.RED + f"[Error] Could not restore macro: {e}" + Style.RESET_ALL)
                     continue
+                if sub == "install":
+                    if len(mtok) < 2:
+                        print(Fore.YELLOW + "[System] Usage: :macro install <alias> [file] [goal]" + Style.RESET_ALL)
+                        continue
+                    a_name = mtok[1].lower()
+                    
+                    if len(mtok) >= 3 and os.path.isfile(mtok[2]):
+                        src_file = mtok[2]
+                        goal_text = " ".join(mtok[3:]) if len(mtok) > 3 else "Manually installed macro."
+                        args_to_scan = mtok[3:]
+                    else:
+                        src_file = macro_aliases.get(a_name, mtok[2] if len(mtok) >= 3 else f"{a_name}.txt")
+                        goal_text = " ".join(mtok[2:]) if len(mtok) > 2 else "Manually installed macro."
+                        args_to_scan = mtok[2:]
+
+                    if not os.path.isfile(src_file):
+                        print(Fore.RED + f"[Error] File not found: {src_file}. Please provide the file path." + Style.RESET_ALL)
+                        continue
+                    if _hidden_overwrite_blocked(a_name, "System"):
+                        continue
+                    arg_names = []
+                    seen_args = set()
+                    for tok in args_to_scan:
+                        idx = tok.find("$")
+                        if idx >= 0:
+                            clean = tok[idx+1:].rstrip(".,;:\"'()!]")
+                            if clean and clean not in seen_args:
+                                arg_names.append(clean)
+                                seen_args.add(clean)
+                    dest = os.path.join(ROOT, "invariants", "out", "macros", f"{a_name}.txt")
+                    try:
+                        os.makedirs(os.path.dirname(dest), exist_ok=True)
+                        with open(src_file, "r", encoding="utf-8") as rf:
+                            content = rf.read().strip()
+                        with open(dest, "w", encoding="utf-8") as wf:
+                            wf.write(f"# :solve macro '{a_name}' -- {goal_text}\n")
+                            if arg_names:
+                                wf.write(f"# args: {', '.join(arg_names)}\n")
+                            if content:
+                                wf.write(content + "\n")
+                        macro_aliases[a_name] = dest
+                        _save_macro_aliases()
+                        print(Fore.GREEN + f"[System] Installed macro ':{a_name}' to {dest}. Run it with :{a_name} <args>." + Style.RESET_ALL)
+                    except Exception as e:
+                        print(Fore.RED + f"[Error] Could not install macro: {e}" + Style.RESET_ALL)
+                    continue
                 if sub == "name":
                     kind = mtok[1].lower() if len(mtok) >= 2 else ""
                     if kind == "self":
@@ -3946,42 +3994,41 @@ def main():
             if user_input.startswith(":solve"):
                 sbody = user_input[len(":solve"):].strip()
                 sparts = sbody.split(maxsplit=1)
+                is_dynamic = False
+                if sparts and sparts[0].lower() == "dynamic":
+                    is_dynamic = True
+                    sbody = sparts[1].strip() if len(sparts) > 1 else ""
+                    sparts = sbody.split(maxsplit=1)
                 if not sparts:
-                    print(Fore.YELLOW + "[Solve] Usage: :solve <command_name> [what it should do]" + Style.RESET_ALL)
+                    print(Fore.YELLOW + "[Solve] Usage: :solve [dynamic] <command_name> [what it should do]" + Style.RESET_ALL)
                     continue
                 sname = re.sub(r"[^a-z0-9_]", "_", sparts[0].lower())[:40].strip("_")
                 rest = sparts[1].strip() if len(sparts) > 1 else ""
-                if ":" in rest:
-                    goal_part, args_part = rest.rsplit(":", 1)
-                    try:
-                        import shlex
-                        arg_names = shlex.split(args_part)
-                    except ValueError:
-                        arg_names = args_part.split()
-                    goal = goal_part.strip() or sname.replace("_", " ")
-                elif "--" in rest:
-                    goal_part, args_part = rest.rsplit("--", 1)
-                    try:
-                        import shlex
-                        arg_names = shlex.split(args_part)
-                    except ValueError:
-                        arg_names = args_part.split()
-                    goal = goal_part.strip() or sname.replace("_", " ")
-                else:
-                    try:
-                        import shlex
-                        tokens = shlex.split(rest)
-                    except ValueError:
-                        tokens = rest.split()
-                        
-                    arg_names = []
-                    while tokens and (
-                        tokens[-1].startswith(("+", "-", "$", "["))
-                        or tokens[-1].endswith(("?", "!", "]", "!!"))
-                        or "=" in tokens[-1]
-                    ):
-                        arg_names.insert(0, tokens.pop())
-                    goal = " ".join(tokens) or sname.replace("_", " ")
+                try:
+                    import shlex
+                    tokens = shlex.split(rest)
+                except ValueError:
+                    tokens = rest.split()
+                    
+                arg_names = []
+                while tokens and (
+                    tokens[-1].startswith(("+", "-", "$", "["))
+                    or tokens[-1].endswith(("?", "!", "]", "!!"))
+                    or "=" in tokens[-1]
+                ):
+                    arg_names.insert(0, tokens.pop())
+                goal = " ".join(tokens) or sname.replace("_", " ")
+
+                if is_dynamic:
+                    text_to_scan = goal + " " + (command_because or "")
+                    seen_args = set(arg_names)
+                    for tok in text_to_scan.split():
+                        idx = tok.find("$")
+                        if idx >= 0:
+                            clean = tok[idx+1:].rstrip(".,;:\"'()!]")
+                            if clean and clean not in seen_args:
+                                arg_names.append(clean)
+                                seen_args.add(clean)
 
                 if sname == "auto" and not arg_names and goal == "auto":
                     print(Fore.YELLOW + "[Solve] Usage: :solve auto <+/- reference probes to steer toward>" + Style.RESET_ALL)

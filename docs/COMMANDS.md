@@ -47,9 +47,13 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:listen on|off|status` -- speak mid-reply: lines you type while it generates are ingested at the next chunk seam and appended to the live stream -- the model chooses to redirect or fold in; never dropped
 - `:macro <file> <c1> ; <c2> ...` -- write a macro; :macro restore <json> exactly restores one; :macro name <alias> <file> aliases it; :macro name self [file] writes a macro that REGENERATES probes, macros/commands, hidden/exposed command tools, and game configs; :macro strip <alias|file> drops display-only lines in place, :macro name strip <src> [dest] writes a stripped copy
 - `:save self <name> | choose` -- alias for :macro name self; 'choose' asks the model to generate a name based on the current tuning state
-- `:spawn <name> join|replace|drop` -- multi-agent support. 'join' adds to the panel, 'replace [N]' takes the operator slot for N turns. Use @<name> :cmd to target a specific agent's tuning state
+- `:spawn <name> join|replace|drop|generate` -- 'join' adds to panel, 'replace' clears it, 'drop' removes, 'generate' creates only) [N]' takes the operator slot for N turns. Use @<name> :cmd to target a specific agent's tuning state
 - `:run <alias|file>` -- queue and execute a macro's commands
 - `:solve <name> <goal> [: args]` -- model writes a parameterized macro for an ad-hoc command; it is PROPOSED, then :accept adopts it (or :reject drops it); after that :<name> <args> runs it, filling $1..$9 / $@. Named args fill $name; optional/default specs are name?, [name], name=default, or [name=default]. All non-hidden commands are available; context staged with :memory use is folded into the request
+- `:expect <name>` -- intercept the model's next output and save it as a macro <name>; :expect file <path> writes to a file; :expect autocomplete suggests a completion; :expect var <name> saves to a shell variable
+- `:refresh prompts` -- reload instructions from invariants/out/prompts
+- `:refresh commands` -- reload commands from shell_commands.md
+- `:refresh macros` -- reload available macro aliases
 - `:<macro-name> <args>` -- run any aliased macro directly, args -> $1..$9
 - `<any :command> because <reason>` -- logs why you issued it as provenance
 - `:memory use probe <name> | :memory choice probe <name>` -- stage the memories where probe <name> reads furthest from 0
