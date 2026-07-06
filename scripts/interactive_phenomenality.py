@@ -161,6 +161,7 @@ def queue_macro_text(text, queue):
     if current_text:
         bundled.append("\n".join(current_text).strip())
     # prepend to queue
+    bundled = [(item, True) for item in bundled]
     queue[:0] = bundled
 
 def score_probes_on_text(model, text, probes, tuner, turn_row=None, turn_sense=None, label_prefix="Probe Score"):
@@ -3282,9 +3283,15 @@ def main():
     while True:
         try:
             reading_turn_source = None  # set when the turn is the model reading, not the operator speaking
+            silent_echo = False
             if input_queue:
-                user_input = input_queue.pop(0)
-                print(Fore.YELLOW + f"\nYou: {user_input}" + Style.RESET_ALL)
+                q_item = input_queue.pop(0)
+                if isinstance(q_item, tuple):
+                    user_input, silent_echo = q_item
+                else:
+                    user_input, silent_echo = q_item, False
+                if not silent_echo:
+                    print(Fore.YELLOW + f"\nYou: {user_input}" + Style.RESET_ALL)
             elif doc_autoread and doc_autoread["remaining"] > 0:
                 # Reading as dialogue, minimally: the framed chunk IS the user
                 # turn -- no synthesized question, no cue, no words put in
@@ -3414,7 +3421,7 @@ def main():
                 cmds = [c.strip() for c in user_input.split(";") if c.strip()]
                 if len(cmds) > 1:
                     user_input = cmds[0]
-                    input_queue.extend(cmds[1:])
+                    input_queue.extend([(c, silent_echo) for c in cmds[1:]])
 
             # A trailing ' because <reason>' on any command is provenance, not an
             # argument: peel it off, log it, and hand the handler a clean line.
@@ -3889,7 +3896,7 @@ def main():
                     if total:
                         names = ", ".join(os.path.basename(x) for x in matches)
                         print(Fore.CYAN + f"[System] Queued {len(total)} command(s) from {len(matches)} macro(s) matching '{target}' ({names})." + Style.RESET_ALL)
-                        input_queue.extend(total)
+                        input_queue.extend([(cmd, True) for cmd in total])
                     else:
                         print(Fore.YELLOW + f"[System] Macros matching '{target}' had no runnable commands." + Style.RESET_ALL)
                     continue
@@ -3902,7 +3909,7 @@ def main():
                     print(Fore.YELLOW + f"[System] Macro not found: {resolved}" + Style.RESET_ALL)
                 elif lines:
                     print(Fore.CYAN + f"[System] Queued {len(lines)} command(s) from {target}." + Style.RESET_ALL)
-                    input_queue.extend(lines)
+                    input_queue.extend([(cmd, True) for cmd in lines])
                 else:
                     print(Fore.YELLOW + f"[System] '{target}' had no runnable commands." + Style.RESET_ALL)
                 continue
