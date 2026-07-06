@@ -115,6 +115,7 @@ _ACTIVE_TUNER = None
 _PROBES_SHOW_ACT = False
 _PROBES_SHOW_TALK = True
 _last_completion = None
+_pending_expect = None
 
 def load_prompt(name, default_template, **kwargs):
     import os, string
@@ -139,6 +140,23 @@ def load_prompt(name, default_template, **kwargs):
         return string.Template(template).safe_substitute(**kwargs)
     except:
         return default_template
+
+def queue_macro_text(text, queue):
+    bundled = []
+    current_text = []
+    for line in text.splitlines():
+        if line.startswith(":"):
+            if current_text:
+                bundled.append("\n".join(current_text).strip())
+                current_text = []
+            bundled.append(line.strip())
+        else:
+            if line.strip() or current_text:
+                current_text.append(line)
+    if current_text:
+        bundled.append("\n".join(current_text).strip())
+    # prepend to queue
+    queue[:0] = bundled
 
 def score_probes_on_text(model, text, probes, tuner, turn_row=None, turn_sense=None, label_prefix="Probe Score"):
     if not probes or not text:
@@ -1349,7 +1367,22 @@ def expand_macro_lines(target, macro_aliases, visited=None, depth=0, args=None):
                             out.extend(sub)
                     continue
             out.append(line)
-    return out
+            
+    # Post-process to bundle consecutive non-command lines into a single multi-line string
+    bundled_out = []
+    current_text_block = []
+    for line in out:
+        if line.startswith(":"):
+            if current_text_block:
+                bundled_out.append("\n".join(current_text_block))
+                current_text_block = []
+            bundled_out.append(line)
+        else:
+            current_text_block.append(line)
+    if current_text_block:
+        bundled_out.append("\n".join(current_text_block))
+        
+    return bundled_out
 
 
 # `:game` config lives in games/<name>_rules.json. Rules stay flat top-level
@@ -3239,6 +3272,9 @@ def main():
     if startup_user_input:
         input_queue.append(startup_user_input)
 
+    global _shell_vars
+    _shell_vars = {}
+
     while True:
         try:
             reading_turn_source = None  # set when the turn is the model reading, not the operator speaking
@@ -3366,6 +3402,10 @@ def main():
 
             
             user_input = user_input.strip()
+            if _shell_vars:
+                for vname, vval in _shell_vars.items():
+                    # Safely replace $vname if it's not part of a larger word
+                    user_input = re.sub(r"\$" + re.escape(vname) + r"\b", lambda _m, v=vval: v, user_input)
             if user_input.startswith(":") and ";" in user_input and not command_keeps_semicolons(user_input):
                 cmds = [c.strip() for c in user_input.split(";") if c.strip()]
                 if len(cmds) > 1:
@@ -3451,6 +3491,10 @@ def main():
                     available_cmds = ", ".join(sorted([c for c in BUILTIN_COMMANDS if c]))
                     
                     default_self_create = (
+                        ":expect macro $alias\n"
+                        ":probe persona_author I am defining a cognitive persona using shell macro commands || I am generating conversational text\n"
+                        ":probe backfill persona_author\n"
+                        ":steer persona_author 1.5\n"
                         "The operator wants to create a cognitive persona named '$alias'.\n"
                         "Write a short shell macro (3 to 6 lines) using any mix of commands to define this persona.\n"
                         "Available system commands: $available_cmds\n"
@@ -3469,60 +3513,9 @@ def main():
                         active_probes=active_probes
                     )
                     
-                    lines = []
-                    for attempt in range(3):
-                        raw = generate_agentic_text(
-                            model, instruction=prompt, config=config,
-                            max_new_tokens=200, chatty_log=False, pre_formatted=False,
-                            system_prompt=""
-                        )
-                        lines = [ln.strip() for ln in (raw or "").splitlines() if ln.strip().startswith(":")]
-                        if not lines:
-                            print(Fore.YELLOW + f"[System] Model failed to generate commands for '{alias}'." + Style.RESET_ALL)
-                            break
-                            
-                        errors = []
-                        for i, ln in enumerate(lines):
-                            parts = ln.split()
-                            cmd = parts[0][1:]
-                            if cmd not in BUILTIN_COMMANDS and cmd not in macro_aliases and cmd not in probes and cmd != alias:
-                                errors.append(f"Line {i+1}: ':{cmd}' is not a recognized command.")
-                                continue
-                            if cmd == "probe":
-                                if len(parts) > 1 and parts[1] == "compose":
-                                    if "||" in ln:
-                                        errors.append(f"Line {i+1}: ':probe compose' uses '+' and '-' to combine existing probes, not '||'.")
-                                elif len(parts) > 1 and parts[1] not in ("adopt", "compose", "backfill", "save", "load", "strip", "name", "list"):
-                                    if "||" not in ln:
-                                        errors.append(f"Line {i+1}: When defining a new probe, you must use '||' to separate the positive and negative framings.")
-                                    elif ln.count("||") > 1:
-                                        errors.append(f"Line {i+1}: A probe definition can only contain one '||' separator.")
-                        
-                        if not errors:
-                            break
-                            
-                        if attempt < 2:
-                            print(Fore.YELLOW + f"[System] Model generated invalid commands. Retrying ({attempt+1}/3)..." + Style.RESET_ALL)
-                            prompt += f"\n\nYour previous attempt generated:\n{raw}\n\nBut it contained the following errors:\n" + "\n".join(errors) + "\n\nPlease rewrite it correctly."
-                        else:
-                            print(Fore.RED + f"[System] Model failed to generate valid commands after 3 attempts." + Style.RESET_ALL)
-                            lines = []
-                            
-                    if not lines:
-                        continue
-                    
-                    dest = os.path.join(ROOT, "invariants", "out", "macros", f"{alias}.txt")
-                    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
-                    try:
-                        with open(dest, "w", encoding="utf-8") as wf:
-                            for ln in lines:
-                                wf.write(ln + "\n")
-                        macro_aliases[alias] = dest
-                        _save_macro_aliases()
-                        print(Fore.GREEN + f"[System] Generated and saved '{alias}' persona ({len(lines)} commands). You can load it with :{alias}" + Style.RESET_ALL)
-                    except Exception as e:
-                        print(Fore.RED + f"[Error] Could not save macro: {e}" + Style.RESET_ALL)
-                        continue
+                    print(Fore.CYAN + f"[System] Queuing phenomenological macro to invent a '{alias}' persona..." + Style.RESET_ALL)
+                    queue_macro_text(prompt, input_queue)
+                    continue
 
                 elif sargs[0] == "save":
                     alias = sargs[1] if len(sargs) > 1 else "choose"
@@ -3531,6 +3524,10 @@ def main():
                     print(Fore.CYAN + "[System] Asking model to pick a persona/macro..." + Style.RESET_ALL)
                     options = "\n".join(f"- {p}" for p in sorted(macro_aliases.keys()))
                     default_self_choose = (
+                        ":expect autocomplete\n"
+                        ":probe persona_selector I am selecting exactly ONE persona name from the list || I am generating conversational text\n"
+                        ":probe backfill persona_selector\n"
+                        ":steer persona_selector 1.5\n"
                         "You are selecting a persona/macro to initialize.\n"
                         "Available options:\n$options\n\n"
                         "Select the single most appropriate persona/macro from the list. "
@@ -3541,18 +3538,8 @@ def main():
                         default_self_choose,
                         options=options
                     )
-                    nm = generate_agentic_text(
-                        model, instruction=prompt, config=config,
-                        max_new_tokens=20, chatty_log=False, pre_formatted=False,
-                        system_prompt=""
-                    )
-                    alias = (nm or "").strip()
-                    if alias in macro_aliases:
-                        print(Fore.GREEN + f"[System] Model chose '{alias}'." + Style.RESET_ALL)
-                        user_input = f":{alias}"
-                    else:
-                        print(Fore.YELLOW + f"[System] Model selected invalid macro '{alias}'. Aborting." + Style.RESET_ALL)
-                        continue
+                    queue_macro_text(prompt, input_queue)
+                    continue
                 else:
                     target_alias = sargs[0]
                     if target_alias not in macro_aliases and target_alias not in BUILTIN_COMMANDS:
@@ -3641,32 +3628,21 @@ def main():
                         print(Fore.RED + f"[Spawn] Failed to load profile for '{a_name}': {e}" + Style.RESET_ALL)
                 else:
                     print(Fore.CYAN + f"[Spawn] No saved profile found for '{a_name}'. Generating profile based on name..." + Style.RESET_ALL)
+                    print(Fore.CYAN + f"[Spawn] No saved profile found for '{a_name}'. Queuing phenomenological macro to generate one..." + Style.RESET_ALL)
                     default_spawn_prompt = (
+                        f":expect file invariants/out/macros/{a_name}.txt\n"
+                        ":probe profile_author I am generating a tuning profile composed of exact shell configuration commands || I am generating conversational text\n"
+                        ":probe backfill profile_author\n"
+                        ":steer profile_author 1.5\n"
                         "You are generating a tuning profile for an agent named '$a_name'. "
                         "Respond ONLY with a series of lines starting with :tune, :steer, or :label to configure this persona. "
                         "For example: ':tune response_tokens 128\\n:steer accuracy 0.5'. "
                         "Output no other text."
                     )
                     g_prompt = load_prompt("spawn", default_spawn_prompt, a_name=a_name)
-                    g_out = generate_agentic_text(
-                        model, instruction=g_prompt, config=config,
-                        max_new_tokens=200, chatty_log=False, pre_formatted=False
-                    )
-                    if g_out:
-                        _old_t, _old_p, _old_tb = tuner, probes, tuner_bindings
-                        tuner, probes, tuner_bindings = new_agent.tuner, new_agent.probes, new_agent.tuner_bindings
-                        g_lines = [l.strip() for l in g_out.splitlines() if l.strip().startswith(":")]
-                        print(Fore.CYAN + f"[Spawn] Generated {len(g_lines)} config commands for '{a_name}'." + Style.RESET_ALL)
-                        for cmd in g_lines:
-                            if cmd.startswith(":tune"):
-                                targs = cmd[len(":tune"):].split()
-                                if len(targs) >= 2:
-                                    try: tuner.set(targs[0], float(targs[1]))
-                                    except: pass
-                        new_agent.tuner, new_agent.probes, new_agent.tuner_bindings = tuner, probes, tuner_bindings
-                        tuner, probes, tuner_bindings = _old_t, _old_p, _old_tb
-                    else:
-                        print(Fore.CYAN + f"[Spawn] Generation failed, using default state." + Style.RESET_ALL)
+                    queue_macro_text(g_prompt, input_queue)
+                    print(Fore.YELLOW + f"        -> Run ':spawn {a_name} {mode}' again after generation completes." + Style.RESET_ALL)
+                    continue
                 if mode == "join":
                     if not any(a.name == a_name for a in joined_agents):
                         joined_agents.append(new_agent)
@@ -4108,9 +4084,14 @@ def main():
                 if command_because:
                     because_ctx = f"The operator provided the following underlying reason/rationale for this macro:\n{command_because}\nMake sure your generated macro commands strongly reflect this rationale.\n\n"
                     print(Fore.CYAN + "[Solve] Passing your 'because' rationale to the model." + Style.RESET_ALL)
-
                 default_solve_prompt = (
-                    "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
+                    ":expect macro $sname\n"
+                    ":probe macro_author I am writing a precise list of colon-prefixed shell commands || I am generating conversational text\n"
+                    ":probe backfill macro_author\n"
+                    ":steer macro_author 1.5\n"
+                    ":probe solve_goal I am fulfilling the user's specific request: $goal || I am doing something else\n"
+                    ":probe backfill solve_goal\n"
+                    ":steer solve_goal 1.5\n"
                     "You write macros for an interactive cognition shell. A macro is a list of ':' "
                     "commands, one per line.$prompt_args_str\n\n"
                     "$command_hints_str"
@@ -4122,8 +4103,6 @@ def main():
                     "$staged_ctx"
                     "$because_ctx"
                     "Write a macro named '$sname' that does: $goal\n"
-                    "Output ONLY the command lines, nothing else.<|eot_id|>"
-                    "<|start_header_id|>assistant<|end_header_id|>\n\n"
                 )
                 prompt = load_prompt(
                     "solve", 
@@ -4136,73 +4115,8 @@ def main():
                     sname=sname,
                     goal=goal
                 )
-                print(Fore.CYAN + f"[Solve] Asking the model to write macro ':{sname}' for: {goal}" + Style.RESET_ALL)
-                try:
-                    sug = generate_agentic_text(model, instruction=prompt, config=config, pre_formatted=True, max_new_tokens=300)
-                except Exception as e:
-                    print(Fore.RED + f"[Solve] Generation failed: {e}" + Style.RESET_ALL)
-                    continue
-                cmd_lines = [ln.strip() for ln in (sug or "").splitlines() if ln.strip().startswith(":") or ln.strip().startswith("#")]
-                if not any(ln.startswith(":") for ln in cmd_lines):
-                    print(Fore.YELLOW + f"[Solve] The model produced no commands. Raw output:\n{(sug or '').strip()[:400]}" + Style.RESET_ALL)
-                    continue
-
-                if not arg_names:
-                    for ln in cmd_lines:
-                        if ln.startswith("# args:"):
-                            inferred = ln[len("# args:"):].split(",")
-                            for i, arg in enumerate(inferred):
-                                spec = parse_macro_arg_spec(arg.strip(), fallback=f"arg{i + 1}")
-                                if spec["name"] not in clean_names:
-                                    clean_names.append(spec["name"])
-                                    arg_specs.append(spec)
-                            if clean_names:
-                                print(Fore.CYAN + f"[Solve] Inferred parameters from model: {', '.join(clean_names)}" + Style.RESET_ALL)
-                            break
-                # Guardrail: flag any line whose leading :command isn't a real
-                # command or a known macro alias (e.g. the model inventing
-                # ':choose'), so a macro that would silently fail later is caught
-                # at creation instead of cascading at run time.
-                known_cmd = _all_shell_commands() | {sname}
-                unknown_cmds = []
-                hidden_cmds = []
-                for ln in cmd_lines:
-                    if not ln.startswith(":"):
-                        continue
-                    toks = ln[1:].split()
-                    w = toks[0].lower() if toks else ""
-                    if w and w in hidden_commands:
-                        hidden_cmds.append(f":{w}")
-                    elif w and w not in known_cmd:
-                        unknown_cmds.append(f":{w}")
-                if unknown_cmds:
-                    print(
-                        Fore.YELLOW
-                        + f"[Solve] warning: {', '.join(sorted(set(unknown_cmds)))} is not a known command or macro -- "
-                        + "this macro may fail when run. (choose/auto are ARGUMENTS to a command, not commands.)"
-                        + Style.RESET_ALL
-                    )
-                if hidden_cmds:
-                    print(
-                        Fore.YELLOW
-                        + f"[Solve] warning: generated macro uses hidden command(s): {', '.join(sorted(set(hidden_cmds)))}. "
-                        + "Hidden commands are deliberately excluded from model-authored macros/solves/games unless you accept this anyway."
-                        + Style.RESET_ALL
-                    )
-                dest = os.path.join(ROOT, "invariants", "out", "macros", f"{sname}.txt")
-                # Every :solve output is STAGED, not written/aliased, until the
-                # operator :accepts it -- so any macro (named or model-chosen) can
-                # be reviewed and :rejected first.
-                warn_note = " -- see the warning above" if (unknown_cmds or hidden_cmds) else ""
-                pending_solve_proposal = {
-                    "name": sname, "goal": goal, "clean_names": clean_names,
-                    "arg_specs": [spec["header"] for spec in arg_specs],
-                    "cmd_lines": cmd_lines, "dest": dest,
-                }
-                print(Fore.YELLOW + Style.BRIGHT + f"[Solve] Proposed ':{sname}' ({len(cmd_lines)} command(s)) -- NOT adopted yet{warn_note}:" + Style.RESET_ALL)
-                for ln in cmd_lines:
-                    print(Fore.CYAN + f"  {ln}" + Style.RESET_ALL)
-                print(Fore.YELLOW + "         Type :accept to adopt it as :" + sname + ", or :reject to discard." + Style.RESET_ALL)
+                print(Fore.CYAN + f"[Solve] Queuing phenomenological macro 'solve.txt' to generate ':{sname}' for: {goal}" + Style.RESET_ALL)
+                queue_macro_text(prompt, input_queue)
                 continue
 
             # Direct parameterized-macro invocation: ':<name> args' runs a known
@@ -4303,7 +4217,7 @@ def main():
                             },
                         )
                         print(Fore.CYAN + f"\n--- Resumed Session {resumed_session} ---" + Style.RESET_ALL)
-                        for r_role, r_text, r_ts, *_ in recovered:
+                        for r_role, r_name, r_text, r_ts, *_ in recovered:
                             ts_prefix = f"[{r_ts.split('T')[1][:8]}] " if show_timestamps and "T" in r_ts else ""
                             name = "You: " if r_role == "user" else "Me: "
                             color = Fore.MAGENTA + Style.BRIGHT if r_role == "user" else Fore.GREEN + Style.BRIGHT
@@ -4691,7 +4605,10 @@ def main():
                         print(Fore.YELLOW + f"[Doc Rewrite] {exc}" + Style.RESET_ALL)
                         continue
                     default_doc_rewrite = (
-                        "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
+                        ":expect file $out_path\n"
+                        ":probe doc_rewriter I am rewriting the source text according to the user's specific reason: $reason || I am answering a question\n"
+                        ":probe backfill doc_rewriter\n"
+                        ":steer doc_rewriter 1.5\n"
                         "Rewrite the file below into a better version, guided by the operator's reason. "
                         "Preserve factual meaning, important details, headings, lists, links, code fences, and code syntax when present. "
                         "Do not explain what you changed. Output ONLY the complete rewritten file content.\n\n"
@@ -4705,46 +4622,12 @@ def main():
                         default_doc_rewrite,
                         basename_in=os.path.basename(path_str),
                         basename_out=os.path.basename(out_path),
-                        reason=reason
-                    ) + f"{original_text}\n=== ORIGINAL DOCUMENT END ===<|eot_id|>\n<|start_header_id|>assistant<|end_header_id|>\n\n"
-                    print(Fore.CYAN + f"[Doc Rewrite] Rewriting {os.path.basename(path_str)} because {reason}..." + Style.RESET_ALL)
-                    try:
-                        rewritten = generate_agentic_text(
-                            model,
-                            instruction=prompt,
-                            config=config,
-                            pre_formatted=True,
-                            chatty_log=False,
-                            max_new_tokens=max(512, min(4096, int(len(original_text) / 3) + 512)),
-                        )
-                    except Exception as exc:
-                        print(Fore.RED + f"[Doc Rewrite] Generation failed: {exc}" + Style.RESET_ALL)
-                        continue
-                    rewritten = clean_rewrite_output(rewritten)
-                    if not rewritten:
-                        print(Fore.YELLOW + "[Doc Rewrite] Model returned no rewritten content; nothing saved." + Style.RESET_ALL)
-                        continue
-                    if original_text.endswith("\n") and not rewritten.endswith("\n"):
-                        rewritten += "\n"
-                    try:
-                        with open(out_path, "w", encoding="utf-8", newline="") as wf:
-                            wf.write(rewritten)
-                    except OSError as exc:
-                        print(Fore.RED + f"[Doc Rewrite] Could not save rewrite: {exc}" + Style.RESET_ALL)
-                        continue
-                    memory.append_event(
-                        "document_rewritten",
-                        text=f"{os.path.basename(path_str)} -> {os.path.basename(out_path)}",
-                        tags=["document", "rewrite"],
-                        provenance={
-                            "source_path": os.path.abspath(path_str),
-                            "output_path": os.path.abspath(out_path),
-                            "because": reason,
-                            "source_chars": len(original_text),
-                            "output_chars": len(rewritten),
-                        },
-                    )
-                    print(Fore.GREEN + f"[Doc Rewrite] Saved rewritten file: {out_path}" + Style.RESET_ALL)
+                        reason=reason,
+                        out_path=out_path
+                    ) + f"{original_text}\n=== ORIGINAL DOCUMENT END ===\n"
+                    print(Fore.CYAN + f"[Doc Rewrite] Queuing phenomenological macro to rewrite {os.path.basename(path_str)} because {reason}..." + Style.RESET_ALL)
+                    queue_macro_text(prompt, input_queue)
+                    continue
                 else:
                     path_part, _, why = dargs.partition(" because ")
                     path_str = path_part.strip().strip('"')
@@ -5359,20 +5242,20 @@ def main():
                     gcfg2["rules"]["goal"] = f"Each turn, make one deliberate move to increase {focus}; name the move and why it should raise {focus}."
                     if minus:
                         gcfg2["rules"]["avoid"] = f"reduce {', '.join(minus)} while doing so."
-                    try:
-                        default_premise_prompt = (
-                            "In one vivid sentence, describe a short cooperative game whose whole point is for you to increase your own $focus. Reply with ONLY that sentence."
-                        )
-                        premise_prompt = load_prompt("game_premise", default_premise_prompt, focus=focus)
-                        premise = generate_agentic_text(
-                            model,
-                            instruction=premise_prompt,
-                            config=config, max_new_tokens=60, chatty_log=False, pre_formatted=False,
-                        )
-                        if premise and premise.strip():
-                            gcfg2["rules"]["premise"] = premise.strip().splitlines()[0][:300]
-                    except Exception:
-                        pass
+                    default_premise_prompt = (
+                        f":expect macro premise_{auto_name}\n"
+                        ":probe premise_author I am writing exactly ONE shell command to set a game premise || I am generating conversational text\n"
+                        ":probe backfill premise_author\n"
+                        ":steer premise_author 1.5\n"
+                        "In one vivid sentence, describe a short cooperative game whose whole point is for you to increase your own $focus.\n"
+                        "Write a macro containing exactly ONE command to set this premise.\n"
+                        "The command must be formatted exactly like this:\n"
+                        ":game $auto_name +premise [your one vivid sentence here]\n"
+                        "Output ONLY that command line, nothing else."
+                    )
+                    premise_prompt = load_prompt("game_premise", default_premise_prompt, focus=focus, auto_name=auto_name)
+                    print(Fore.CYAN + f"[Game] Queuing phenomenological macro to generate a premise for '{auto_name}'..." + Style.RESET_ALL)
+                    queue_macro_text(premise_prompt, input_queue)
                     save_game_config(auto_rules_path, gcfg2)
                     model_proposed_game = auto_name
                     print(Fore.GREEN + Style.BRIGHT + f"[Game] Auto-designed '{auto_name}' to improve {focus}." + Style.RESET_ALL)
@@ -6505,6 +6388,21 @@ def main():
                 else:
                     print(Fore.YELLOW + "[Place] Usage: :place <probe> <+|->" + Style.RESET_ALL)
                 continue
+            if user_input.lower().startswith(":expect "):
+                eargs = user_input.strip().split()
+                if len(eargs) < 2:
+                    print(Fore.YELLOW + "[Expect] Usage: :expect <name> | :expect macro <name> | :expect file <path> | :expect autocomplete" + Style.RESET_ALL)
+                    continue
+                etype = eargs[1].lower()
+                if etype not in ("macro", "file", "autocomplete", "var"):
+                    ename = eargs[1]
+                    etype = "var"
+                else:
+                    ename = eargs[2] if len(eargs) > 2 else ""
+                global _pending_expect
+                _pending_expect = {"type": etype, "name": ename}
+                print(Fore.CYAN + f"[Expect] Intercepting the model's next turn for type '{etype}' ('{ename}')." + Style.RESET_ALL)
+                continue
             if user_input.lower().startswith(":suggest"):
                 sargs = user_input.strip().split()
                 _arch = sum(
@@ -6523,14 +6421,16 @@ def main():
                         active_probes = ", ".join(probes.keys()) if probes else "None"
                         active_steers = ", ".join(k for k in tuner.triggers.keys() if k.startswith("steer_") or "_alpha" in k)
                         default_suggest_prompt = (
-                            "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
+                            ":expect autocomplete\n"
+                            ":probe command_author I am suggesting exactly ONE valid completion for the user's shell command || I am generating conversational text\n"
+                            ":probe backfill command_author\n"
+                            ":steer command_author 1.5\n"
                             "You are a command autocomplete assistant for an interactive agent shell.\n"
                             "The user has started typing a command: '$prefix_cmd'\n"
                             "Currently active probes: $active_probes\n"
                             "Active steers: $active_steers\n"
                             "Please provide exactly ONE valid completion for this command based on the available shell capabilities. "
-                            "Output only the full completed command string (starting with '$prefix_cmd'), and nothing else.<|eot_id|>"
-                            "<|start_header_id|>assistant<|end_header_id|>\n\n"
+                            "Output only the full completed command string (starting with '$prefix_cmd'), and nothing else."
                         )
                         prompt = load_prompt(
                             "suggest_autocomplete",
@@ -6539,26 +6439,8 @@ def main():
                             active_probes=active_probes,
                             active_steers=active_steers
                         )
-                        print(Fore.CYAN + f"[Suggest] Asking model to complete '{prefix_cmd}'..." + Style.RESET_ALL)
-                        completion = generate_agentic_text(
-                            model,
-                            instruction=prompt,
-                            config=config,
-                            pre_formatted=True,
-                            max_new_tokens=40,
-                            chatty_log=False
-                        )
-                        completion = (completion or "").strip()
-                        if completion.startswith(prefix_cmd):
-                            print(Fore.GREEN + f"[Suggest] Auto-completion:\n  {completion}" + Style.RESET_ALL)
-                            print(Fore.CYAN + f"  -> Press UP and copy it, or run: :suggest apply" + Style.RESET_ALL)
-                            # We can stash this completion so `:suggest apply` could pick it up, 
-                            # but for now we just print it. If they run `:suggest apply` it won't 
-                            # run this specifically unless we save it.
-                            # We'll save it to a global/local variable `_last_completion`
-                            _last_completion = completion
-                        else:
-                            print(Fore.YELLOW + f"[Suggest] Model failed to complete the command (returned: {completion})" + Style.RESET_ALL)
+                        print(Fore.CYAN + f"[Suggest] Queuing phenomenological macro to complete '{prefix_cmd}'..." + Style.RESET_ALL)
+                        queue_macro_text(prompt, input_queue)
                         continue
                         
                     target_probe = re.sub(r"[^a-z0-9_]", "_", sargs[1].lower())[:40]
@@ -8007,6 +7889,37 @@ def main():
                     probe_tool_result=active_probe_tool_result,
                     command_tool_result=active_command_tool_result,
                 )
+                
+                global _pending_expect
+                if _pending_expect:
+                    etype = _pending_expect.get("type")
+                    ename = _pending_expect.get("name")
+                    _pending_expect = None
+                    print(Fore.CYAN + f"\n[Expect] Intercepted response for {etype} '{ename}'." + Style.RESET_ALL)
+                    if etype == "macro":
+                        lines = [ln.strip() for ln in response.splitlines() if ln.strip().startswith(":")]
+                        if not lines:
+                            print(Fore.YELLOW + f"[Expect] Model generated no commands." + Style.RESET_ALL)
+                        else:
+                            pending_solve_proposal = {"name": ename, "commands": lines}
+                            print(Fore.GREEN + f"[Expect] Staged {len(lines)} command(s) as macro '{ename}'. Type :accept to save/run it." + Style.RESET_ALL)
+                    elif etype == "file":
+                        out_path = os.path.join(ROOT, ename)
+                        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+                        with open(out_path, "w", encoding="utf-8") as wf:
+                            wf.write(response)
+                        print(Fore.GREEN + f"[Expect] Wrote response to {out_path}." + Style.RESET_ALL)
+                    elif etype == "autocomplete":
+                        global _last_completion
+                        _last_completion = response.strip()
+                        print(Fore.GREEN + f"[Expect] Suggested: '{_last_completion}'. Type :accept to use it." + Style.RESET_ALL)
+                    elif etype == "var":
+                        global _shell_vars
+                        _shell_vars[ename] = response.strip()
+                        print(Fore.GREEN + f"[Expect] Saved response to variable ${ename}." + Style.RESET_ALL)
+                    # Skip adding this meta-turn to the chat context/memory
+                    continue
+
                 if show_timestamps:
                     print(Fore.GREEN + Style.BRIGHT + f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] Me: " + Style.RESET_ALL)
                 print(response, end="")
