@@ -4889,7 +4889,6 @@ def main():
                 print(Fore.CYAN + "[System] Refreshing referenced files from disk (session + model stay live)..." + Style.RESET_ALL)
                 probes.clear()
                 try:
-                    import torch
                     if os.path.isdir(PROBE_DIR):
                         for pf in os.listdir(PROBE_DIR):
                             if pf.endswith(".pt"):
@@ -6170,7 +6169,6 @@ def main():
                         + Style.RESET_ALL,
                         flush=True,
                     )
-                    import torch
                     with torch.no_grad():
                         for bf_i, br in enumerate(archive):
                             b_ids = _bf_inputs(model, br.text[:600])
@@ -6492,7 +6490,6 @@ def main():
                         
                     print(Fore.CYAN + f"[Suggest] Projecting your reason into the model's representation space to find the best matching probes..." + Style.RESET_ALL)
                     from invariants.engine import _inputs, _hidden_states
-                    import torch
                     
                     ids = _inputs(model, command_because[:600])
                     hs = _hidden_states(model, ids["input_ids"], ids.get("attention_mask"))
