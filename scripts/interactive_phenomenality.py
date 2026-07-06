@@ -2602,7 +2602,7 @@ def get_hardware_appropriate_model():
         return "Qwen/Qwen2.5-1.5B-Instruct"
 
 def main():
-    global _last_completion
+    global _last_completion, _pending_expect, _shell_vars
     os.chdir(ROOT)
     print(Fore.CYAN + Style.BRIGHT + "================================================")
     print("      HUMBLE SYNTHESIS - INTERACTIVE SHELL      ")
@@ -3272,7 +3272,6 @@ def main():
     if startup_user_input:
         input_queue.append(startup_user_input)
 
-    global _shell_vars
     _shell_vars = {}
 
     while True:
@@ -5029,7 +5028,6 @@ def main():
                     except Exception as e:
                         print(Fore.RED + f"[Accept] Could not save macro: {e}" + Style.RESET_ALL)
                     continue
-                global _last_completion
                 if _last_completion is not None:
                     if verb == ":accept":
                         print(Fore.GREEN + f"[Accept] Queued autocomplete: {_last_completion}" + Style.RESET_ALL)
@@ -6399,7 +6397,6 @@ def main():
                     etype = "var"
                 else:
                     ename = eargs[2] if len(eargs) > 2 else ""
-                global _pending_expect
                 _pending_expect = {"type": etype, "name": ename}
                 print(Fore.CYAN + f"[Expect] Intercepting the model's next turn for type '{etype}' ('{ename}')." + Style.RESET_ALL)
                 continue
@@ -7890,7 +7887,6 @@ def main():
                     command_tool_result=active_command_tool_result,
                 )
                 
-                global _pending_expect
                 if _pending_expect:
                     etype = _pending_expect.get("type")
                     ename = _pending_expect.get("name")
@@ -7910,11 +7906,9 @@ def main():
                             wf.write(response)
                         print(Fore.GREEN + f"[Expect] Wrote response to {out_path}." + Style.RESET_ALL)
                     elif etype == "autocomplete":
-                        global _last_completion
                         _last_completion = response.strip()
                         print(Fore.GREEN + f"[Expect] Suggested: '{_last_completion}'. Type :accept to use it." + Style.RESET_ALL)
                     elif etype == "var":
-                        global _shell_vars
                         _shell_vars[ename] = response.strip()
                         print(Fore.GREEN + f"[Expect] Saved response to variable ${ename}." + Style.RESET_ALL)
                     # Skip adding this meta-turn to the chat context/memory
