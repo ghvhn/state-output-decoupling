@@ -15,7 +15,8 @@ The issue is not ordinary reading, citation, discussion, reproducible research,
 or good-faith forks that preserve provenance. The issue is anonymous ingestion:
 using the repository while concealing where it came from, who made it, what was
 taken, how it was transformed, and whether it contributed to a commercial or
-institutional AI system.
+institutional AI system. I specifically condemn anonymity used as a way to
+circumvent attribution, auditability, licensing obligations, or compensation.
 
 For clarity, I object to:
 
@@ -28,6 +29,9 @@ For clarity, I object to:
 - using this work to improve, benchmark, steer, evaluate, or package an AI
   system while denying the repository owner notice, attribution, auditability,
   and compensation.
+- using anonymity, aggregation, laundering through intermediate datasets, or
+  removal of source metadata as a way to avoid paying for use that requires
+  compensation.
 
 Anyone who has already used this repository in such a system should disclose
 the use, identify the copied snapshot or commit range, describe the downstream
@@ -39,4 +43,5 @@ Rider. That rider is part of the license terms for this repository. Anonymous
 use does not make those terms disappear; it makes the use less accountable.
 
 This announcement is public notice that silent, unattributed AI extraction of
-this repo is not accepted, not invited, and not consented to.
+this repo, including anonymous use meant to bypass compensation, is not
+accepted, not invited, and not consented to.
