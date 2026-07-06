@@ -1588,7 +1588,7 @@ def build_session_restore_macro(probes, macro_aliases, exposed_commands, exposed
         stats["exposed_knobs"] += 1
 
     for word, mode in sorted((exposed_commands or {}).items()):
-        if word == "expose" or word in hidden_commands:
+        if word == "expose":
             continue
         suffix = " direct" if str(mode).lower() == "direct" else ""
         lines.append(f":expose :{word}{suffix}")
@@ -1998,15 +1998,16 @@ COMMAND_HELP_LINES = [
     "          :game no | decline           (decline the game the model just proposed)",
     "          :accept [n|all] | :reject [n|all]  (a game may STAGE a command instead of",
     "                running it; nothing a game chose runs until you accept it here)",
-    "          :expose :<command> [stage|direct] | :expose off <target>  (make a command or",
-    "                macro command callable by the model as <<CMD: :command args>>;",
+    "          :expose :<command> [stage|direct] | :expose off <target>  (runtime tool access:",
+    "                make/remove a command callable by the model as <<CMD: :command args>>;",
     "                bare/default = staged for :accept, direct = queued immediately;",
     "                off works for commands, probes, and knobs with the same order)",
     "          :expose <probe|knob> [off]  (without leading ':', expose a probe sensor",
     "                or tuner knob to the model's <<PROBE: name>> tool)",
-    "          :hide <command> | :hide off <command>  (hide/reveal a command from model-facing help,",
-    "                suggestions, exposed-command discovery, and <<CMD>> hints; also",
-    "                unexposes it. Operator help and execution still work)",
+    "          :hide <command> | :hide off <command>  (documentation/writing visibility:",
+    "                hide/reveal a command from model-facing help, suggestions, command",
+    "                discovery, and macro/profile writing hints. Tool access is unchanged;",
+    "                use :expose off :command to remove runtime access)",
     "          :impact                      (consequence trail: what its words caused,",
     "                and whether experienced impact tracks better deliberation)",
     "          :clock                       (last turn's generation time + tok/s and memory;",
@@ -2099,6 +2100,23 @@ def find_command_help_entries(query, lines=COMMAND_HELP_LINES):
     return matches
 
 
+def visible_command_help_lines(hidden_commands=None, lines=COMMAND_HELP_LINES):
+    """Filter the command reference for model-facing writing surfaces."""
+    hidden_commands = set(hidden_commands or [])
+    if not hidden_commands:
+        return list(lines)
+    out = []
+    for entry in command_help_entries(lines):
+        head = entry[0].strip()
+        if head.startswith("Commands:"):
+            head = head[len("Commands:"):].strip()
+        words = {m.group(1).lower() for m in re.finditer(r":([a-z_][\w-]*)", head)}
+        if words and words & hidden_commands:
+            continue
+        out.extend(entry)
+    return out
+
+
 def render_commands_md(lines=COMMAND_HELP_LINES):
     """Render the in-shell command help into a Markdown reference. A 10-space
     indent (or the leading 'Commands:' line) starts an entry; deeper indents
@@ -2139,6 +2157,10 @@ def render_commands_md(lines=COMMAND_HELP_LINES):
         out.append(f"- `{sig}` -- {desc}" if desc else f"- `{sig}`")
     out.append("")
     return "\n".join(out)
+
+
+def render_visible_commands_md(hidden_commands=None, lines=COMMAND_HELP_LINES):
+    return render_commands_md(visible_command_help_lines(hidden_commands, lines))
 
 
 def write_commands_md(path=None, lines=COMMAND_HELP_LINES):
@@ -2216,13 +2238,13 @@ def build_model_help_text(solve_macros=None, exposed_commands=None, exposed_knob
         )
         lines.extend([
             "  <<CMD: :command args>>    call an operator-exposed command tool",
-            "                             Currently exposed: " + exposed_list + ".",
+            "                             Documented here: " + exposed_list + ".",
             "                             Semicolon chains run only exposed commands; :macro keeps semicolons as its body.",
         ])
     else:
         expose_hint = (
-            "unavailable until the operator exposes a command"
-            if "expose" in hidden_commands
+            "no command tools are documented here"
+            if exposed_commands
             else "unavailable until the operator exposes a command with :expose"
         )
         lines.append("  <<CMD: ...>>              " + expose_hint)
@@ -3431,12 +3453,12 @@ def main():
         lines.append("Visible commands/macros: " + ", ".join(f":{c}" for c in visible_cmds[:80]) + (" ..." if len(visible_cmds) > 80 else ""))
         if hidden:
             lines.append("Hidden from model-facing discovery: " + ", ".join(f":{c}" for c in hidden[:40]))
-        lines.append("Model-callable command tools: " + (", ".join(exposed[:40]) if exposed else "none"))
+        lines.append("Runtime command tools exposed with :expose: " + (", ".join(exposed[:40]) if exposed else "none"))
         if exposed_probe_names or exposed_knobs:
             lines.append("Model-readable probes/knobs: " + ", ".join(exposed_probe_names + sorted(exposed_knobs)))
         else:
             lines.append("Model-readable probes/knobs: none")
-        macros = sorted(macro_aliases)
+        macros = sorted(m for m in macro_aliases if m not in hidden_commands)
         lines.append("Macro aliases: " + (", ".join(macros[:max_macros]) + (" ..." if len(macros) > max_macros else "") if macros else "none"))
         return "\n".join(lines)
 
@@ -3511,9 +3533,6 @@ def main():
             exposed_commands = {str(k): str(v) for k, v in json.load(_ecf).items()}
     except (OSError, ValueError):
         exposed_commands = {}
-    if hidden_commands:
-        exposed_commands = {k: v for k, v in exposed_commands.items() if k not in hidden_commands}
-
     exposed_knobs = set()
     try:
         with open(EXPOSED_KNOB_PATH, "r", encoding="utf-8") as _ekf:
@@ -3583,9 +3602,6 @@ def main():
                 word = command_word(cmd)
                 if not word:
                     result_lines.append(f"- refused malformed command: {cmd}")
-                    continue
-                if word in hidden_commands:
-                    result_lines.append("- refused an unavailable command.")
                     continue
                 if word == "expose":
                     result_lines.append("- refused :expose; the model cannot grant itself command tools.")
@@ -4181,7 +4197,7 @@ def main():
                         print(Fore.CYAN + "[Spawn] Passing your 'because' rationale to the model." + Style.RESET_ALL)
 
                     valid_knobs = ", ".join(sorted(k for k in tuner.triggers if not k.startswith("probe_") and k not in SPAWN_FAKE_KNOBS))
-                    command_reference = render_commands_md(COMMAND_HELP_LINES)
+                    command_reference = render_visible_commands_md(hidden_commands, COMMAND_HELP_LINES)
                     spawn_state_report = _spawn_state_report(a_name, new_agent.tuner, new_agent.probes)
 
                     default_spawn_prompt = (
@@ -4192,13 +4208,13 @@ def main():
                         ":steer profile_author 1.5\n"
                         "You are generating an executable spawn calibration profile for an agent named '$a_name'. "
                         f"{because_ctx}"
-                        "The full shell command reference is loaded below so you can reason from the actual command surface, not guesses.\n"
+                        "The visible shell command reference is loaded below so you can reason from the actual writing surface, not guesses.\n"
                         "$command_reference\n\n"
                         "The live hook/evidence report is loaded below. It is the map of what the spawned agent can hook onto, current/default-ish values, observed/tried values, active probes, macros, command exposure, documents, and queued work.\n"
                         "$spawn_state_report\n\n"
                         "Output ONLY runnable shell commands or macro invocations, one per line; no prose, headings, bullets, markdown, or explanations. "
                         "The command reference is authoritative: use any known command/macro that serves the spawned agent's setup, context, calibration, or future workflow. "
-                        "If access should be narrowed, use explicit shell controls such as :expose off :command, :expose off <probe_or_knob>, or :hide :command; reveal with :hide off :command. Do not rely on hidden spawn-loader filtering. "
+                        "Use :hide/:hide off for documentation and writing visibility. Use :expose/:expose off for runtime tool access, e.g. @agent :expose :command grants a callable tool and @agent :hide off :command makes it visible for profile/macro writing. Do not rely on hidden spawn-loader filtering. "
                         "Use trailing because-clauses to record purpose for context or side-effect commands. "
                         "Use :doc when the spawned agent needs a document as working context; for example :doc readings because <purpose>, followed by :doc read/:doc next/:doc inject when useful. "
                         "Use :queue <future command> for commands that should run later when they become useful or when enough evidence exists; queued commands must still be runnable shell commands. "
@@ -4733,8 +4749,8 @@ def main():
                         "Available macros include:\n" + "\n".join(f"  {m}" for m in existing_macros) + "\n\n"
                     )
                 command_hints_str = (
-                    "Here is the reference for the shell commands you can use:\n\n"
-                    + render_commands_md(COMMAND_HELP_LINES)
+                    "Here is the visible reference for the shell commands you can use while writing this macro:\n\n"
+                    + render_visible_commands_md(hidden_commands, COMMAND_HELP_LINES)
                     + "\n\n"
                 )
 
@@ -5624,7 +5640,7 @@ def main():
                     with open(EXPOSED_CMD_PATH, "r", encoding="utf-8") as _ecf:
                         _loaded_exposed = {str(k): str(v) for k, v in json.load(_ecf).items()}
                     exposed_commands.clear()
-                    exposed_commands.update({k: v for k, v in _loaded_exposed.items() if k not in hidden_commands})
+                    exposed_commands.update(_loaded_exposed)
                     print(Fore.GREEN + f"[System] Reloaded {len(exposed_commands)} exposed command(s)." + Style.RESET_ALL)
                 except (OSError, ValueError):
                     pass
@@ -5773,9 +5789,9 @@ def main():
                 hargs = user_input.strip()[len(":hide"):].split()
                 if not hargs:
                     if hidden_commands:
-                        print(Fore.CYAN + "[Hide] Hidden from the model: " + ", ".join(f":{w}" for w in sorted(hidden_commands)) + Style.RESET_ALL)
+                        print(Fore.CYAN + "[Hide] Hidden from model-facing writing/help: " + ", ".join(f":{w}" for w in sorted(hidden_commands)) + Style.RESET_ALL)
                     else:
-                        print(Fore.CYAN + "[Hide] No commands are hidden. Use ':hide <command>' to hide one from model-facing help/discovery, or ':hide off <command>' to reveal it." + Style.RESET_ALL)
+                        print(Fore.CYAN + "[Hide] No commands are hidden. Use ':hide <command>' to hide one from model-facing writing/help, or ':hide off <command>' to reveal it." + Style.RESET_ALL)
                     continue
                 if hargs[0].lower() in ("off", "show", "reveal", "visible"):
                     if len(hargs) < 2:
@@ -5789,7 +5805,7 @@ def main():
                     if word in hidden_commands:
                         hidden_commands.remove(word)
                         _save_hidden_commands()
-                        print(Fore.GREEN + f"[Hide] ':{word}' is visible to model-facing help/discovery again." + Style.RESET_ALL)
+                        print(Fore.GREEN + f"[Hide] ':{word}' is visible to model-facing writing/help again." + Style.RESET_ALL)
                     else:
                         print(Fore.YELLOW + f"[Hide] ':{word}' wasn't hidden." + Style.RESET_ALL)
                     continue
@@ -5800,12 +5816,8 @@ def main():
                     print(Fore.YELLOW + f"[Hide] Unknown mode '{mode_arg}'. Use ':hide <command>' or ':hide off <command>'." + Style.RESET_ALL)
                     continue
                 hidden_commands.add(word)
-                was_exposed = exposed_commands.pop(word, None) is not None
                 _save_hidden_commands()
-                if was_exposed:
-                    _save_exposed_commands()
-                extra = " and unexposed" if was_exposed else ""
-                print(Fore.GREEN + f"[Hide] ':{word}' is hidden from model-facing help/discovery{extra}. It still works for the operator." + Style.RESET_ALL)
+                print(Fore.GREEN + f"[Hide] ':{word}' is hidden from model-facing writing/help. Runtime tool access is unchanged; use :expose off :{word} to remove that." + Style.RESET_ALL)
                 continue
 
             if _cmdword == ":expose":
@@ -5816,7 +5828,8 @@ def main():
                         print(Fore.CYAN + "[Expose] Nothing exposed. Use ':expose :command [stage|direct]' for command tools, or ':expose <probe|knob>' for model-readable probes/knobs." + Style.RESET_ALL)
                     if exposed_commands:
                         for w, mode in sorted(exposed_commands.items()):
-                            print(Fore.CYAN + f"[Expose] command :{w}  ({mode})" + Style.RESET_ALL)
+                            hidden_note = " [hidden from writing/help]" if w in hidden_commands else ""
+                            print(Fore.CYAN + f"[Expose] command :{w}  ({mode}){hidden_note}" + Style.RESET_ALL)
                     if exposed_probe_names:
                         print(Fore.CYAN + "[Expose] probes: " + ", ".join(exposed_probe_names) + Style.RESET_ALL)
                     if exposed_knobs:
@@ -5873,10 +5886,7 @@ def main():
                 if word == "expose":
                     print(Fore.RED + "[Expose] refusing to expose ':expose' itself -- the model could then self-grant any command." + Style.RESET_ALL)
                     continue
-                if word in hidden_commands:
-                    print(Fore.YELLOW + f"[Expose] ':{word}' is hidden from model-facing discovery. Reveal it first with ':hide off :{word}'." + Style.RESET_ALL)
-                    continue
-                known_exposable = _known_model_commands()
+                known_exposable = _all_shell_commands() - {"expose"}
                 if word not in known_exposable:
                     print(Fore.YELLOW + f"[Expose] ':{word}' isn't a command.{did_you_mean(word, known_exposable)}" + Style.RESET_ALL)
                     continue
@@ -5891,6 +5901,8 @@ def main():
                 _save_exposed_commands()
                 run_note = "is queued immediately" if mode == "direct" else "is staged for your :accept"
                 print(Fore.GREEN + f"[Expose] ':{word}' is now a model tool -- it calls <<CMD: :{word} ...>> and it {run_note} ({mode})." + Style.RESET_ALL)
+                if word in hidden_commands:
+                    print(Fore.CYAN + f"         Note: ':{word}' is still hidden from model-facing writing/help. Reveal it with ':hide off :{word}' if it should be documented too." + Style.RESET_ALL)
                 if word in EXPOSE_META_CMDS:
                     print(Fore.YELLOW + f"         WARNING: ':{word}' takes another command/macro/script as its argument, so through it the model can reach commands you did NOT expose. Expose it only if you mean to." + Style.RESET_ALL)
                 elif word in macro_aliases and word not in BUILTIN_COMMANDS:
