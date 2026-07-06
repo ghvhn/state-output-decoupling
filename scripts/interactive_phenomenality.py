@@ -3646,8 +3646,9 @@ def main():
                         ":probe backfill profile_author\n"
                         ":steer profile_author 1.5\n"
                         "You are generating a tuning profile for an agent named '$a_name'. "
-                        "Respond ONLY with a series of lines starting with :tune, :steer, or :label to configure this persona. "
-                        "For example: ':tune response_tokens 128\\n:steer accuracy 0.5'. "
+                        "Respond ONLY with a series of lines starting with :probe, :tune, :steer, or :label to configure this persona. "
+                        "You can use :probe to define custom cognitive probes, and :steer to prioritize them. "
+                        "For example: ':probe creativity I invent new ideas || I repeat standard answers\\n:steer creativity 1.5\\n:tune response_tokens 128'. "
                         "Output no other text."
                     )
                     g_prompt = load_prompt("spawn", default_spawn_prompt, a_name=a_name)
