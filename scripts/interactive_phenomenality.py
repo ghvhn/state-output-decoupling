@@ -1999,8 +1999,9 @@ COMMAND_HELP_LINES = [
     "                :macro name strip <src> [dest] writes a stripped copy)",
     "          :save self <name> | choose   (alias for :macro name self; 'choose' asks",
     "                the model to generate a name based on the current tuning state)",
-    "          :spawn <name> join|replace|drop  (multi-agent support. 'join' adds to",
-    "                the panel, 'replace [N]' takes the operator slot for N turns.",
+    "          :spawn <name> join|replace|drop|generate  ('join' adds to panel, 'replace'",
+    "                                            clears it, 'drop' removes, 'generate' creates only)",
+    "                [N]' takes the operator slot for N turns.",
     "                Use @<name> :cmd to target a specific agent's tuning state)",
     "          :run <alias|file>            (queue and execute a macro's commands)",
     "          :solve <name> <goal> [: args]  (model writes a parameterized macro for an",
@@ -3585,7 +3586,7 @@ def main():
             if user_input.startswith(":spawn"):
                 sargs = user_input.split()
                 if len(sargs) < 3:
-                    print(Fore.YELLOW + "[System] Usage: :spawn <name> join | :spawn <name> replace [N] | :spawn <name> drop" + Style.RESET_ALL)
+                    print(Fore.YELLOW + "[System] Usage: :spawn <name> join | :spawn <name> replace [N] | :spawn <name> drop | :spawn <name> generate" + Style.RESET_ALL)
                     continue
                 a_name = sargs[1]
                 mode = sargs[2].lower()
@@ -3664,6 +3665,8 @@ def main():
                     replace_agent = new_agent
                     replace_turns_remaining = n_turns
                     print(Fore.GREEN + f"[Spawn] Agent '{a_name}' is replacing the user for {n_turns} turn(s)." + Style.RESET_ALL)
+                elif mode == "generate":
+                    print(Fore.CYAN + f"[Spawn] Profile for '{a_name}' generated and saved. It is ready for use." + Style.RESET_ALL)
                 continue
 
             if user_input == ":macro" or user_input.startswith(":macro "):
