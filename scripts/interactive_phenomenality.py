@@ -283,7 +283,12 @@ class AgentState:
     tuner_bindings: dict = field(default_factory=dict)
     prioritize_pin: dict = field(default_factory=lambda: {"probe": None, "mix": None})
     queued_calibrations: list = field(default_factory=list)
+    queued_commands: list = field(default_factory=list)
     labels: dict = field(default_factory=dict)
+    doc_session: object = None
+    doc_library: list = field(default_factory=list)
+    pending_document_tool_result: object = None
+    doc_autoread: object = None
 
 from invariants.tool_sense import ToolSense, Tool
 from invariants.memory_engine import MemoryEngine
@@ -1955,6 +1960,8 @@ COMMAND_HELP_LINES = [
     "                BY NAME; anchors join with '+' = fired only when EVERY stream fired;",
     "                the system evaluates the request and refuses unsafe ones --",
     "                circular strength knobs, binary streams, vacuous p100 caps)",
+    "          :queue [calibrate <name> ...|:<command>]  (retry calibrations until enough evidence;",
+    "                defer other known commands once, preserving a trailing because-purpose)",
     "          :label <probe|stream> pos|neg  (judge the MOST RECENT turn on that axis:",
     "                credits its last signal with a human outcome -- supervised evidence",
     "                alongside the automatic sense credit, so lift can reflect your judgment)",
@@ -2022,7 +2029,7 @@ COMMAND_HELP_LINES = [
     "          :save self <name> | choose   (alias for :macro name self; 'choose' asks",
     "                the model to generate a name based on the current tuning state)",
     "          :spawn <name> join|replace|drop|create  (load/create an executable calibration",
-    "                profile: probes, steers, tunes, calibrations, labels, backfill. 'join'",
+    "                profile: probes, steers, tunes, calibrations, docs, queue, labels, backfill. 'join'",
     "                adds to the panel; 'replace [N]' takes the operator slot for N turns;",
     "                'drop' removes; 'create' writes the profile only)",
     "                Use @<name> :cmd to target a specific agent's tuning state)",
@@ -3000,6 +3007,7 @@ def main():
     pending_document_tool_result = None
     pending_sandbox_tool_result = None
     pending_game_tool_result = None
+    queued_commands = []
     model_proposed_game = None
     user_proposed_game = None
     user_proposed_game_args = None
@@ -3158,8 +3166,8 @@ def main():
         return agent_tuner
 
     def _spawn_profile_runnable_lines(raw_lines, base_tuner):
-        """Keep spawn profiles executable: calibration DSL only, no prose/fake knobs."""
-        allowed = {"probe", "tune", "steer", "calibrate", "queue", "label", "place"}
+        """Keep spawn profiles executable: calibration/context DSL only, no prose/fake knobs."""
+        allowed = {"probe", "tune", "steer", "calibrate", "queue", "label", "place", "doc"}
         forbidden_tunes = {
             "embedding_size", "hidden_layers", "batch_size", "learning_rate",
             "optimizer", "cpu_cycles_per_second", "accuracy", "precision",
@@ -3181,6 +3189,12 @@ def main():
             nm = str(name or "").lower()
             bare = nm[len("probe_"):] if nm.startswith("probe_") else nm
             return nm in known_targets or bare in pending_probes or f"probe_{bare}" in known_targets
+
+        def _queued_command_from_tail(tail):
+            qt = (tail or "").strip()
+            if not qt:
+                return ""
+            return qt if qt.startswith(":") else ":" + qt
 
         for idx, raw in enumerate(raw_lines, 1):
             s = (raw or "").strip()
@@ -3292,17 +3306,44 @@ def main():
                 runnable.append(s)
                 continue
 
+            if word == "doc":
+                tail = s[len(":doc"):].strip()
+                if not tail:
+                    skipped.append(f"L{idx}: empty :doc")
+                    continue
+                head = tail.split()[0].lower()
+                if head == "rewrite" or " rewrite " in tail.lower() or tail.lower().endswith(" rewrite"):
+                    skipped.append(f"L{idx}: :doc rewrite is a file-writing command, not spawn context")
+                    continue
+                runnable.append(s)
+                continue
+
             if word == "queue":
                 tail = s[len(":queue"):].strip()
-                qparts = tail.split()
-                if qparts and qparts[0].lower() == "calibrate":
-                    target = qparts[1] if len(qparts) >= 2 else ""
-                    if not target or (not _known_or_pending(target) and target not in {"steer_cap_fraction", "steer_band"}):
-                        skipped.append(f"L{idx}: unknown queued calibration target '{target or '(none)'}'")
+                queued_cmd = _queued_command_from_tail(tail)
+                qword = command_word(queued_cmd)
+                if not qword or qword not in allowed or qword == "queue":
+                    skipped.append(f"L{idx}: :queue target must be a profile-safe future command")
+                    continue
+                if qword == "calibrate":
+                    qparts = queued_cmd[len(":calibrate"):].strip().split()
+                    target = qparts[0] if qparts else ""
+                    if target and not _known_or_pending(target) and target not in {"steer_cap_fraction", "steer_band"}:
+                        skipped.append(f"L{idx}: unknown queued calibration target '{target}'")
                         continue
-                    runnable.append(s)
-                else:
-                    skipped.append(f"L{idx}: spawn queues may only use :queue calibrate ...")
+                if qword == "tune":
+                    qparts = queued_cmd[len(":tune"):].strip().split()
+                    target = qparts[0].lower() if qparts else ""
+                    bare_target = target[len("probe_"):] if target.startswith("probe_") else target
+                    if target in forbidden_tunes or bare_target in forbidden_tunes:
+                        skipped.append(f"L{idx}: refused queued fake/non-tunable target '{target}'")
+                        continue
+                if qword == "doc":
+                    qtail = queued_cmd[len(":doc"):].strip().lower()
+                    if qtail == "rewrite" or " rewrite " in qtail or qtail.endswith(" rewrite"):
+                        skipped.append(f"L{idx}: queued :doc rewrite is not spawn context")
+                        continue
+                runnable.append(s)
                 continue
 
             if word == "place":
@@ -3540,12 +3581,33 @@ def main():
                     _agent.tuner_bindings = tuner_bindings
                     _agent.prioritize_pin = prioritize_pin
                     _agent.queued_calibrations = queued_calibrations
+                    _agent.queued_commands = queued_commands
+                    _agent.doc_session = doc_session
+                    _agent.doc_library = doc_library
+                    _agent.pending_document_tool_result = pending_document_tool_result
+                    _agent.doc_autoread = doc_autoread
                 tuner = _target_restore["tuner"]
                 probes = _target_restore["probes"]
                 tuner_bindings = _target_restore["tuner_bindings"]
                 prioritize_pin = _target_restore["prioritize_pin"]
                 queued_calibrations = _target_restore["queued_calibrations"]
+                queued_commands = _target_restore["queued_commands"]
+                doc_session = _target_restore["doc_session"]
+                doc_library = _target_restore["doc_library"]
+                pending_document_tool_result = _target_restore["pending_document_tool_result"]
+                doc_autoread = _target_restore["doc_autoread"]
                 _target_restore = None
+
+            if not input_queue and queued_commands:
+                input_queue.append((queued_commands.pop(0), True))
+                continue
+            if not input_queue:
+                for _qa in [a for a in joined_agents] + ([replace_agent] if replace_agent else []):
+                    if _qa and getattr(_qa, "queued_commands", None):
+                        input_queue.append((f"@{_qa.name} {_qa.queued_commands.pop(0)}", True))
+                        break
+                if input_queue:
+                    continue
 
             if _inline_capture is not None:
                 if len(input_queue) <= _inline_capture["queue_len"]:
@@ -3633,15 +3695,40 @@ def main():
                 _sys_tb = tuner_bindings
                 _sys_pin = prioritize_pin
                 _sys_queue = queued_calibrations
+                _sys_cmd_queue = queued_commands
+                _sys_doc_session = doc_session
+                _sys_doc_library = doc_library
+                _sys_pending_doc = pending_document_tool_result
+                _sys_doc_autoread = doc_autoread
                 tuner = replace_agent.tuner
                 probes = replace_agent.probes
                 tuner_bindings = replace_agent.tuner_bindings
                 prioritize_pin = replace_agent.prioritize_pin
                 queued_calibrations = replace_agent.queued_calibrations
+                queued_commands = replace_agent.queued_commands
+                doc_session = replace_agent.doc_session
+                doc_library = replace_agent.doc_library
+                pending_document_tool_result = replace_agent.pending_document_tool_result
+                doc_autoread = replace_agent.doc_autoread
+
+                agent_document_tool_result = pending_document_tool_result
+                pending_document_tool_result = None
+                if agent_document_tool_result is None and doc_autoread and doc_autoread.get("remaining", 0) > 0:
+                    pick = select_next_chunk(doc_library, "", doc_autoread.get("mode", "order"))
+                    if pick is not None:
+                        doc_session = doc_library[pick["session_index"]]
+                        doc_session["cursor"] = pick["chunk_index"]
+                        doc_session.setdefault("read", set()).add(pick["chunk_index"])
+                        record_chunk_read(memory, doc_session, pick["chunk_index"])
+                        agent_document_tool_result = stage_chunk(doc_session, index=pick["chunk_index"])
+                        doc_autoread["remaining"] -= 1
+                        if doc_autoread["remaining"] <= 0:
+                            doc_autoread = None
 
                 # Generate user input autonomously
                 r_prompt = build_prompt(
                     "[Your turn to respond]",
+                    document_tool_result=agent_document_tool_result,
                     session_context=session_context if session_context_enabled else None
                 )
                 _r_handles, _r_prio = _priority_steer_handles(probes, tuner, prioritize_pin)
@@ -3670,11 +3757,21 @@ def main():
                 replace_agent.tuner_bindings = tuner_bindings
                 replace_agent.prioritize_pin = prioritize_pin
                 replace_agent.queued_calibrations = queued_calibrations
+                replace_agent.queued_commands = queued_commands
+                replace_agent.doc_session = doc_session
+                replace_agent.doc_library = doc_library
+                replace_agent.pending_document_tool_result = pending_document_tool_result
+                replace_agent.doc_autoread = doc_autoread
                 tuner = _sys_tuner
                 probes = _sys_probes
                 tuner_bindings = _sys_tb
                 prioritize_pin = _sys_pin
                 queued_calibrations = _sys_queue
+                queued_commands = _sys_cmd_queue
+                doc_session = _sys_doc_session
+                doc_library = _sys_doc_library
+                pending_document_tool_result = _sys_pending_doc
+                doc_autoread = _sys_doc_autoread
                 replace_turns_remaining -= 1
                 _last_replace_name = replace_agent.name
                 if replace_turns_remaining <= 0:
@@ -3772,12 +3869,22 @@ def main():
                     "tuner_bindings": tuner_bindings,
                     "prioritize_pin": prioritize_pin,
                     "queued_calibrations": queued_calibrations,
+                    "queued_commands": queued_commands,
+                    "doc_session": doc_session,
+                    "doc_library": doc_library,
+                    "pending_document_tool_result": pending_document_tool_result,
+                    "doc_autoread": doc_autoread,
                 }
                 tuner = target_agent.tuner
                 probes = target_agent.probes
                 tuner_bindings = target_agent.tuner_bindings
                 prioritize_pin = target_agent.prioritize_pin
                 queued_calibrations = target_agent.queued_calibrations
+                queued_commands = target_agent.queued_commands
+                doc_session = target_agent.doc_session
+                doc_library = target_agent.doc_library
+                pending_document_tool_result = target_agent.pending_document_tool_result
+                doc_autoread = target_agent.doc_autoread
 
             if command_because:
                 related = set()
@@ -3998,7 +4105,7 @@ def main():
 
                     default_spawn_prompt = (
                         ":expect file invariants/out/macros/$a_name.txt\n"
-                        "# SPAWN_PROFILE_V3_COMMAND_REFERENCE\n"
+                        "# SPAWN_PROFILE_V4_AGENT_DOCS_AND_QUEUE\n"
                         ":probe profile_author I am generating a tuning profile composed of exact shell configuration commands || I am generating conversational text\n"
                         ":probe backfill profile_author\n"
                         ":steer profile_author 1.5\n"
@@ -4007,17 +4114,20 @@ def main():
                         "The full shell command reference is loaded below so you can reason from the actual command surface, not guesses.\n"
                         "$command_reference\n\n"
                         "Output ONLY runnable profile commands, one per line; no prose, headings, bullets, markdown, or explanations. "
-                        "Valid spawn profile commands are :probe, :probe adopt, :probe compose, :probe expose, :probe backfill, :tune, :tune dynamic, :steer, :calibrate, :queue calibrate, :label, and :place. "
-                        "The command reference may mention many other commands, but do not include non-profile commands in the output; profile loading deliberately skips side-effect commands such as :doc, :memory, :run, :macro, :solve, :shell, :os, :game, :sandbox, :expect, :refresh, :expose, and :hide. "
+                        "Valid spawn profile commands are :probe, :probe adopt, :probe compose, :probe expose, :probe backfill, :tune, :tune dynamic, :steer, :calibrate, :queue <future profile command>, :label, :place, and purposeful :doc context commands. "
+                        "Use :doc only when the spawned agent needs a document as working context; include a because-purpose when it matters, then use :doc read/:doc next/:doc inject as needed. "
+                        "The command reference may mention many other commands, but do not include non-profile commands in the output; profile loading deliberately skips broad side-effect commands such as :memory, :run, :macro, :solve, :shell, :os, :game, :sandbox, :expect, :refresh, :expose, and :hide. "
                         "A direct :probe line MUST use this exact contrastive form: :probe <short_snake_name> <first-person WITH statement> || <first-person WITHOUT statement>. "
                         "Use :probe to define behavioral sensors for traits such as speed, care, calibration, caution, or compression; do NOT invent architecture knobs. "
                         f"Known direct :tune targets are: {valid_knobs}. "
                         "Do NOT output fake knobs such as embedding_size, hidden_layers, batch_size, learning_rate, optimizer, cpu_cycles_per_second, accuracy, precision, recall, or common_sense. "
-                        "Prefer this shape: 3-6 :probe definitions, :probe backfill all 120, 1-3 deliberate :tune lines for known knobs, :steer or :steer mix for the new probes, and :calibrate/:queue calibrate lines for the new probes. "
+                        "Prefer this shape: 3-6 :probe definitions, purposeful :doc lines if the agent needs readings, :probe backfill all 120, 1-3 deliberate :tune lines for known knobs, :steer or :steer mix for the new probes, and :calibrate/:queue calibrate lines for the new probes. "
                         "Example:\n"
                         ":probe careful_compression I answer directly while preserving the important constraints. || I ramble or drop important constraints.\n"
                         ":probe calibration_hunger I seek evidence before locking in a setting. || I assert settings without checking data.\n"
                         ":probe backfill all 120\n"
+                        ":doc readings because this agent needs the readings file as working context\n"
+                        ":doc read 2 order\n"
                         ":tune response_tokens 256\n"
                         ":steer mix careful_compression calibration_hunger 0.08\n"
                         ":calibrate careful_compression 50\n"
@@ -4025,7 +4135,7 @@ def main():
                         "Now output the profile for '$a_name'.\n"
                         ":steer profile_author 0"
                     )
-                    g_prompt = load_prompt("spawn", default_spawn_prompt, required_substring="SPAWN_PROFILE_V3_COMMAND_REFERENCE", a_name=a_name, command_reference=command_reference)
+                    g_prompt = load_prompt("spawn", default_spawn_prompt, required_substring="SPAWN_PROFILE_V4_AGENT_DOCS_AND_QUEUE", a_name=a_name, command_reference=command_reference)
                     queue_macro_text(g_prompt, input_queue)
                     print(Fore.YELLOW + f"        -> Run ':spawn {a_name} {mode}' again after generation completes." + Style.RESET_ALL)
                     continue
@@ -4079,7 +4189,7 @@ def main():
                     "```\n"
                     f"{because_ctx}"
                     f"The operator has provided the following instruction to fix or improve it: \"{instructions}\"\n"
-                    "Respond ONLY with executable profile commands: :probe, :probe adopt, :probe compose, :probe expose, :probe backfill, :tune, :tune dynamic, :steer, :calibrate, :queue calibrate, :label, or :place. "
+                    "Respond ONLY with executable profile commands: :probe, :probe adopt, :probe compose, :probe expose, :probe backfill, :tune, :tune dynamic, :steer, :calibrate, :queue <future profile command>, :label, :place, or purposeful :doc context commands. "
                     "Direct :probe definitions must contain ||. Do not use markdown formatting blocks around your response. Output no other text. Do not leave trailing colons or unfinished commands at the end.\n"
                     ":steer profile_author 0"
                 )
@@ -7381,33 +7491,59 @@ def main():
             if user_input.startswith(":queue"):
                 qargs = user_input[len(":queue"):].strip()
                 if not qargs:
-                    if not queued_calibrations:
+                    if not queued_calibrations and not queued_commands:
                         if last_refused_calibration:
                             queued_calibrations.append(last_refused_calibration)
                             print(Fore.GREEN + f"[Queue] Added: :calibrate {last_refused_calibration} (will silently retry every turn)." + Style.RESET_ALL)
                             last_refused_calibration = None
                         else:
-                            print(Fore.CYAN + "[Queue] no calibrations queued." + Style.RESET_ALL)
+                            print(Fore.CYAN + "[Queue] no calibrations or commands queued." + Style.RESET_ALL)
                     else:
                         for idx, qcmd in enumerate(queued_calibrations):
-                            print(Fore.CYAN + f"  [{idx}] :calibrate {qcmd}" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  [cal {idx}] :calibrate {qcmd}" + Style.RESET_ALL)
+                        for idx, qcmd in enumerate(queued_commands):
+                            print(Fore.CYAN + f"  [cmd {idx}] {qcmd}" + Style.RESET_ALL)
                     continue
                 if qargs.lower() == "clear":
                     queued_calibrations.clear()
+                    queued_commands.clear()
                     print(Fore.CYAN + "[Queue] cleared." + Style.RESET_ALL)
                     continue
                 if qargs.lower().startswith("drop "):
                     try:
-                        idx = int(qargs[5:].strip())
-                        popped = queued_calibrations.pop(idx)
-                        print(Fore.CYAN + f"[Queue] dropped: :calibrate {popped}" + Style.RESET_ALL)
+                        drop_args = qargs[5:].strip().split()
+                        if len(drop_args) >= 2 and drop_args[0].lower() in ("cmd", "command"):
+                            popped = queued_commands.pop(int(drop_args[1]))
+                            print(Fore.CYAN + f"[Queue] dropped: {popped}" + Style.RESET_ALL)
+                        elif len(drop_args) >= 2 and drop_args[0].lower() in ("cal", "calibrate"):
+                            popped = queued_calibrations.pop(int(drop_args[1]))
+                            print(Fore.CYAN + f"[Queue] dropped: :calibrate {popped}" + Style.RESET_ALL)
+                        else:
+                            idx = int(drop_args[0])
+                            popped = queued_calibrations.pop(idx)
+                            print(Fore.CYAN + f"[Queue] dropped: :calibrate {popped}" + Style.RESET_ALL)
                     except Exception:
                         pass
                     continue
-                cmd_to_queue = qargs[len("calibrate "):].strip() if qargs.lower().startswith("calibrate ") else qargs
-                if cmd_to_queue not in queued_calibrations:
-                    queued_calibrations.append(cmd_to_queue)
-                    print(Fore.GREEN + f"[Queue] Added: :calibrate {cmd_to_queue} (will silently retry every turn)." + Style.RESET_ALL)
+                if qargs.lower().startswith("calibrate ") or qargs.lower().startswith(":calibrate "):
+                    cmd_to_queue = qargs.split(maxsplit=1)[1].strip() if len(qargs.split(maxsplit=1)) > 1 else ""
+                    if not cmd_to_queue:
+                        print(Fore.YELLOW + "[Queue] Usage: :queue calibrate <name> [args] or :queue :command ..." + Style.RESET_ALL)
+                        continue
+                    if cmd_to_queue not in queued_calibrations:
+                        queued_calibrations.append(cmd_to_queue)
+                        print(Fore.GREEN + f"[Queue] Added: :calibrate {cmd_to_queue} (will silently retry every turn)." + Style.RESET_ALL)
+                    continue
+                queued_cmd = qargs if qargs.startswith(":") else ":" + qargs
+                qword = command_word(queued_cmd)
+                if not qword or (qword not in BUILTIN_COMMANDS and qword not in macro_aliases):
+                    print(Fore.YELLOW + f"[Queue] '{queued_cmd.split()[0] if queued_cmd.split() else queued_cmd}' is not a known future command.{did_you_mean(qword, _all_shell_commands())}" + Style.RESET_ALL)
+                    continue
+                if command_because and " because " not in queued_cmd.lower():
+                    queued_cmd = f"{queued_cmd} because {command_because}"
+                if queued_cmd not in queued_commands:
+                    queued_commands.append(queued_cmd)
+                    print(Fore.GREEN + f"[Queue] Added future command: {queued_cmd}" + Style.RESET_ALL)
                 continue
             if user_input.startswith(":tune"):
                 if " dynamic " in user_input.lower():
@@ -8567,14 +8703,39 @@ def main():
                     _sys_tb = tuner_bindings
                     _sys_pin = prioritize_pin
                     _sys_queue = queued_calibrations
+                    _sys_cmd_queue = queued_commands
+                    _sys_doc_session = doc_session
+                    _sys_doc_library = doc_library
+                    _sys_pending_doc = pending_document_tool_result
+                    _sys_doc_autoread = doc_autoread
                     tuner = ja.tuner
                     probes = ja.probes
                     tuner_bindings = ja.tuner_bindings
                     prioritize_pin = ja.prioritize_pin
                     queued_calibrations = ja.queued_calibrations
+                    queued_commands = ja.queued_commands
+                    doc_session = ja.doc_session
+                    doc_library = ja.doc_library
+                    pending_document_tool_result = ja.pending_document_tool_result
+                    doc_autoread = ja.doc_autoread
+
+                    agent_document_tool_result = pending_document_tool_result
+                    pending_document_tool_result = None
+                    if agent_document_tool_result is None and doc_autoread and doc_autoread.get("remaining", 0) > 0:
+                        pick = select_next_chunk(doc_library, "", doc_autoread.get("mode", "order"))
+                        if pick is not None:
+                            doc_session = doc_library[pick["session_index"]]
+                            doc_session["cursor"] = pick["chunk_index"]
+                            doc_session.setdefault("read", set()).add(pick["chunk_index"])
+                            record_chunk_read(memory, doc_session, pick["chunk_index"])
+                            agent_document_tool_result = stage_chunk(doc_session, index=pick["chunk_index"])
+                            doc_autoread["remaining"] -= 1
+                            if doc_autoread["remaining"] <= 0:
+                                doc_autoread = None
 
                     ja_prompt = build_prompt(
                         "[Please respond]",
+                        document_tool_result=agent_document_tool_result,
                         session_context=session_context if session_context_enabled else None,
                         active_u_name="system"
                     )
@@ -8607,11 +8768,21 @@ def main():
                     ja.tuner_bindings = tuner_bindings
                     ja.prioritize_pin = prioritize_pin
                     ja.queued_calibrations = queued_calibrations
+                    ja.queued_commands = queued_commands
+                    ja.doc_session = doc_session
+                    ja.doc_library = doc_library
+                    ja.pending_document_tool_result = pending_document_tool_result
+                    ja.doc_autoread = doc_autoread
                     tuner = _sys_tuner
                     probes = _sys_probes
                     tuner_bindings = _sys_tb
                     prioritize_pin = _sys_pin
                     queued_calibrations = _sys_queue
+                    queued_commands = _sys_cmd_queue
+                    doc_session = _sys_doc_session
+                    doc_library = _sys_doc_library
+                    pending_document_tool_result = _sys_pending_doc
+                    doc_autoread = _sys_doc_autoread
                     
                     memory.append_turn(
                         "assistant",
