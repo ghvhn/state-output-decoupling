@@ -4377,6 +4377,34 @@ def main():
                         print(Fore.CYAN + f"  {raw:+.3f}  [{r.kind}] {prev}..." + Style.RESET_ALL)
                     print(Fore.CYAN + pending_memory_tool_result + Style.RESET_ALL)
                     print(Fore.YELLOW + "[Memory] This tool result will be provided to the next model turn only." + Style.RESET_ALL)
+                elif tail.startswith("action use"):
+                    records = [r for r in memory.records if "action" in r.tags][-6:]
+                    if not records:
+                        print(Fore.YELLOW + "[Memory] No recent action memories found." + Style.RESET_ALL)
+                        continue
+                    pending_memory_tool_result = memory.format_tool_result(records)
+                    memory.append_event(
+                        "memory_tool_staged",
+                        tags=["memory_tool"],
+                        provenance={"query": "action_use", "records": len(records)},
+                    )
+                    print(Fore.CYAN + f"[Memory] Staged {len(records)} recent action memories." + Style.RESET_ALL)
+                    print(Fore.CYAN + pending_memory_tool_result + Style.RESET_ALL)
+                    print(Fore.YELLOW + "[Memory] This tool result will be provided to the next model turn only." + Style.RESET_ALL)
+                elif tail.startswith("all use"):
+                    records = memory.records[-10:]
+                    if not records:
+                        print(Fore.YELLOW + "[Memory] No recent memories found." + Style.RESET_ALL)
+                        continue
+                    pending_memory_tool_result = memory.format_tool_result(records)
+                    memory.append_event(
+                        "memory_tool_staged",
+                        tags=["memory_tool"],
+                        provenance={"query": "all_use", "records": len(records)},
+                    )
+                    print(Fore.CYAN + f"[Memory] Staged {len(records)} recent memories of all types." + Style.RESET_ALL)
+                    print(Fore.CYAN + pending_memory_tool_result + Style.RESET_ALL)
+                    print(Fore.YELLOW + "[Memory] This tool result will be provided to the next model turn only." + Style.RESET_ALL)
                 elif tail.startswith("use "):
                     query = tail[len("use "):].strip()
                     records = memory.search(query, max_records=6, scope=memory.scope)
@@ -4438,7 +4466,7 @@ def main():
                 else:
                     print(
                         Fore.YELLOW
-                        + "[Memory] Commands: :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory use probe <name>, :memory choice [query], :memory choice probe <name>, :memory boundary"
+                        + "[Memory] Commands: :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory use probe <name>, :memory action use, :memory all use, :memory choice [query], :memory choice probe <name>, :memory boundary"
                         + Style.RESET_ALL
                     )
                 continue
@@ -8075,7 +8103,12 @@ def main():
                     elif etype == "var":
                         _shell_vars[ename] = response.strip()
                         print(Fore.GREEN + f"[Expect] Saved response to variable ${ename}." + Style.RESET_ALL)
-                    # Skip adding this meta-turn to the chat context/memory
+                    # Record this meta-turn as an action memory so the model can recall what it generated
+                    memory.append_event(
+                        "model_action",
+                        text=f"I successfully wrote the following content to {etype} '{ename}':\n{response}",
+                        tags=["action", etype]
+                    )
                     continue
 
                 if show_timestamps:
