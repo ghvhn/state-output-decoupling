@@ -233,7 +233,7 @@ def _split_macro_commands(raw_str):
                 curr.append('||')
                 i += 3
                 continue
-            elif nxt in (';', '\\'):
+            elif nxt in (';', ':', '\\'):
                 curr.append(nxt)
                 i += 2
                 continue
@@ -241,6 +241,11 @@ def _split_macro_commands(raw_str):
             cmds.append("".join(curr).strip())
             curr = []
             i += 1
+            continue
+        elif raw_str[i:i+2] == ' :':
+            cmds.append("".join(curr).strip())
+            curr = [':']
+            i += 2
             continue
         curr.append(raw_str[i])
         i += 1
@@ -3439,8 +3444,8 @@ def main():
                 for vname, vval in _shell_vars.items():
                     # Safely replace $vname if it's not part of a larger word
                     user_input = re.sub(r"\$" + re.escape(vname) + r"\b", lambda _m, v=vval: v, user_input)
-            if user_input.startswith(":") and ";" in user_input and not command_keeps_semicolons(user_input):
-                cmds = [c.strip() for c in user_input.split(";") if c.strip()]
+            if user_input.startswith(":") and not command_keeps_semicolons(user_input):
+                cmds = _split_macro_commands(user_input)
                 if len(cmds) > 1:
                     user_input = cmds[0]
                     input_queue.extend([(c, silent_echo) for c in cmds[1:]])
