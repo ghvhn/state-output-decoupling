@@ -8610,7 +8610,7 @@ def main():
             # A bug in ONE command (or a typo that reaches bad code) must not end
             # the session -- abort the turn, report, and keep going. The full
             # traceback is logged so the fault is still discoverable.
-            import traceback as _tb
+            import traceback; traceback.print_exc()
             print(
                 Fore.RED
                 + f"\n[Shell] recovered from an error: {type(_turn_exc).__name__}: {_turn_exc}"

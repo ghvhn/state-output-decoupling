@@ -864,7 +864,10 @@ def _steer_handles(M: HF, vecs, layers, alpha, cap_fraction=None):
     handles = []
     for l in layers:
         a = alpha[l] if isinstance(alpha, dict) else alpha
-        add = (a * vecs[l]).to(M.device)
+        v = vecs[l]
+        if isinstance(v, dict) and "direction" in v:
+            v = v["direction"].get(l, v["direction"])
+        add = (a * v).to(M.device)
 
         def hook(module, inp, out, add=add, cap_fraction=cap_fraction):
             h = out[0] if isinstance(out, tuple) else out
