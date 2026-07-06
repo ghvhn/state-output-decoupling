@@ -3586,7 +3586,7 @@ def main():
             if user_input.startswith(":spawn"):
                 sargs = user_input.split()
                 if len(sargs) < 3:
-                    print(Fore.YELLOW + "[System] Usage: :spawn <name> join | :spawn <name> replace [N] | :spawn <name> drop | :spawn <name> generate" + Style.RESET_ALL)
+                    print(Fore.YELLOW + "[System] Usage: :spawn <name> join | :spawn <name> replace [N] | :spawn <name> drop | :spawn <name> create" + Style.RESET_ALL)
                     continue
                 a_name = sargs[1]
                 mode = sargs[2].lower()
@@ -3665,7 +3665,7 @@ def main():
                     replace_agent = new_agent
                     replace_turns_remaining = n_turns
                     print(Fore.GREEN + f"[Spawn] Agent '{a_name}' is replacing the user for {n_turns} turn(s)." + Style.RESET_ALL)
-                elif mode == "generate":
+                elif mode in ("generate", "create"):
                     print(Fore.CYAN + f"[Spawn] Profile for '{a_name}' generated and saved. It is ready for use." + Style.RESET_ALL)
                 continue
 
