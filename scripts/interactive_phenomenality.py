@@ -6169,6 +6169,7 @@ def main():
                         + Style.RESET_ALL,
                         flush=True,
                     )
+                    import torch
                     with torch.no_grad():
                         for bf_i, br in enumerate(archive):
                             b_ids = _bf_inputs(model, br.text[:600])
@@ -8116,7 +8117,8 @@ def main():
             # VRAM on CUDA, process RSS on CPU-only, so the stream is never dead.
             gen_seconds = _time.perf_counter() - _gen_t0
             vram_alloc, vram_reserved, vram_peak, mem_label = _memory_footprint_gb()
-            tps = (tokens_generated / gen_seconds) if (gen_seconds > 0 and tokens_generated) else 0.0
+            _tg = (telemetry or {}).get("tokens_generated", 0)
+            tps = (_tg / gen_seconds) if (gen_seconds > 0 and _tg) else 0.0
             tuner.observe("generation_seconds", gen_seconds)
             tuner.observe("vram_gb", vram_reserved)
             turn_row["generation_seconds"] = float(gen_seconds)
@@ -8127,7 +8129,7 @@ def main():
                 tuner.credit("vram_gb", vram_reserved, turn_sense)
             last_clock = {
                 "generation_seconds": gen_seconds,
-                "tokens_generated": int(tokens_generated or 0),
+                "tokens_generated": int(_tg or 0),
                 "tokens_per_sec": tps,
                 "vram_alloc_gb": vram_alloc,
                 "vram_reserved_gb": vram_reserved,
