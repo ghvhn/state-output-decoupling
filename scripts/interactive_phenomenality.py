@@ -2028,10 +2028,10 @@ COMMAND_HELP_LINES = [
     "                parameterized built-in command with proper solve/args headers)",
     "          :save self <name> | choose   (alias for :macro name self; 'choose' asks",
     "                the model to generate a name based on the current tuning state)",
-    "          :spawn <name> join|replace|drop|create  (load/create an executable calibration",
-    "                profile: probes, steers, tunes, calibrations, docs, queue, labels, backfill. 'join'",
-    "                adds to the panel; 'replace [N]' takes the operator slot for N turns;",
-    "                'drop' removes; 'create' writes the profile only)",
+    "          :spawn <name> join|replace|drop|create  (load/create an executable setup",
+    "                profile for a target agent; any known command/macro can appear when",
+    "                it has a purpose. 'join' adds to the panel; 'replace [N]' takes the",
+    "                operator slot for N turns; 'drop' removes; 'create' writes only)",
     "                Use @<name> :cmd to target a specific agent's tuning state)",
     "          :run <alias|file>            (queue and execute a macro's commands)",
     "          :solve [dynamic] <name> <goal> [args]  (model writes a parameterized macro",
@@ -3166,8 +3166,13 @@ def main():
         return agent_tuner
 
     def _spawn_profile_runnable_lines(raw_lines, base_tuner):
-        """Keep spawn profiles executable: calibration/context DSL only, no prose/fake knobs."""
-        allowed = {"probe", "tune", "steer", "calibrate", "queue", "label", "place", "doc"}
+        """Keep spawn profiles executable without imposing a workflow whitelist.
+
+        A spawn profile is a worker-authored setup script for the target agent.
+        The loader's job is only to reject prose/unknown commands and ensure
+        queued items are future-runnable commands; semantics belong to the
+        worker prompt and the real command handlers.
+        """
         forbidden_tunes = {
             "embedding_size", "hidden_layers", "batch_size", "learning_rate",
             "optimizer", "cpu_cycles_per_second", "accuracy", "precision",
@@ -3196,6 +3201,9 @@ def main():
                 return ""
             return qt if qt.startswith(":") else ":" + qt
 
+        def _known_command(word):
+            return word in BUILTIN_COMMANDS or word in macro_aliases
+
         for idx, raw in enumerate(raw_lines, 1):
             s = (raw or "").strip()
             if not s or s.startswith("#"):
@@ -3204,8 +3212,12 @@ def main():
                 skipped.append(f"L{idx}: non-command text")
                 continue
             word = command_word(s)
-            if word not in allowed:
-                skipped.append(f"L{idx}: :{word} is not a spawn calibration command")
+            if not _known_command(word):
+                skipped.append(f"L{idx}: :{word} is not a known shell command or macro")
+                continue
+
+            if word != "queue":
+                runnable.append(s)
                 continue
 
             if word == "probe":
@@ -3322,27 +3334,9 @@ def main():
                 tail = s[len(":queue"):].strip()
                 queued_cmd = _queued_command_from_tail(tail)
                 qword = command_word(queued_cmd)
-                if not qword or qword not in allowed or qword == "queue":
-                    skipped.append(f"L{idx}: :queue target must be a profile-safe future command")
+                if not qword or qword == "queue" or not _known_command(qword):
+                    skipped.append(f"L{idx}: :queue target must be a known future command")
                     continue
-                if qword == "calibrate":
-                    qparts = queued_cmd[len(":calibrate"):].strip().split()
-                    target = qparts[0] if qparts else ""
-                    if target and not _known_or_pending(target) and target not in {"steer_cap_fraction", "steer_band"}:
-                        skipped.append(f"L{idx}: unknown queued calibration target '{target}'")
-                        continue
-                if qword == "tune":
-                    qparts = queued_cmd[len(":tune"):].strip().split()
-                    target = qparts[0].lower() if qparts else ""
-                    bare_target = target[len("probe_"):] if target.startswith("probe_") else target
-                    if target in forbidden_tunes or bare_target in forbidden_tunes:
-                        skipped.append(f"L{idx}: refused queued fake/non-tunable target '{target}'")
-                        continue
-                if qword == "doc":
-                    qtail = queued_cmd[len(":doc"):].strip().lower()
-                    if qtail == "rewrite" or " rewrite " in qtail or qtail.endswith(" rewrite"):
-                        skipped.append(f"L{idx}: queued :doc rewrite is not spawn context")
-                        continue
                 runnable.append(s)
                 continue
 
@@ -4113,15 +4107,16 @@ def main():
                         f"{because_ctx}"
                         "The full shell command reference is loaded below so you can reason from the actual command surface, not guesses.\n"
                         "$command_reference\n\n"
-                        "Output ONLY runnable profile commands, one per line; no prose, headings, bullets, markdown, or explanations. "
-                        "Valid spawn profile commands are :probe, :probe adopt, :probe compose, :probe expose, :probe backfill, :tune, :tune dynamic, :steer, :calibrate, :queue <future profile command>, :label, :place, and purposeful :doc context commands. "
-                        "Use :doc only when the spawned agent needs a document as working context; include a because-purpose when it matters, then use :doc read/:doc next/:doc inject as needed. "
-                        "The command reference may mention many other commands, but do not include non-profile commands in the output; profile loading deliberately skips broad side-effect commands such as :memory, :run, :macro, :solve, :shell, :os, :game, :sandbox, :expect, :refresh, :expose, and :hide. "
+                        "Output ONLY runnable shell commands or macro invocations, one per line; no prose, headings, bullets, markdown, or explanations. "
+                        "The command reference is authoritative: use any known command/macro that serves the spawned agent's setup, context, calibration, or future workflow. "
+                        "Use trailing because-clauses to record purpose for context or side-effect commands. "
+                        "Use :doc when the spawned agent needs a document as working context; for example :doc readings because <purpose>, followed by :doc read/:doc next/:doc inject when useful. "
+                        "Use :queue <future command> for commands that should run later when they become useful or when enough evidence exists; queued commands must still be runnable shell commands. "
                         "A direct :probe line MUST use this exact contrastive form: :probe <short_snake_name> <first-person WITH statement> || <first-person WITHOUT statement>. "
-                        "Use :probe to define behavioral sensors for traits such as speed, care, calibration, caution, or compression; do NOT invent architecture knobs. "
+                        "Use :probe to define behavioral sensors for traits such as speed, care, calibration, caution, or compression; do not invent architecture knobs. "
                         f"Known direct :tune targets are: {valid_knobs}. "
-                        "Do NOT output fake knobs such as embedding_size, hidden_layers, batch_size, learning_rate, optimizer, cpu_cycles_per_second, accuracy, precision, recall, or common_sense. "
-                        "Prefer this shape: 3-6 :probe definitions, purposeful :doc lines if the agent needs readings, :probe backfill all 120, 1-3 deliberate :tune lines for known knobs, :steer or :steer mix for the new probes, and :calibrate/:queue calibrate lines for the new probes. "
+                        "Do not output fake knobs such as embedding_size, hidden_layers, batch_size, learning_rate, optimizer, cpu_cycles_per_second, accuracy, precision, recall, or common_sense. "
+                        "Prefer this shape when it fits: context/docs the agent needs, 3-6 :probe definitions, :probe backfill all 120, deliberate known-knob :tune lines, :steer or :steer mix, and calibration/queued follow-up commands. "
                         "Example:\n"
                         ":probe careful_compression I answer directly while preserving the important constraints. || I ramble or drop important constraints.\n"
                         ":probe calibration_hunger I seek evidence before locking in a setting. || I assert settings without checking data.\n"
@@ -4189,7 +4184,8 @@ def main():
                     "```\n"
                     f"{because_ctx}"
                     f"The operator has provided the following instruction to fix or improve it: \"{instructions}\"\n"
-                    "Respond ONLY with executable profile commands: :probe, :probe adopt, :probe compose, :probe expose, :probe backfill, :tune, :tune dynamic, :steer, :calibrate, :queue <future profile command>, :label, :place, or purposeful :doc context commands. "
+                    "Respond ONLY with runnable shell commands or macro invocations, one per line. "
+                    "Use any known command that serves the spawned agent's setup, context, calibration, or future workflow; include because-clauses where purpose matters. "
                     "Direct :probe definitions must contain ||. Do not use markdown formatting blocks around your response. Output no other text. Do not leave trailing colons or unfinished commands at the end.\n"
                     ":steer profile_author 0"
                 )
