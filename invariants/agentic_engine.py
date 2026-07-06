@@ -35,15 +35,20 @@ def _get_vector(name, device):
     if name not in _vector_cache:
         path = Path(__file__).parent / f"{name}.pt"
         if path.exists():
-            _vector_cache[name] = torch.load(path, map_location=device)
+            try:
+                _vector_cache[name] = torch.load(path, map_location=device, weights_only=True)
+            except Exception:
+                _vector_cache[name] = torch.load(path, map_location=device)
         else:
             _vector_cache[name] = None
     vec = _vector_cache[name]
     if vec is None:
         return None
     if isinstance(vec, dict):
-        return {k: v.to(device) for k, v in vec.items()}
-    return vec.to(device)
+        if "direction" in vec:
+            vec = vec["direction"]
+        return {k: (v.to(device) if hasattr(v, "to") else v) for k, v in vec.items()}
+    return vec.to(device) if hasattr(vec, "to") else vec
 
 def _entropy_from_logits(logits):
     probs = F.softmax(logits.float(), dim=-1)
@@ -121,8 +126,11 @@ def _note_channel(state, name, ratio, cap):
 def _layer_vector(name, layer_index, device):
     vec = _get_vector(name, device)
     if isinstance(vec, dict):
-        vec = vec.get(layer_index)
-    return None if vec is None else vec.to(device)
+        v = vec.get(layer_index)
+        if v is None:
+            v = vec.get(str(layer_index))
+        vec = v
+    return None if vec is None else (vec.to(device) if hasattr(vec, "to") else vec)
 
 
 def _last_token_matrix(t):
@@ -594,7 +602,10 @@ def get_agentic_handles(
                                                 def vector_similarity(vector_name: str):
                                                     vec = _get_vector(vector_name, v_target.device)
                                                     if isinstance(vec, dict):
-                                                        vec = vec.get(l_idx)
+                                                        v = vec.get(l_idx)
+                                                        if v is None:
+                                                            v = vec.get(str(l_idx))
+                                                        vec = v
                                                     if vec is None:
                                                         return None
                                                     return F.cosine_similarity(
