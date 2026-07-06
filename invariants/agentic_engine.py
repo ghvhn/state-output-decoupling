@@ -383,7 +383,15 @@ def get_agentic_handles(
                             for bi, p in enumerate(proposals):
                                 _bn = h_parallel[bi, -1, :].float().norm().clamp_min(1e-30).item()
                                 _note_channel(state, "expert_branch", step / _bn, cap_frac)
-                                v_dir = p.direction.to(h.device).to(h.dtype)
+                                v_dir = p.direction
+                                if isinstance(v_dir, dict):
+                                    v = v_dir.get(l_idx)
+                                    if v is None:
+                                        v = v_dir.get(str(l_idx))
+                                    if v is None and v_dir:
+                                        v = next(iter(v_dir.values()))
+                                    v_dir = v
+                                v_dir = v_dir.to(h.device).to(h.dtype)
                                 h_parallel[bi, -1, :] += _cap_steer(step * (v_dir / v_dir.norm()), h_parallel[bi, -1, :])
                         
                         # 3. Parallel Recurrent Loop
