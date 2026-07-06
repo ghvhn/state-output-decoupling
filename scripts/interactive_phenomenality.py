@@ -6280,6 +6280,23 @@ def main():
                     continue
                 a_text, _, b_text = _partition_unescaped_pipes(framings)
                 a_text, b_text = a_text.strip(), b_text.strip()
+                
+                if pname in probes:
+                    existing_a, existing_b = probes[pname].get("framings", ("", ""))
+                    if existing_a == a_text and existing_b == b_text:
+                        print(Fore.CYAN + f"[Probe] '{pname}' already has these exact framings; using the existing one." + Style.RESET_ALL)
+                        continue
+                    else:
+                        base = pname
+                        counter = 1
+                        while f"{base}_{counter}" in probes:
+                            counter += 1
+                        backup_name = f"{base}_{counter}"
+                        print(Fore.CYAN + f"[Probe] '{base}' has different framings. Backing up the old one to '{backup_name}' to make way for the new one." + Style.RESET_ALL)
+                        probes[backup_name] = probes.pop(base)
+                        if f"probe_{base}" in tuner.triggers:
+                            tuner.triggers[f"probe_{backup_name}"] = tuner.triggers.pop(f"probe_{base}")
+
                 b_text, mint_layers = strip_band_suffix(b_text)
                 from invariants.engine import _inputs, _hidden_states, probe_direction, steer_band_layers
                 ids_a = _inputs(model, a_text[:600])
