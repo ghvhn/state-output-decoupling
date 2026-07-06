@@ -3678,7 +3678,7 @@ def main():
                     print(Fore.CYAN + f"[Spawn] No saved profile found for '{a_name}'. Generating profile based on name..." + Style.RESET_ALL)
                     print(Fore.CYAN + f"[Spawn] No saved profile found for '{a_name}'. Queuing phenomenological macro to generate one..." + Style.RESET_ALL)
                     default_spawn_prompt = (
-                        f":expect file invariants/out/macros/{a_name}.txt\n"
+                        ":expect file invariants/out/macros/$a_name.txt\n"
                         ":probe profile_author I am generating a tuning profile composed of exact shell configuration commands || I am generating conversational text\n"
                         ":probe backfill profile_author\n"
                         ":steer profile_author 1.5\n"
