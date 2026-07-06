@@ -4889,6 +4889,7 @@ def main():
                 print(Fore.CYAN + "[System] Refreshing referenced files from disk (session + model stay live)..." + Style.RESET_ALL)
                 probes.clear()
                 try:
+                    import torch
                     if os.path.isdir(PROBE_DIR):
                         for pf in os.listdir(PROBE_DIR):
                             if pf.endswith(".pt"):
