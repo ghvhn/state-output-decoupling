@@ -1902,7 +1902,7 @@ KNOWN_COMMANDS = (
 # never invoked as ':<name>' (the built-in wins). Everything else that is a known
 # macro alias runs directly as ':<alias> args'.
 BUILTIN_COMMANDS = {c[1:] for c in KNOWN_COMMANDS} | {
-    "macro", "run", "game", "solve", "refresh", "place", "consider", "spawn",
+    "macro", "run", "game", "solve", "refresh", "place", "install", "consider", "spawn",
     "exit", "quit", "timestamps", "listen", "history", "accept", "reject", "help", "expose", "hide", "show",
 }
 
@@ -2007,9 +2007,9 @@ COMMAND_HELP_LINES = [
     "                :macro name self [file] writes a macro that REGENERATES probes,",
     "                macros/commands, hidden/exposed command tools, and game configs;",
     "                :macro strip <alias|file> drops display-only lines in place,",
-    "                :macro name strip <src> [dest] writes a stripped copy;",
-    "                :macro install <alias> <file> [goal] converts a manual text file into",
-    "                a parameterized built-in command with proper solve/args headers)",
+    "                :macro name strip <src> [dest] writes a stripped copy)",
+    "          :install <alias> <file> [goal]       (converts a manual text file into a",
+    "                parameterized built-in command with proper solve/args headers)",
     "          :save self <name> | choose   (alias for :macro name self; 'choose' asks",
     "                the model to generate a name based on the current tuning state)",
     "          :spawn <name> join|replace|drop|generate  ('join' adds to panel, 'replace'",
@@ -6493,6 +6493,53 @@ def main():
                         )
                 else:
                     print(Fore.YELLOW + "[Place] Usage: :place <probe> <+|->" + Style.RESET_ALL)
+                continue
+            if user_input.startswith(":install "):
+                mtok = user_input[len(":install "):].strip().split()
+                if len(mtok) < 1:
+                    print(Fore.YELLOW + "[System] Usage: :install <alias> [file] [goal]" + Style.RESET_ALL)
+                    continue
+                a_name = mtok[0].lower()
+                
+                if len(mtok) >= 2 and os.path.isfile(mtok[1]):
+                    src_file = mtok[1]
+                    goal_text = " ".join(mtok[2:]) if len(mtok) > 2 else "Manually installed macro."
+                    args_to_scan = mtok[2:]
+                else:
+                    src_file = macro_aliases.get(a_name, mtok[1] if len(mtok) >= 2 else f"{a_name}.txt")
+                    goal_text = " ".join(mtok[1:]) if len(mtok) > 1 else "Manually installed macro."
+                    args_to_scan = mtok[1:]
+
+                if not os.path.isfile(src_file):
+                    print(Fore.RED + f"[Error] File not found: {src_file}. Please provide the file path." + Style.RESET_ALL)
+                    continue
+                if _hidden_overwrite_blocked(a_name, "System"):
+                    continue
+                arg_names = []
+                seen_args = set()
+                for tok in args_to_scan:
+                    idx = tok.find("$")
+                    if idx >= 0:
+                        clean = tok[idx+1:].rstrip(".,;:\"'()!]")
+                        if clean and clean not in seen_args:
+                            arg_names.append(clean)
+                            seen_args.add(clean)
+                dest = os.path.join(ROOT, "invariants", "out", "macros", f"{a_name}.txt")
+                try:
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with open(src_file, "r", encoding="utf-8") as rf:
+                        content = rf.read().strip()
+                    with open(dest, "w", encoding="utf-8") as wf:
+                        wf.write(f"# :solve macro '{a_name}' -- {goal_text}\n")
+                        if arg_names:
+                            wf.write(f"# args: {', '.join(arg_names)}\n")
+                        if content:
+                            wf.write(content + "\n")
+                    macro_aliases[a_name] = dest
+                    _save_macro_aliases()
+                    print(Fore.GREEN + f"[System] Installed macro ':{a_name}' to {dest}. Run it with :{a_name} <args>." + Style.RESET_ALL)
+                except Exception as e:
+                    print(Fore.RED + f"[Error] Could not install macro: {e}" + Style.RESET_ALL)
                 continue
             if user_input.lower().startswith(":expect "):
                 eargs = user_input.strip().split()
