@@ -2326,6 +2326,7 @@ def load_stored_direction(model, stem, layers=None):
     from invariants.engine import steer_band_layers
     direction = {}
     exposed = False
+    dim_mismatch = None
     if isinstance(payload, dict) and "direction" in payload:
         exposed = bool(payload.get("exposed", False))
         for L, v in payload["direction"].items():
@@ -2333,6 +2334,7 @@ def load_stored_direction(model, stem, layers=None):
                 continue
             v = v.to(model.device).float().reshape(-1)
             if v.shape[0] != model.d_model:
+                dim_mismatch = v.shape[0]
                 continue
             n = v.norm()
             if n.item() > 0:
@@ -2348,6 +2350,7 @@ def load_stored_direction(model, stem, layers=None):
             for L in keep:
                 v = raw_vecs[L].to(model.device).float().reshape(-1)
                 if v.shape[0] != model.d_model:
+                    dim_mismatch = v.shape[0]
                     continue
                 n = v.norm()
                 if n.item() > 0:
@@ -2358,12 +2361,15 @@ def load_stored_direction(model, stem, layers=None):
             n = v.norm()
             if n.item() > 0:
                 unit = v / n
-                n_layers = int(model.model.config.num_hidden_layers)
+                n_layers = getattr(model.model.config, "num_hidden_layers", getattr(model.model.config, "n_layers", getattr(model, "n_layers", 32)))
+                n_layers = int(n_layers)
                 targets = sorted(want) if want is not None else steer_band_layers(n_layers)
                 for L in targets:
                     if 0 <= int(L) < n_layers:
                         direction[int(L)] = unit.clone()
-    return direction, os.path.basename(src_path), exposed
+        else:
+            dim_mismatch = v.shape[0]
+    return direction, os.path.basename(src_path), exposed, dim_mismatch
 
 
 def parse_compose_expr(expr):
@@ -6015,14 +6021,13 @@ def main():
                         if stem in probes:
                             print(Fore.YELLOW + f"[Probe] '{stem}' is already an active probe." + Style.RESET_ALL)
                             continue
-                        direction, src_name, exposed_state = load_stored_direction(model, stem, layers=adopt_layers)
+                        direction, src_name, exposed_state, dim_mismatch = load_stored_direction(model, stem, layers=adopt_layers)
                         if not direction:
-                            print(
-                                Fore.YELLOW
-                                + f"[Probe] no usable vector for '{stem}' (looked for invariants/{stem}_vector.pt "
-                                + f"and invariants/{stem}.pt)."
-                                + Style.RESET_ALL
-                            )
+                            if dim_mismatch:
+                                err_msg = f"[Probe] Cannot adopt '{stem}': saved vector dimension ({dim_mismatch}) does not match current model d_model ({model.d_model}). You must re-mint this probe on the smaller model!"
+                            else:
+                                err_msg = f"[Probe] no usable vector for '{stem}' (looked for invariants/{stem}_vector.pt and invariants/{stem}.pt)."
+                            print(Fore.YELLOW + err_msg + Style.RESET_ALL)
                             continue
                         probes[stem] = {
                             "direction": direction,
@@ -6094,7 +6099,7 @@ def main():
                             # An explicit band re-reads every term from its
                             # stored file at that depth; an active probe's
                             # in-memory direction is fixed at its mint band.
-                            tdir, _, _ = load_stored_direction(model, tname, layers=cband)
+                            tdir, _, _, _ = load_stored_direction(model, tname, layers=cband)
                             if not tdir and tname in probes:
                                 tdir = {
                                     L: v for L, v in probes[tname]["direction"].items()
