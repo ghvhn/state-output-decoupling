@@ -278,10 +278,13 @@ def _inputs(M: HF, instruction: str, pre_formatted: bool = False, system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": instruction})
     
-    return M.tok.apply_chat_template(
+    d = M.tok.apply_chat_template(
         messages,
         add_generation_prompt=True, return_tensors="pt", return_dict=True,
-    ).to(M.device)
+    )
+    if hasattr(d, "to"):
+        return d.to(M.device)
+    return {k: v.to(M.device) if hasattr(v, "to") else v for k, v in d.items()}
 
 
 def _generated_text_satisfies_stop(
