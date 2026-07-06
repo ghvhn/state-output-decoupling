@@ -4122,7 +4122,7 @@ def main():
                     "${because_ctx}"
                     "Write a macro named '${sname}' that does: ${goal}\n"
                     "Output ONLY the commands, one per line. Do not use markdown blocks or conversational text. "
-                    "Do not leave trailing colons or unfinished commands at the end.\n"
+                    "Do not wrap arguments in quotes unless they contain spaces. Do not leave trailing colons or unfinished commands at the end.\n"
                     ":steer macro_author 0\n"
                     ":steer solve_goal 0"
                 )
