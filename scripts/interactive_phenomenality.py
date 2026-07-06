@@ -3515,7 +3515,7 @@ def main():
                         "Use the syntax `:probe <concept_name> <framing with it> || <framing without it>` to define new dimensions.\n"
                         "You can also use `:probe compose ...` to combine existing probes.\n"
                         "Output ONLY the commands, one per line. Do not use markdown blocks or conversational text.\n"
-                        ":release profile_author"
+                        ":steer profile_author 0"
                     )
                     prompt = load_prompt(
                         "self_create",
@@ -3545,7 +3545,7 @@ def main():
                         "Available options:\n$options\n\n"
                         "Select the single most appropriate persona/macro from the list. "
                         "Output ONLY the exact name, and nothing else.\n"
-                        ":release persona_selector"
+                        ":steer persona_selector 0"
                     )
                     prompt = load_prompt(
                         "self_choose",
@@ -3653,7 +3653,7 @@ def main():
                         "You can use :probe to define custom cognitive probes, and :steer to prioritize them. "
                         "For example: ':probe creativity I invent new ideas || I repeat standard answers\\n:steer creativity 1.5\\n:tune response_tokens 128'. "
                         "Output no other text. Do not leave trailing colons or unfinished commands at the end.\n"
-                        ":release profile_author"
+                        ":steer profile_author 0"
                     )
                     g_prompt = load_prompt("spawn", default_spawn_prompt, a_name=a_name)
                     queue_macro_text(g_prompt, input_queue)
