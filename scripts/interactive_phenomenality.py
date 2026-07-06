@@ -134,6 +134,11 @@ def load_prompt(name, default_template, **kwargs):
         try:
             with open(prompt_path, "r", encoding="utf-8") as rf:
                 template = rf.read()
+            # Hotfix: silently overwrite old buggy solve templates that had concatenation errors
+            if "$command_hints_strNote" in template or "$because_ctxWrite" in template:
+                template = default_template
+                with open(prompt_path, "w", encoding="utf-8") as wf:
+                    wf.write(default_template)
         except:
             template = default_template
     try:
@@ -4093,15 +4098,15 @@ def main():
                     ":steer solve_goal 1.5\n"
                     "You write macros for an interactive cognition shell. A macro is a list of ':' "
                     "commands, one per line.$prompt_args_str\n\n"
-                    "$command_hints_str"
+                    "${command_hints_str}\n"
                     "Note: Shell commands natively accept 'auto' or 'choose' as arguments where applicable "
                     "to automatically select or interactively prompt for a value. "
                     "You should seamlessly pass these through to the underlying commands if the user provides them, "
                     "unless a parameter is explicitly restricted from doing so.\n\n"
-                    "$macro_hints_str"
-                    "$staged_ctx"
-                    "$because_ctx"
-                    "Write a macro named '$sname' that does: $goal\n"
+                    "${macro_hints_str}\n"
+                    "${staged_ctx}"
+                    "${because_ctx}"
+                    "Write a macro named '${sname}' that does: ${goal}\n"
                 )
                 prompt = load_prompt(
                     "solve", 
