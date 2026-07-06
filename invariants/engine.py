@@ -833,12 +833,12 @@ def _cap_steer(add, h, cap_fraction=None):
     if not torch.isfinite(a).all():
         return torch.zeros_like(a)
     a_norm = a.float().norm(dim=-1, keepdim=True)
-    if float(a_norm.max()) <= 0.0:
+    if float(a_norm.detach().max()) <= 0.0:
         return a
     h_norm = h.float().norm(dim=-1, keepdim=True)
     # Telemetry: the ATTEMPTED ratio, pre-clip — the distribution the cap is
     # deliberately calibrated from (steer_cap_from_data). Deterministic window.
-    ratio = float((a_norm / h_norm.clamp_min(1e-30)).max())
+    ratio = float((a_norm.detach() / h_norm.detach().clamp_min(1e-30)).max())
     if math.isfinite(ratio):
         _steer_attempts.append(ratio)
         _steer_apply_count += 1
