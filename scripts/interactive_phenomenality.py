@@ -117,7 +117,7 @@ _PROBES_SHOW_TALK = True
 _last_completion = None
 _pending_expect = None
 
-def load_prompt(name, default_template, **kwargs):
+def load_prompt(name, default_template, required_substring=None, **kwargs):
     import os, string
     prompt_dir = os.path.join(ROOT, "invariants", "out", "prompts")
     prompt_path = os.path.join(prompt_dir, f"{name}.txt")
@@ -135,7 +135,13 @@ def load_prompt(name, default_template, **kwargs):
             with open(prompt_path, "r", encoding="utf-8") as rf:
                 template = rf.read()
             # Hotfix: silently overwrite old buggy solve templates that had concatenation errors
+            needs_update = False
             if "$command_hints_strNote" in template or "$because_ctxWrite" in template:
+                needs_update = True
+            elif required_substring and required_substring not in template:
+                needs_update = True
+                
+            if needs_update:
                 template = default_template
                 with open(prompt_path, "w", encoding="utf-8") as wf:
                     wf.write(default_template)
@@ -3520,6 +3526,7 @@ def main():
                     prompt = load_prompt(
                         "self_create",
                         default_self_create,
+                        required_substring=":steer profile_author 0",
                         alias=alias,
                         available_cmds=available_cmds,
                         existing_personas=existing_personas,
@@ -3550,6 +3557,7 @@ def main():
                     prompt = load_prompt(
                         "self_choose",
                         default_self_choose,
+                        required_substring=":steer persona_selector 0",
                         options=options
                     )
                     queue_macro_text(prompt, input_queue)
@@ -3655,7 +3663,7 @@ def main():
                         "Output no other text. Do not leave trailing colons or unfinished commands at the end.\n"
                         ":steer profile_author 0"
                     )
-                    g_prompt = load_prompt("spawn", default_spawn_prompt, a_name=a_name)
+                    g_prompt = load_prompt("spawn", default_spawn_prompt, required_substring="unfinished commands at the end", a_name=a_name)
                     queue_macro_text(g_prompt, input_queue)
                     print(Fore.YELLOW + f"        -> Run ':spawn {a_name} {mode}' again after generation completes." + Style.RESET_ALL)
                     continue
@@ -4129,6 +4137,7 @@ def main():
                 prompt = load_prompt(
                     "solve", 
                     default_solve_prompt, 
+                    required_substring="Do not wrap arguments in quotes",
                     prompt_args_str=prompt_args_str,
                     command_hints_str=command_hints_str,
                     macro_hints_str=macro_hints_str,
