@@ -4013,7 +4013,7 @@ def main():
                     arg_specs = []
                     prompt_args_str = (
                         " Use $1, $2, ... for parameters and $@ for all of them. "
-                        "Alternatively, you can invent your own named parameters by making the VERY FIRST line of your response "
+                        "If this macro requires parameters to be flexible, you MUST invent your own named parameters by making the VERY FIRST line of your response "
                         "a comment like `# args: target, amount` and then using `$target` and `$amount` in your code. "
                         "Optional named args use `name?` or `[name]`; defaults use `name=default` or `[name=default]`."
                     )
@@ -4096,6 +4096,19 @@ def main():
                 if not any(ln.startswith(":") for ln in cmd_lines):
                     print(Fore.YELLOW + f"[Solve] The model produced no commands. Raw output:\n{(sug or '').strip()[:400]}" + Style.RESET_ALL)
                     continue
+
+                if not arg_names:
+                    for ln in cmd_lines:
+                        if ln.startswith("# args:"):
+                            inferred = ln[len("# args:"):].split(",")
+                            for i, arg in enumerate(inferred):
+                                spec = parse_macro_arg_spec(arg.strip(), fallback=f"arg{i + 1}")
+                                if spec["name"] not in clean_names:
+                                    clean_names.append(spec["name"])
+                                    arg_specs.append(spec)
+                            if clean_names:
+                                print(Fore.CYAN + f"[Solve] Inferred parameters from model: {', '.join(clean_names)}" + Style.RESET_ALL)
+                            break
                 # Guardrail: flag any line whose leading :command isn't a real
                 # command or a known macro alias (e.g. the model inventing
                 # ':choose'), so a macro that would silently fail later is caught
