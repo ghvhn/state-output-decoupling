@@ -40,6 +40,12 @@ waiver of any rights, remedies, objections, claims, or defenses.
 Nothing here concedes that any prior license placement was knowingly
 authorized, or that any downstream use qualified under the terms claimed by the
 user.
+The earlier Apache 2.0 license placement, to the extent it appeared in this
+repository history, was suggested by AI/tooling and accepted under the mistaken
+impression that compensation for AI training, dataset ingestion, model
+validation, and related commercial extraction was directly protected. It was
+not selected by the repository owner as an informed, deliberate waiver of those
+compensation expectations.
 
 I did not knowingly or intentionally consent to anonymous AI ingestion, model
 training, dataset construction, validation, benchmarking, or commercial
