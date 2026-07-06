@@ -281,6 +281,9 @@ class AgentState:
     tuner: 'TriggerTuner'
     probes: dict = field(default_factory=dict)
     tuner_bindings: dict = field(default_factory=dict)
+    prioritize_pin: dict = field(default_factory=lambda: {"probe": None, "mix": None})
+    queued_calibrations: list = field(default_factory=list)
+    labels: dict = field(default_factory=dict)
 
 from invariants.tool_sense import ToolSense, Tool
 from invariants.memory_engine import MemoryEngine
@@ -1926,6 +1929,7 @@ COMMAND_HELP_LINES = [
     "          :steer  (envelope + observed push distribution + data-implied cap/band)",
     "          :probe <name> <with it> || <without it>  (mint a named-concept sensor from",
     "                YOUR contrastive framings; scores every turn; :probe lists; :probe drop <name>)",
+    "          :probe choose              (ask the model to draft one runnable :probe <name> A || B command)",
     "          :probe adopt <dim> [<dim> ...]  (turn stored vectors -- ambiguity, disagreement,",
     "                warranted_confidence, organic_correction, ... -- into reply-scoring probes)",
     "          :probe compose <name> <mix>  (mint a probe from a SIGNED MIX of dimensions and",
@@ -2017,9 +2021,10 @@ COMMAND_HELP_LINES = [
     "                parameterized built-in command with proper solve/args headers)",
     "          :save self <name> | choose   (alias for :macro name self; 'choose' asks",
     "                the model to generate a name based on the current tuning state)",
-    "          :spawn <name> join|replace|drop|create  ('join' adds to panel, 'replace'",
-    "                                            clears it, 'drop' removes, 'create' creates only)",
-    "                [N]' takes the operator slot for N turns.",
+    "          :spawn <name> join|replace|drop|create  (load/create an executable calibration",
+    "                profile: probes, steers, tunes, calibrations, labels, backfill. 'join'",
+    "                adds to the panel; 'replace [N]' takes the operator slot for N turns;",
+    "                'drop' removes; 'create' writes the profile only)",
     "                Use @<name> :cmd to target a specific agent's tuning state)",
     "          :run <alias|file>            (queue and execute a macro's commands)",
     "          :solve [dynamic] <name> <goal> [args]  (model writes a parameterized macro",
@@ -3140,6 +3145,215 @@ def main():
         except Exception as e:
             print(Fore.RED + f"[Error] Could not save probe matches: {e}" + Style.RESET_ALL)
 
+    def _agent_slug(name):
+        slug = re.sub(r"[^a-z0-9_]", "_", str(name or "").lower()).strip("_")[:48]
+        return slug or "agent"
+
+    def _agent_tuner(name):
+        """Agent tuners live under their own path, seeded from current shell knobs."""
+        path = os.path.join(ROOT, "invariants", "out", "agents", _agent_slug(name), "trigger_tuner.json")
+        agent_tuner = TriggerTuner(path=path)
+        for _tn, _tr in tuner.triggers.items():
+            agent_tuner.register(_tn, _tr.value, kind=_tr.kind, comparator=_tr.comparator)
+        return agent_tuner
+
+    def _spawn_profile_runnable_lines(raw_lines, base_tuner):
+        """Keep spawn profiles executable: calibration DSL only, no prose/fake knobs."""
+        allowed = {"probe", "tune", "steer", "calibrate", "queue", "label", "place"}
+        forbidden_tunes = {
+            "embedding_size", "hidden_layers", "batch_size", "learning_rate",
+            "optimizer", "cpu_cycles_per_second", "accuracy", "precision",
+            "recall", "general_knowledge", "common_sense", "problem_solving",
+            "adaptability", "consistency", "memory_access",
+        }
+        probe_subcommands = {
+            "adopt", "compose", "expose", "backfill", "drop", "match", "define",
+            "explain", "show", "hide", "values", "value", "recent", "last", "auto",
+        }
+        known_targets = set(base_tuner.triggers)
+        pending_probes = set()
+        runnable, skipped = [], []
+
+        def _clean_probe(raw):
+            return re.sub(r"[^a-z0-9_]", "_", str(raw or "").lower()).strip("_")[:40]
+
+        def _known_or_pending(name):
+            nm = str(name or "").lower()
+            bare = nm[len("probe_"):] if nm.startswith("probe_") else nm
+            return nm in known_targets or bare in pending_probes or f"probe_{bare}" in known_targets
+
+        for idx, raw in enumerate(raw_lines, 1):
+            s = (raw or "").strip()
+            if not s or s.startswith("#"):
+                continue
+            if not s.startswith(":"):
+                skipped.append(f"L{idx}: non-command text")
+                continue
+            word = command_word(s)
+            if word not in allowed:
+                skipped.append(f"L{idx}: :{word} is not a spawn calibration command")
+                continue
+
+            if word == "probe":
+                tail = s[len(":probe"):].strip()
+                if not tail:
+                    skipped.append(f"L{idx}: empty :probe")
+                    continue
+                parts = tail.split()
+                head = parts[0].lower() if parts else ""
+                if head in probe_subcommands:
+                    if head == "compose" and len(parts) >= 2:
+                        pname = _clean_probe(parts[1])
+                        if pname:
+                            pending_probes.add(pname)
+                    elif head == "adopt":
+                        for tok in parts[1:]:
+                            if tok.lower() == "band":
+                                break
+                            pname = _clean_probe(tok)
+                            if pname:
+                                pending_probes.add(pname)
+                    runnable.append(s)
+                    continue
+                pname = _clean_probe(head)
+                if not pname or pname in {"auto", "choose", "choice"}:
+                    skipped.append(f"L{idx}: invalid probe name '{head}'")
+                    continue
+                if "||" not in tail and r"\||" not in tail:
+                    skipped.append(f"L{idx}: :probe {pname} missing || contrast")
+                    continue
+                pending_probes.add(pname)
+                runnable.append(s)
+                continue
+
+            if word == "tune":
+                parts = s[len(":tune"):].strip().split()
+                if len(parts) < 2:
+                    skipped.append(f"L{idx}: incomplete :tune")
+                    continue
+                target = parts[0].lower()
+                bare_target = target[len("probe_"):] if target.startswith("probe_") else target
+                mode = parts[1].lower()
+                if target in forbidden_tunes or bare_target in forbidden_tunes:
+                    skipped.append(f"L{idx}: refused fake/non-tunable target '{parts[0]}'")
+                    continue
+                if target not in known_targets and bare_target in pending_probes and mode != "dynamic":
+                    skipped.append(f"L{idx}: use :calibrate, not static :tune, for probe '{bare_target}'")
+                    continue
+                if not _known_or_pending(target):
+                    skipped.append(f"L{idx}: unknown tune target '{parts[0]}'")
+                    continue
+                if mode not in {"dynamic", "auto", "off"}:
+                    try:
+                        float(parts[1])
+                    except ValueError:
+                        skipped.append(f"L{idx}: non-numeric :tune value '{parts[1]}'")
+                        continue
+                runnable.append(s)
+                continue
+
+            if word == "steer":
+                parts = s[len(":steer"):].strip().split()
+                if not parts:
+                    skipped.append(f"L{idx}: empty :steer")
+                    continue
+                head = parts[0].lower()
+                if head in {"auto", "off", "none", "unpin"}:
+                    runnable.append(s)
+                    continue
+                if head == "mix":
+                    mix_terms = parts[1:]
+                    if mix_terms:
+                        try:
+                            float(mix_terms[-1])
+                            mix_terms = mix_terms[:-1]
+                        except ValueError:
+                            pass
+                    bad = [p for p in mix_terms if _clean_probe(p) not in pending_probes]
+                    if not mix_terms or bad:
+                        skipped.append(f"L{idx}: :steer mix references unknown probe(s) {', '.join(bad) or '(none)'}")
+                        continue
+                    runnable.append(s)
+                    continue
+                if _clean_probe(head) not in pending_probes:
+                    skipped.append(f"L{idx}: :steer references unknown probe '{parts[0]}'")
+                    continue
+                runnable.append(s)
+                continue
+
+            if word in {"calibrate", "label"}:
+                parts = s[len(":" + word):].strip().split()
+                if not parts:
+                    skipped.append(f"L{idx}: empty :{word}")
+                    continue
+                if not _known_or_pending(parts[0]) and parts[0] not in {"steer_cap_fraction", "steer_band"}:
+                    skipped.append(f"L{idx}: unknown :{word} target '{parts[0]}'")
+                    continue
+                runnable.append(s)
+                continue
+
+            if word == "queue":
+                tail = s[len(":queue"):].strip()
+                qparts = tail.split()
+                if qparts and qparts[0].lower() == "calibrate":
+                    target = qparts[1] if len(qparts) >= 2 else ""
+                    if not target or (not _known_or_pending(target) and target not in {"steer_cap_fraction", "steer_band"}):
+                        skipped.append(f"L{idx}: unknown queued calibration target '{target or '(none)'}'")
+                        continue
+                    runnable.append(s)
+                else:
+                    skipped.append(f"L{idx}: spawn queues may only use :queue calibrate ...")
+                continue
+
+            if word == "place":
+                parts = s[len(":place"):].strip().split()
+                if len(parts) < 2 or _clean_probe(parts[0]) not in pending_probes:
+                    skipped.append(f"L{idx}: :place references unknown probe")
+                    continue
+                runnable.append(s)
+
+        return runnable, skipped
+
+    def _priority_steer_handles(active_probes, active_tuner, active_pin):
+        handles = []
+        prio_steered = None
+        try:
+            prio_alpha = float(active_tuner.get("prioritize_alpha", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            prio_alpha = 0.0
+        if prio_alpha <= 0 or not active_probes:
+            return handles, prio_steered
+        try:
+            from invariants.engine import _steer_handles as _p_steer
+            _mix = (active_pin or {}).get("mix")
+            _pin = (active_pin or {}).get("probe")
+            _pdir, _label, _psign = None, None, 1.0
+            if _mix:
+                _md = build_priority_mix_direction(model, _mix, active_probes, active_tuner)
+                if _md:
+                    _pdir, _label, _psign = _md, "mix(" + "+".join(_mix) + ")", 1.0
+            elif _pin and _pin in active_probes:
+                _pdir = active_probes[_pin].get("direction") or None
+                _label = _pin
+                _psign = float((active_pin or {}).get("sign", 1.0) or 1.0)
+            else:
+                _pr = rank_probes(active_probes, active_tuner)
+                if _pr and _pr[0]["priority"] > 0 and _pr[0]["lift"] is not None:
+                    _pdir = active_probes[_pr[0]["name"]].get("direction") or None
+                    _label = _pr[0]["name"]
+                    _psign = 1.0 if _pr[0]["lift"] >= 0 else -1.0
+            if _pdir:
+                handles = list(_p_steer(model, _pdir, list(_pdir.keys()), prio_alpha * _psign))
+                prio_steered = (_label, _psign, prio_alpha)
+        except Exception:
+            for h in handles:
+                try:
+                    h.remove()
+                except Exception:
+                    pass
+            handles, prio_steered = [], None
+        return handles, prio_steered
+
     # Re-arm any persisted servo bindings (mode=drive) so a restart keeps steering.
     for _pn, _m in probe_matches.items():
         if _m.get("mode") == "drive" and _m.get("knob"):
@@ -3312,9 +3526,39 @@ def main():
         input_queue.append(startup_user_input)
 
     _shell_vars = {}
+    _inline_capture = None
+    _saved_stdout = sys.stdout
+    _target_restore = None
 
     while True:
         try:
+            if _target_restore is not None:
+                _agent = _target_restore.get("agent")
+                if _agent is not None:
+                    _agent.tuner = tuner
+                    _agent.probes = probes
+                    _agent.tuner_bindings = tuner_bindings
+                    _agent.prioritize_pin = prioritize_pin
+                    _agent.queued_calibrations = queued_calibrations
+                tuner = _target_restore["tuner"]
+                probes = _target_restore["probes"]
+                tuner_bindings = _target_restore["tuner_bindings"]
+                prioritize_pin = _target_restore["prioritize_pin"]
+                queued_calibrations = _target_restore["queued_calibrations"]
+                _target_restore = None
+
+            if _inline_capture is not None:
+                if len(input_queue) <= _inline_capture["queue_len"]:
+                    sys.stdout = _saved_stdout
+                    out_text = _inline_capture["buf"].getvalue().strip()
+                    if not out_text:
+                        out_text = "..."
+                    out_text = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', out_text)
+                    new_input = _inline_capture["prefix"] + out_text + _inline_capture["suffix"]
+                    input_queue.insert(0, (new_input, True))
+                    _inline_capture = None
+                    continue
+
             reading_turn_source = None  # set when the turn is the model reading, not the operator speaking
             silent_echo = False
             if input_queue:
@@ -3387,31 +3631,50 @@ def main():
                 _sys_tuner = tuner
                 _sys_probes = probes
                 _sys_tb = tuner_bindings
+                _sys_pin = prioritize_pin
+                _sys_queue = queued_calibrations
                 tuner = replace_agent.tuner
                 probes = replace_agent.probes
                 tuner_bindings = replace_agent.tuner_bindings
-                
+                prioritize_pin = replace_agent.prioritize_pin
+                queued_calibrations = replace_agent.queued_calibrations
+
                 # Generate user input autonomously
                 r_prompt = build_prompt(
-                    "[Your turn to respond]", 
+                    "[Your turn to respond]",
                     session_context=session_context if session_context_enabled else None
                 )
-                r_response = generate_agentic_text(
-                    model,
-                    instruction=r_prompt,
-                    config=config,
-                    max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
-                    synthesis_recorder=None,
-                    chatty_log=False,
-                    pre_formatted=True,
-                    return_telemetry=False,
-                )
+                _r_handles, _r_prio = _priority_steer_handles(probes, tuner, prioritize_pin)
+                try:
+                    r_response = generate_agentic_text(
+                        model,
+                        instruction=r_prompt,
+                        config=config,
+                        max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
+                        synthesis_recorder=None,
+                        chatty_log=False,
+                        pre_formatted=True,
+                        return_telemetry=False,
+                    )
+                finally:
+                    for _h in _r_handles:
+                        try:
+                            _h.remove()
+                        except Exception:
+                            pass
                 user_input = r_response.strip() if r_response else "..."
-                
+
                 # Restore
+                replace_agent.tuner = tuner
+                replace_agent.probes = probes
+                replace_agent.tuner_bindings = tuner_bindings
+                replace_agent.prioritize_pin = prioritize_pin
+                replace_agent.queued_calibrations = queued_calibrations
                 tuner = _sys_tuner
                 probes = _sys_probes
                 tuner_bindings = _sys_tb
+                prioritize_pin = _sys_pin
+                queued_calibrations = _sys_queue
                 replace_turns_remaining -= 1
                 _last_replace_name = replace_agent.name
                 if replace_turns_remaining <= 0:
@@ -3436,7 +3699,7 @@ def main():
                         print(Fore.CYAN + "[Auto Probe Readings]" + Style.RESET_ALL)
                         for pname, val in recent[0].items():
                             print(Fore.CYAN + f"  {pname}: {val:+.3f}" + Style.RESET_ALL)
-                            
+
                 prefix = f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] You: " if show_timestamps else "\nYou: "
                 prompt_str = Fore.MAGENTA + Style.BRIGHT + prefix + Style.RESET_ALL
                 # Once the listener is active, every turn is served from its
@@ -3444,8 +3707,29 @@ def main():
                 # the plain, unchanged input() path.
                 user_input = listener.get(prompt_str) if listener.active else input(prompt_str)
 
-            
+
             user_input = user_input.strip()
+
+            if "{:" in user_input and "}" in user_input and _inline_capture is None:
+                m = re.search(r"\{:(.*?)\}", user_input)
+                if m:
+                    inner_cmd = m.group(1).strip()
+                    if not inner_cmd.startswith(":"):
+                        inner_cmd = ":" + inner_cmd
+                    prefix = user_input[:m.start()]
+                    suffix = user_input[m.end():]
+                    import io
+                    buf = io.StringIO()
+                    _inline_capture = {
+                        "prefix": prefix,
+                        "suffix": suffix,
+                        "buf": buf,
+                        "queue_len": len(input_queue)
+                    }
+                    input_queue.insert(0, (inner_cmd, True))
+                    sys.stdout = buf
+                    continue
+
             if _shell_vars:
                 for vname, vval in _shell_vars.items():
                     # Safely replace $vname if it's not part of a larger word
@@ -3481,12 +3765,19 @@ def main():
 
             # Swap global state if target_agent
             if target_agent:
-                _sys_tuner = tuner
-                _sys_probes = probes
-                _sys_tb = tuner_bindings
+                _target_restore = {
+                    "agent": target_agent,
+                    "tuner": tuner,
+                    "probes": probes,
+                    "tuner_bindings": tuner_bindings,
+                    "prioritize_pin": prioritize_pin,
+                    "queued_calibrations": queued_calibrations,
+                }
                 tuner = target_agent.tuner
                 probes = target_agent.probes
                 tuner_bindings = target_agent.tuner_bindings
+                prioritize_pin = target_agent.prioritize_pin
+                queued_calibrations = target_agent.queued_calibrations
 
             if command_because:
                 related = set()
@@ -3519,6 +3810,19 @@ def main():
                 print(Fore.BLUE + f"[Because] noted: {noted_str}" + Style.RESET_ALL)
 
             
+            if user_input.startswith(":shell ") or user_input.startswith(":os "):
+                import subprocess
+                cmd = user_input.split(maxsplit=1)[1].strip()
+                try:
+                    res = subprocess.run(["powershell", "-Command", cmd], capture_output=True, text=True, timeout=30)
+                    out = res.stdout.strip()
+                    if not out and res.stderr:
+                        out = res.stderr.strip()
+                    print(out)
+                except Exception as e:
+                    print(Fore.RED + f"[Error running {cmd}: {e}]" + Style.RESET_ALL)
+                continue
+
             if user_input.startswith(":self ") or user_input == ":self":
                 sargs = user_input.split()[1:]
                 if not sargs:
@@ -3534,20 +3838,34 @@ def main():
                     active_probes = ", ".join(sorted(probes.keys())) or "None"
                     available_cmds = ", ".join(sorted([c for c in BUILTIN_COMMANDS if c]))
                     
+                    because_ctx = ""
+                    if command_because:
+                        because_ctx = f"The operator provided the following rationale for this persona:\n{command_because}\nMake sure your generated macro commands strongly reflect this rationale.\n\n"
+                        print(Fore.CYAN + "[Self] Passing your 'because' rationale to the model." + Style.RESET_ALL)
+
+                    import dataclasses
+                    valid_knobs = ", ".join(f.name for f in dataclasses.fields(AgenticConfig) if f.name not in ("disabled_steer_channels", "committee", "recent_corrections", "clarifying_questions"))
+
                     default_self_create = (
                         ":expect macro $alias\n"
                         ":probe persona_author I am defining a cognitive persona using shell macro commands || I am generating conversational text\n"
                         ":probe backfill persona_author\n"
                         ":steer persona_author 1.5\n"
                         "The operator wants to create a cognitive persona named '$alias'.\n"
-                        "Write a short shell macro (3 to 6 lines) using any mix of commands to define this persona.\n"
+                        f"{because_ctx}"
+                        "Write a short shell macro (3 to 10 lines) using any mix of commands to define this persona.\n"
+                        f"Available engine knobs you can :tune directly are: {valid_knobs}. "
+                        "If you want to control a behavioral trait NOT in this list (like speed, creativity, or response length), DO NOT hallucinate a :tune command. Instead, define a cognitive sensor for it using :probe (e.g. `:probe patience I take time to think || I respond instantly`) and steer it (`:steer patience 1.5`).\n"
                         "Available system commands: $available_cmds\n"
                         "Existing personas you could invoke (by adding `:<name>`): $existing_personas\n"
                         "Currently active probes you could compose: $active_probes\n"
                         "Use the syntax `:probe <concept_name> <framing with it> || <framing without it>` to define new dimensions.\n"
                         "You can also use `:probe compose ...` to combine existing probes.\n"
+                        "You MUST actively use commands like :tune, :steer, and :probe to tune the model's behavior.\n"
+                        "You MUST include `:doc COMMANDS.md` in your macro so the persona knows what shell commands it can use.\n"
+                        "You SHOULD also provide context or system instructions to the persona if appropriate (e.g., by using `:doc` to stage relevant files or `:memory use` for context). "
                         "Output ONLY the commands, one per line. Do not use markdown blocks or conversational text.\n"
-                        ":steer profile_author 0"
+                        ":steer persona_author 0"
                     )
                     prompt = load_prompt(
                         "self_create",
@@ -3635,61 +3953,75 @@ def main():
                     print(Fore.CYAN + f"[Spawn] Dropped agent '{a_name}'." + Style.RESET_ALL)
                     continue
                 
-                # Create agent state
-                new_agent = AgentState(name=a_name, tuner=TriggerTuner())
+                # Create agent state. The tuner is isolated per spawned agent,
+                # then seeded with the shell's current known knobs.
+                new_agent = AgentState(name=a_name, tuner=_agent_tuner(a_name))
                 # Load profile if macro exists
                 macro_path = macro_aliases.get(a_name, a_name)
                 if mode not in ("create", "generate") and (os.path.isfile(macro_path) or os.path.isfile(os.path.join(ROOT, "invariants", "out", "macros", f"{a_name}.txt"))):
                     real_path = macro_path if os.path.isfile(macro_path) else os.path.join(ROOT, "invariants", "out", "macros", f"{a_name}.txt")
                     try:
                         with open(real_path, "r", encoding="utf-8") as rf:
-                            lines = [l.strip() for l in rf.read().splitlines() if l.strip() and not l.strip().startswith("#")]
-                        
-                        # Temporarily swap global tuner to apply macro commands
-                        _old_t = tuner
-                        _old_p = probes
-                        _old_tb = tuner_bindings
-                        
-                        tuner = new_agent.tuner
-                        probes = new_agent.probes
-                        tuner_bindings = new_agent.tuner_bindings
-                        
-                        # simple execution of tune commands for the agent
-                        for cmd in lines:
-                            if cmd.startswith(":tune"):
-                                targs = cmd[len(":tune"):].split()
-                                if len(targs) >= 2:
-                                    try:
-                                        tuner.set(targs[0], float(targs[1]))
-                                    except:
-                                        pass
-                                
-                        new_agent.tuner = tuner
-                        new_agent.probes = probes
-                        new_agent.tuner_bindings = tuner_bindings
-                        
-                        tuner = _old_t
-                        probes = _old_p
-                        tuner_bindings = _old_tb
-                        print(Fore.GREEN + f"[Spawn] Loaded profile for '{a_name}' from {real_path}." + Style.RESET_ALL)
+                            raw_lines = rf.read().splitlines()
+                        lines, skipped = _spawn_profile_runnable_lines(raw_lines, new_agent.tuner)
+
+                        if mode in ("join", "replace"):
+                            # Queue profile commands to be executed against the new agent.
+                            bundled = [(f"@{a_name} {cmd}", True) for cmd in lines]
+                            input_queue[:0] = bundled
+                        skip_note = f" Skipped {len(skipped)} invalid/non-profile line(s)." if skipped else ""
+                        print(Fore.GREEN + f"[Spawn] Loaded {len(lines)} profile command(s) for '{a_name}' from {real_path}.{skip_note}" + Style.RESET_ALL)
+                        if skipped:
+                            for reason in skipped[:6]:
+                                print(Fore.YELLOW + f"        - {reason}" + Style.RESET_ALL)
+                            if len(skipped) > 6:
+                                print(Fore.YELLOW + f"        - ...and {len(skipped) - 6} more" + Style.RESET_ALL)
                     except Exception as e:
                         print(Fore.RED + f"[Spawn] Failed to load profile for '{a_name}': {e}" + Style.RESET_ALL)
                 else:
                     print(Fore.CYAN + f"[Spawn] No saved profile found for '{a_name}'. Generating profile based on name..." + Style.RESET_ALL)
                     print(Fore.CYAN + f"[Spawn] No saved profile found for '{a_name}'. Queuing phenomenological macro to generate one..." + Style.RESET_ALL)
+
+                    because_ctx = ""
+                    if command_because:
+                        because_ctx = f"The operator provided the following rationale for this profile:\n{command_because}\nMake sure your generated profile strongly reflects this rationale.\n\n"
+                        print(Fore.CYAN + "[Spawn] Passing your 'because' rationale to the model." + Style.RESET_ALL)
+
+                    invalid_spawn_knobs = {
+                        "embedding_size", "hidden_layers", "batch_size", "learning_rate",
+                        "optimizer", "cpu_cycles_per_second", "accuracy", "precision",
+                        "recall", "general_knowledge", "common_sense", "problem_solving",
+                        "adaptability", "consistency", "memory_access",
+                    }
+                    valid_knobs = ", ".join(sorted(k for k in tuner.triggers if not k.startswith("probe_") and k not in invalid_spawn_knobs))
+
                     default_spawn_prompt = (
                         ":expect file invariants/out/macros/$a_name.txt\n"
+                        "# SPAWN_PROFILE_V2\n"
                         ":probe profile_author I am generating a tuning profile composed of exact shell configuration commands || I am generating conversational text\n"
                         ":probe backfill profile_author\n"
                         ":steer profile_author 1.5\n"
-                        "You are generating a tuning profile for an agent named '$a_name'. "
-                        "Respond ONLY with a series of lines starting with :probe, :tune, :steer, or :label to configure this persona. "
-                        "You can use :probe to define custom cognitive probes, and :steer to prioritize them. "
-                        "For example: ':probe creativity I invent new ideas || I repeat standard answers\\n:steer creativity 1.5\\n:tune response_tokens 128'. "
-                        "Output no other text. Do not leave trailing colons or unfinished commands at the end.\n"
+                        "You are generating an executable spawn calibration profile for an agent named '$a_name'. "
+                        f"{because_ctx}"
+                        "Output ONLY runnable profile commands, one per line; no prose, headings, bullets, markdown, or explanations. "
+                        "Valid spawn profile commands are :probe, :probe adopt, :probe compose, :probe expose, :probe backfill, :tune, :tune dynamic, :steer, :calibrate, :queue calibrate, :label, and :place. "
+                        "A direct :probe line MUST use this exact contrastive form: :probe <short_snake_name> <first-person WITH statement> || <first-person WITHOUT statement>. "
+                        "Use :probe to define behavioral sensors for traits such as speed, care, calibration, caution, or compression; do NOT invent architecture knobs. "
+                        f"Known direct :tune targets are: {valid_knobs}. "
+                        "Do NOT output fake knobs such as embedding_size, hidden_layers, batch_size, learning_rate, optimizer, cpu_cycles_per_second, accuracy, precision, recall, or common_sense. "
+                        "Prefer this shape: 3-6 :probe definitions, :probe backfill all 120, 1-3 deliberate :tune lines for known knobs, :steer or :steer mix for the new probes, and :calibrate/:queue calibrate lines for the new probes. "
+                        "Example:\n"
+                        ":probe careful_compression I answer directly while preserving the important constraints. || I ramble or drop important constraints.\n"
+                        ":probe calibration_hunger I seek evidence before locking in a setting. || I assert settings without checking data.\n"
+                        ":probe backfill all 120\n"
+                        ":tune response_tokens 256\n"
+                        ":steer mix careful_compression calibration_hunger 0.08\n"
+                        ":calibrate careful_compression 50\n"
+                        ":queue calibrate calibration_hunger 50\n"
+                        "Now output the profile for '$a_name'.\n"
                         ":steer profile_author 0"
                     )
-                    g_prompt = load_prompt("spawn", default_spawn_prompt, required_substring="unfinished commands at the end", a_name=a_name)
+                    g_prompt = load_prompt("spawn", default_spawn_prompt, required_substring="SPAWN_PROFILE_V2", a_name=a_name)
                     queue_macro_text(g_prompt, input_queue)
                     print(Fore.YELLOW + f"        -> Run ':spawn {a_name} {mode}' again after generation completes." + Style.RESET_ALL)
                     continue
@@ -3704,6 +4036,51 @@ def main():
                     print(Fore.GREEN + f"[Spawn] Agent '{a_name}' is replacing the user for {n_turns} turn(s)." + Style.RESET_ALL)
                 elif mode in ("generate", "create"):
                     print(Fore.CYAN + f"[Spawn] Profile for '{a_name}' generated and saved. It is ready for use." + Style.RESET_ALL)
+                continue
+
+            if user_input.startswith(":fix "):
+                sargs = user_input.split(maxsplit=2)
+                if len(sargs) < 3:
+                    print(Fore.YELLOW + "[System] Usage: :fix <macro_name> <instructions...>" + Style.RESET_ALL)
+                    continue
+                a_name = sargs[1]
+                instructions = sargs[2]
+
+                macro_path = macro_aliases.get(a_name, a_name)
+                real_path = macro_path if os.path.isfile(macro_path) else os.path.join(ROOT, "invariants", "out", "macros", f"{a_name}.txt")
+
+                if not os.path.isfile(real_path):
+                    print(Fore.YELLOW + f"[System] Could not find macro '{a_name}' at {real_path}." + Style.RESET_ALL)
+                    continue
+
+                with open(real_path, "r", encoding="utf-8") as rf:
+                    existing_macro = rf.read()
+
+                print(Fore.CYAN + f"[System] Queuing phenomenological macro to fix '{a_name}'..." + Style.RESET_ALL)
+
+                because_ctx = ""
+                if command_because:
+                    because_ctx = f"The operator provided the following underlying reason/rationale for this modification:\n{command_because}\nMake sure your updated macro strongly reflects this rationale.\n\n"
+                    print(Fore.CYAN + "[Fix] Passing your 'because' rationale to the model." + Style.RESET_ALL)
+
+                fix_prompt = (
+                    f":expect file {real_path}\n"
+                    ":probe profile_author I am generating a tuning profile composed of exact shell configuration commands || I am generating conversational text\n"
+                    ":probe backfill profile_author\n"
+                    ":steer profile_author 1.5\n"
+                    f"You are modifying the tuning profile for an agent named '{a_name}'.\n"
+                    "Here is the existing profile:\n"
+                    "```\n"
+                    f"{existing_macro.strip()}\n"
+                    "```\n"
+                    f"{because_ctx}"
+                    f"The operator has provided the following instruction to fix or improve it: \"{instructions}\"\n"
+                    "Respond ONLY with executable profile commands: :probe, :probe adopt, :probe compose, :probe expose, :probe backfill, :tune, :tune dynamic, :steer, :calibrate, :queue calibrate, :label, or :place. "
+                    "Direct :probe definitions must contain ||. Do not use markdown formatting blocks around your response. Output no other text. Do not leave trailing colons or unfinished commands at the end.\n"
+                    ":steer profile_author 0"
+                )
+                queue_macro_text(fix_prompt, input_queue)
+                print(Fore.YELLOW + f"        -> The fix is queued. It will overwrite {real_path}." + Style.RESET_ALL)
                 continue
 
             if user_input == ":macro" or user_input.startswith(":macro "):
@@ -4794,7 +5171,7 @@ def main():
                         if "{last_updated}" in file_why:
                             try:
                                 mtime = os.path.getmtime(p)
-                                dt = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d")
+                                dt = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
                             except OSError:
                                 dt = "unknown"
                             file_why = file_why.replace("{last_updated}", dt)
@@ -5719,6 +6096,42 @@ def main():
                         print(Fore.YELLOW + "[Probe] Usage: :probe auto [on|off]" + Style.RESET_ALL)
                     continue
 
+                if pargs.lower() in ("choose", "choice"):
+                    active_probe_names = ", ".join(sorted(probes)) or "none"
+                    print(Fore.CYAN + "[Probe] Asking the model to choose a useful probe definition..." + Style.RESET_ALL)
+                    suggestion_prompt = (
+                        f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
+                        "Choose one useful cognitive/behavioral probe for the current interactive shell. "
+                        "Output exactly one runnable command in this format:\n"
+                        ":probe <short_snake_name> I <WITH statement>. || I <WITHOUT statement>.\n\n"
+                        "Rules:\n"
+                        "- The probe name must not be choose, choice, auto, values, recent, or all.\n"
+                        "- Both sides must be first-person statements and must contrast the same dimension.\n"
+                        "- The line must contain exactly one || separator.\n"
+                        "- Do not output prose, bullets, markdown, or explanation.\n\n"
+                        f"Active probes already present: {active_probe_names}\n"
+                        "Example:\n"
+                        ":probe evidence_before_commitment I check evidence before committing to a setting. || I commit to settings before checking evidence.\n"
+                        "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n"
+                    )
+                    sug = generate_agentic_text(
+                        model,
+                        instruction=suggestion_prompt,
+                        config=config,
+                        pre_formatted=True,
+                        max_new_tokens=120
+                    ).strip()
+                    sug = re.sub(r"```.*?```", lambda m: m.group(0).strip("`"), sug, flags=re.DOTALL).strip()
+                    line = next((ln.strip() for ln in sug.splitlines() if ln.strip().startswith(":probe ")), sug.splitlines()[0].strip() if sug.splitlines() else "")
+                    m = re.match(r"^:probe\s+([a-zA-Z0-9_]+)\s+(.+\|\|.+)$", line)
+                    if not m or m.group(1).lower() in {"choose", "choice", "auto", "values", "recent", "all"}:
+                        print(Fore.YELLOW + f"[Probe] Model did not return a valid probe command. Raw suggestion: {sug[:240]}" + Style.RESET_ALL)
+                        continue
+                    pname_s = re.sub(r"[^a-z0-9_]", "_", m.group(1).lower())[:40]
+                    pair_s = m.group(2).strip()
+                    print(Fore.GREEN + f"\n[Probe Suggestion] Try running this:\n:probe {pname_s} {pair_s}\n" + Style.RESET_ALL)
+                    continue
+
                 if pargs.lower() in ("values", "value", "recent", "last") or pargs.lower().startswith(("values ", "value ", "recent ", "last ")):
                     vparts = pargs.split()
                     rest = vparts[1:]
@@ -6610,6 +7023,12 @@ def main():
                         prefix_cmd = user_input[len(":suggest"):].strip()
                         active_probes = ", ".join(probes.keys()) if probes else "None"
                         active_steers = ", ".join(k for k in tuner.triggers.keys() if k.startswith("steer_") or "_alpha" in k)
+
+                        because_ctx = ""
+                        if command_because:
+                            because_ctx = f"\nThe user provided this rationale for the command they are trying to type:\n{command_because}\nEnsure your suggested completion perfectly aligns with this rationale."
+                            print(Fore.CYAN + "[Suggest] Passing your 'because' rationale to the model." + Style.RESET_ALL)
+
                         default_suggest_prompt = (
                             ":expect autocomplete\n"
                             ":probe command_author I am suggesting exactly ONE valid completion for the user's shell command || I am generating conversational text\n"
@@ -6617,6 +7036,7 @@ def main():
                             ":steer command_author 1.5\n"
                             "You are a command autocomplete assistant for an interactive agent shell.\n"
                             "The user has started typing a command: '$prefix_cmd'\n"
+                            f"{because_ctx}\n"
                             "Currently active probes: $active_probes\n"
                             "Active steers: $active_steers\n"
                             "Please provide exactly ONE valid completion for this command based on the available shell capabilities. "
@@ -8141,34 +8561,53 @@ def main():
                     _sys_tuner = tuner
                     _sys_probes = probes
                     _sys_tb = tuner_bindings
+                    _sys_pin = prioritize_pin
+                    _sys_queue = queued_calibrations
                     tuner = ja.tuner
                     probes = ja.probes
                     tuner_bindings = ja.tuner_bindings
-                    
+                    prioritize_pin = ja.prioritize_pin
+                    queued_calibrations = ja.queued_calibrations
+
                     ja_prompt = build_prompt(
-                        "[Please respond]", 
+                        "[Please respond]",
                         session_context=session_context if session_context_enabled else None,
                         active_u_name="system"
                     )
-                    ja_response = generate_agentic_text(
-                        model,
-                        instruction=ja_prompt,
-                        config=config,
-                        max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
-                        synthesis_recorder=None,
-                        chatty_log=False,
-                        pre_formatted=True,
-                        return_telemetry=False,
-                    )
-                    
+                    _ja_handles, _ja_prio = _priority_steer_handles(probes, tuner, prioritize_pin)
+                    try:
+                        ja_response = generate_agentic_text(
+                            model,
+                            instruction=ja_prompt,
+                            config=config,
+                            max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
+                            synthesis_recorder=None,
+                            chatty_log=False,
+                            pre_formatted=True,
+                            return_telemetry=False,
+                        )
+                    finally:
+                        for _h in _ja_handles:
+                            try:
+                                _h.remove()
+                            except Exception:
+                                pass
+
                     print(ja_response, end="")
-                    
+
                     if session_context_enabled:
                         session_context.append(("assistant", ja.name, ja_response, 0.0))
-                    
+
+                    ja.tuner = tuner
+                    ja.probes = probes
+                    ja.tuner_bindings = tuner_bindings
+                    ja.prioritize_pin = prioritize_pin
+                    ja.queued_calibrations = queued_calibrations
                     tuner = _sys_tuner
                     probes = _sys_probes
                     tuner_bindings = _sys_tb
+                    prioritize_pin = _sys_pin
+                    queued_calibrations = _sys_queue
                     
                     memory.append_turn(
                         "assistant",
