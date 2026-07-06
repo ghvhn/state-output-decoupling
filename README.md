@@ -7,6 +7,10 @@ output.** Activations are sensors first and controllers second; every
 intervention is bounded; every "does it help" question is settled by recorded
 outcomes, not assertion.
 
+Public notice: this repository includes a Machine Learning and Artificial
+Intelligence Rider, and anonymous or unattributed AI ingestion is explicitly
+condemned in [PUBLIC_ANNOUNCEMENT.md](PUBLIC_ANNOUNCEMENT.md).
+
 Two front doors:
 
 1. **The benchmark suite** — clean-lane math reasoning with verifier-gated
