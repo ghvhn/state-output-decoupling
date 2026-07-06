@@ -1891,7 +1891,7 @@ KNOWN_COMMANDS = (
 # never invoked as ':<name>' (the built-in wins). Everything else that is a known
 # macro alias runs directly as ':<alias> args'.
 BUILTIN_COMMANDS = {c[1:] for c in KNOWN_COMMANDS} | {
-    "macro", "run", "game", "solve", "refresh", "place", "consider",
+    "macro", "run", "game", "solve", "refresh", "place", "consider", "spawn",
     "exit", "quit", "timestamps", "listen", "history", "accept", "reject", "help", "expose", "hide", "show",
 }
 
