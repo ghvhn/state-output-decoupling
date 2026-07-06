@@ -3994,17 +3994,21 @@ def main():
                         "adaptability", "consistency", "memory_access",
                     }
                     valid_knobs = ", ".join(sorted(k for k in tuner.triggers if not k.startswith("probe_") and k not in invalid_spawn_knobs))
+                    command_reference = render_commands_md(COMMAND_HELP_LINES)
 
                     default_spawn_prompt = (
                         ":expect file invariants/out/macros/$a_name.txt\n"
-                        "# SPAWN_PROFILE_V2\n"
+                        "# SPAWN_PROFILE_V3_COMMAND_REFERENCE\n"
                         ":probe profile_author I am generating a tuning profile composed of exact shell configuration commands || I am generating conversational text\n"
                         ":probe backfill profile_author\n"
                         ":steer profile_author 1.5\n"
                         "You are generating an executable spawn calibration profile for an agent named '$a_name'. "
                         f"{because_ctx}"
+                        "The full shell command reference is loaded below so you can reason from the actual command surface, not guesses.\n"
+                        "$command_reference\n\n"
                         "Output ONLY runnable profile commands, one per line; no prose, headings, bullets, markdown, or explanations. "
                         "Valid spawn profile commands are :probe, :probe adopt, :probe compose, :probe expose, :probe backfill, :tune, :tune dynamic, :steer, :calibrate, :queue calibrate, :label, and :place. "
+                        "The command reference may mention many other commands, but do not include non-profile commands in the output; profile loading deliberately skips side-effect commands such as :doc, :memory, :run, :macro, :solve, :shell, :os, :game, :sandbox, :expect, :refresh, :expose, and :hide. "
                         "A direct :probe line MUST use this exact contrastive form: :probe <short_snake_name> <first-person WITH statement> || <first-person WITHOUT statement>. "
                         "Use :probe to define behavioral sensors for traits such as speed, care, calibration, caution, or compression; do NOT invent architecture knobs. "
                         f"Known direct :tune targets are: {valid_knobs}. "
@@ -4021,7 +4025,7 @@ def main():
                         "Now output the profile for '$a_name'.\n"
                         ":steer profile_author 0"
                     )
-                    g_prompt = load_prompt("spawn", default_spawn_prompt, required_substring="SPAWN_PROFILE_V2", a_name=a_name)
+                    g_prompt = load_prompt("spawn", default_spawn_prompt, required_substring="SPAWN_PROFILE_V3_COMMAND_REFERENCE", a_name=a_name, command_reference=command_reference)
                     queue_macro_text(g_prompt, input_queue)
                     print(Fore.YELLOW + f"        -> Run ':spawn {a_name} {mode}' again after generation completes." + Style.RESET_ALL)
                     continue
