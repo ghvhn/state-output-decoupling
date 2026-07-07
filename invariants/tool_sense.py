@@ -29,6 +29,8 @@ class Tool:
     act: Callable[[Any, Any], Optional[list]]   # (payload, model) -> steer handles to
                                                 # apply to the remaining generation
     comparator: str = ">="                      # fire when signal >= threshold (or <=)
+    activation_criteria: str = ""               # human-readable condition for when it should fire
+    steer_magnitude: str = ""                   # human-readable alpha/strength surface
 
 
 class ToolSense:

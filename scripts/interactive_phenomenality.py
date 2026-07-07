@@ -1197,11 +1197,11 @@ def macro_line_affects_probes_or_tuning(line):
 def split_because(line):
     """Peel a trailing ' because <reason>' provenance clause off any command.
     Returns (command_without_clause, reason_or_None). Only commands (lines that
-    start with ':') carry a clause -- a plain utterance keeps its words intact.
+    start with ':' or target an agent with '@name :cmd') carry a clause -- a plain utterance keeps its words intact.
     Uses the LAST ' because ' so an end-of-line clause wins over the word
     appearing inside an argument (a trailing 'because ...' inside a probe framing
     is the one caveat)."""
-    if not line.startswith(":"):
+    if not (line.startswith(":") or line.startswith("@")):
         return line, None
     low = line.lower()
     idx = low.rfind(" because ")
@@ -1505,6 +1505,55 @@ def restore_command_path(path, root=ROOT):
     return str(path)
 
 
+DEFAULT_COMMAND_TOOL_STEER = "0.0 (command result only; no activation vector)"
+
+
+def normalize_command_exposure(record):
+    """Return the persisted shape for an exposed command tool.
+
+    Older saves store only "stage"/"direct". New saves may also carry a
+    human-readable activation criterion and explicit steer magnitude note.
+    """
+    if isinstance(record, dict):
+        mode = str(record.get("mode", "stage") or "stage").lower()
+        activation = str(record.get("activation", "") or "").strip()
+        steer = str(
+            record.get("steer_magnitude", record.get("steer", ""))
+            or ""
+        ).strip()
+    else:
+        mode = str(record or "stage").lower()
+        activation = ""
+        steer = ""
+    if mode not in {"direct", "stage"}:
+        mode = "stage"
+    return {
+        "mode": mode,
+        "activation": activation,
+        "steer_magnitude": steer,
+    }
+
+
+def command_exposure_mode(record):
+    return normalize_command_exposure(record)["mode"]
+
+
+def command_exposure_custom_activation(record):
+    return normalize_command_exposure(record)["activation"]
+
+
+def command_exposure_activation(word, record):
+    activation = command_exposure_custom_activation(record)
+    if activation:
+        return activation
+    return f"explicit <<CMD: :{word} ...>> request while :{word} is exposed"
+
+
+def command_exposure_steer(record):
+    steer = normalize_command_exposure(record)["steer_magnitude"]
+    return steer or DEFAULT_COMMAND_TOOL_STEER
+
+
 def normalize_game_config(raw):
     """Accept the internal {rules, win, loss, prizes} shape or old flat JSON."""
     if not isinstance(raw, dict):
@@ -1590,8 +1639,11 @@ def build_session_restore_macro(probes, macro_aliases, exposed_commands, exposed
     for word, mode in sorted((exposed_commands or {}).items()):
         if word == "expose":
             continue
-        suffix = " direct" if str(mode).lower() == "direct" else ""
-        lines.append(f":expose :{word}{suffix}")
+        record = normalize_command_exposure(mode)
+        suffix = " direct" if command_exposure_mode(record) == "direct" else ""
+        because = command_exposure_custom_activation(record)
+        because_suffix = f" because {because}" if because else ""
+        lines.append(f":expose :{word}{suffix}{because_suffix}")
         stats["exposed_commands"] += 1
 
     games_dir = os.path.join(root, "games")
@@ -1998,10 +2050,12 @@ COMMAND_HELP_LINES = [
     "          :game no | decline           (decline the game the model just proposed)",
     "          :accept [n|all] | :reject [n|all]  (a game may STAGE a command instead of",
     "                running it; nothing a game chose runs until you accept it here)",
-    "          :expose :<command> [stage|direct] | :expose off <target>  (runtime tool access:",
+    "          :expose :<command> [stage|direct] [because <activation>] | :expose off <target>",
+    "                (runtime tool access:",
     "                make/remove a command callable by the model as <<CMD: :command args>>;",
     "                bare/default = staged for :accept, direct = queued immediately;",
-    "                off works for commands, probes, and knobs with the same order)",
+    "                because records when the tool should activate; off works",
+    "                for commands, probes, and knobs with the same order)",
     "          :expose <probe|knob> [off]  (without leading ':', expose a probe sensor",
     "                or tuner knob to the model's <<PROBE: name>> tool)",
     "          :hide <command> | :hide off <command>  (documentation/writing visibility:",
@@ -2207,7 +2261,10 @@ def build_model_help_text(solve_macros=None, exposed_commands=None, exposed_knob
     the operator's ':' commands, which it can only reach by proposing a game."""
     if solve_macros is None:
         solve_macros = list_solve_macros()
-    exposed_commands = exposed_commands or {}
+    exposed_commands = {
+        str(name).lstrip(":").lower(): normalize_command_exposure(record)
+        for name, record in (exposed_commands or {}).items()
+    }
     exposed_knobs = set(exposed_knobs or [])
     hidden_commands = set(hidden_commands or [])
     visible_exposed = {
@@ -2233,12 +2290,17 @@ def build_model_help_text(solve_macros=None, exposed_commands=None, exposed_knob
     if exposed_knobs:
         lines.append("                             Exposed knobs: " + ", ".join(sorted(exposed_knobs)) + ".")
     if visible_exposed:
-        exposed_list = ", ".join(
-            f":{name} ({mode})" for name, mode in sorted(visible_exposed.items())
-        )
         lines.extend([
             "  <<CMD: :command args>>    call an operator-exposed command tool",
-            "                             Documented here: " + exposed_list + ".",
+            "                             Documented here:",
+        ])
+        for name, record in sorted(visible_exposed.items()):
+            lines.append(
+                f"                             - :{name} ({command_exposure_mode(record)}); "
+                f"activate when {command_exposure_activation(name, record)}; "
+                f"steer {command_exposure_steer(record)}."
+            )
+        lines.extend([
             "                             Semicolon chains run only exposed commands; :macro keeps semicolons as its body.",
         ])
     else:
@@ -2986,8 +3048,21 @@ def main():
         print(Fore.MAGENTA + f"\n[ClaimMap] mid-thought: sensed a tension, {msg}" + Style.RESET_ALL, flush=True)
         return handles
 
-    tool_sense.register(Tool("claimmap_tension", _claimmap_detect, _claimmap_act))
-    tool_sense.register(Tool("memory_need", _memory_detect, _memory_act, comparator=">="))
+    tool_sense.register(Tool(
+        "claimmap_tension",
+        _claimmap_detect,
+        _claimmap_act,
+        activation_criteria="framing tension score crosses :tune claimmap_tension",
+        steer_magnitude=":tune claimmap_alpha",
+    ))
+    tool_sense.register(Tool(
+        "memory_need",
+        _memory_detect,
+        _memory_act,
+        comparator=">=",
+        activation_criteria="phenomenality memory-gap score crosses :tune memory_need",
+        steer_magnitude=":tune memory_alpha",
+    ))
     imported_methodologies = memory.import_methodologies(
         _global_cache.memory,
         source="cognitive_cache",
@@ -3448,7 +3523,10 @@ def main():
 
         visible_cmds = sorted(_all_shell_commands() - hidden_commands)
         hidden = sorted(hidden_commands)
-        exposed = [f":{w}({m})" for w, m in sorted(exposed_commands.items())]
+        exposed = [
+            f":{w}({command_exposure_mode(r)}; activate={command_exposure_activation(w, r)}; steer={command_exposure_steer(r)})"
+            for w, r in sorted(exposed_commands.items())
+        ]
         exposed_probe_names = sorted(n for n, p in (active_probes or {}).items() if p.get("exposed"))
         lines.append("Visible commands/macros: " + ", ".join(f":{c}" for c in visible_cmds[:80]) + (" ..." if len(visible_cmds) > 80 else ""))
         if hidden:
@@ -3530,7 +3608,10 @@ def main():
     exposed_commands = {}
     try:
         with open(EXPOSED_CMD_PATH, "r", encoding="utf-8") as _ecf:
-            exposed_commands = {str(k): str(v) for k, v in json.load(_ecf).items()}
+            exposed_commands = {
+                str(k).lstrip(":").lower(): normalize_command_exposure(v)
+                for k, v in json.load(_ecf).items()
+            }
     except (OSError, ValueError):
         exposed_commands = {}
     exposed_knobs = set()
@@ -3613,7 +3694,7 @@ def main():
                 if word not in BUILTIN_COMMANDS and word not in macro_aliases:
                     result_lines.append(f"- refused :{word}; it is exposed but no longer exists as a command.")
                     continue
-                mode = str(exposed_commands.get(word, "stage")).lower()
+                mode = command_exposure_mode(exposed_commands.get(word, "stage"))
                 if mode == "direct":
                     direct_cmds.append(cmd)
                     result_lines.append(f"- queued direct command: {cmd}")
@@ -4214,7 +4295,7 @@ def main():
                         "$spawn_state_report\n\n"
                         "Output ONLY runnable shell commands or macro invocations, one per line; no prose, headings, bullets, markdown, or explanations. "
                         "The command reference is authoritative: use any known command/macro that serves the spawned agent's setup, context, calibration, or future workflow. "
-                        "Use :hide/:hide off for documentation and writing visibility. Use :expose/:expose off for runtime tool access, e.g. @agent :expose :command grants a callable tool and @agent :hide off :command makes it visible for profile/macro writing. Do not rely on hidden spawn-loader filtering. "
+                        "Use :hide/:hide off for documentation and writing visibility. Use :expose/:expose off for runtime tool access, e.g. @agent :expose :command because <activation criteria> grants a callable tool and @agent :hide off :command makes it visible for profile/macro writing. Every tool should have an activation criterion and a steer magnitude; command tools default to explicit-request activation and steer 0.0 because they return command context rather than applying an activation vector. Do not rely on hidden spawn-loader filtering. "
                         "Use trailing because-clauses to record purpose for context or side-effect commands. "
                         "Use :doc when the spawned agent needs a document as working context; for example :doc readings because <purpose>, followed by :doc read/:doc next/:doc inject when useful. "
                         "Use :queue <future command> for commands that should run later when they become useful or when enough evidence exists; queued commands must still be runnable shell commands. "
@@ -5109,7 +5190,14 @@ def main():
                             msg = f"steered the rest of this answer (scaled alpha {alpha:.2f})." if handles else f"steering off (:tune {t_name}_alpha to enable)."
                             print(Fore.MAGENTA + f"\n[{t_name}] metric '{t_metric}' triggered -> {msg}" + Style.RESET_ALL, flush=True)
                             return handles
-                        return Tool(f"{t_name}_need", custom_detect, custom_act, comparator=">=")
+                        return Tool(
+                            f"{t_name}_need",
+                            custom_detect,
+                            custom_act,
+                            comparator=">=",
+                            activation_criteria=f"phenomenality metric '{t_metric}' crosses :tune {t_name}_need",
+                            steer_magnitude=f":tune {t_name}_alpha multiplied by |{t_metric}|",
+                        )
 
                     new_tool = make_custom_tool()
                     tool_sense.register(new_tool)
@@ -5531,6 +5619,10 @@ def main():
                             print(Fore.CYAN + f"  {k}: {round(v,3)} of fire decisions decoupled from its signal (coin flip)." + Style.RESET_ALL)
                     else:
                         print(Fore.CYAN + f"  none released. Releasable tools: {', '.join(tool_names)}." + Style.RESET_ALL)
+                    for tool in tool_sense.tools:
+                        activation = getattr(tool, "activation_criteria", "") or f"signal crosses :tune {tool.name}"
+                        magnitude = getattr(tool, "steer_magnitude", "") or "action-defined"
+                        print(Fore.CYAN + f"  {tool.name}: activation={activation}; steer={magnitude}." + Style.RESET_ALL)
                     print(Fore.CYAN + "  Release separates causality: over decoupled turns the trigger and the action decorrelate, so credit lift can tell 'the trigger caused it' from 'acting helped anyway'." + Style.RESET_ALL)
                     continue
                 tname = rargs[0]
@@ -5638,7 +5730,10 @@ def main():
                     pass
                 try:
                     with open(EXPOSED_CMD_PATH, "r", encoding="utf-8") as _ecf:
-                        _loaded_exposed = {str(k): str(v) for k, v in json.load(_ecf).items()}
+                        _loaded_exposed = {
+                            str(k).lstrip(":").lower(): normalize_command_exposure(v)
+                            for k, v in json.load(_ecf).items()
+                        }
                     exposed_commands.clear()
                     exposed_commands.update(_loaded_exposed)
                     print(Fore.GREEN + f"[System] Reloaded {len(exposed_commands)} exposed command(s)." + Style.RESET_ALL)
@@ -5825,11 +5920,17 @@ def main():
                 if not eargs:  # list exposures
                     exposed_probe_names = sorted(n for n in probes if probes[n].get("exposed"))
                     if not exposed_commands and not exposed_probe_names and not exposed_knobs:
-                        print(Fore.CYAN + "[Expose] Nothing exposed. Use ':expose :command [stage|direct]' for command tools, or ':expose <probe|knob>' for model-readable probes/knobs." + Style.RESET_ALL)
+                        print(Fore.CYAN + "[Expose] Nothing exposed. Use ':expose :command [stage|direct] because <activation>' for command tools, or ':expose <probe|knob>' for model-readable probes/knobs." + Style.RESET_ALL)
                     if exposed_commands:
-                        for w, mode in sorted(exposed_commands.items()):
+                        for w, record in sorted(exposed_commands.items()):
                             hidden_note = " [hidden from writing/help]" if w in hidden_commands else ""
-                            print(Fore.CYAN + f"[Expose] command :{w}  ({mode}){hidden_note}" + Style.RESET_ALL)
+                            print(
+                                Fore.CYAN
+                                + f"[Expose] command :{w}  ({command_exposure_mode(record)}){hidden_note}\n"
+                                + f"         activation: {command_exposure_activation(w, record)}\n"
+                                + f"         steer: {command_exposure_steer(record)}"
+                                + Style.RESET_ALL
+                            )
                     if exposed_probe_names:
                         print(Fore.CYAN + "[Expose] probes: " + ", ".join(exposed_probe_names) + Style.RESET_ALL)
                     if exposed_knobs:
@@ -5844,7 +5945,7 @@ def main():
                 mode_arg = eargs[1].lower() if len(eargs) > 1 else ""
                 if not target.startswith(":"):
                     if mode_arg not in ("", "on", "expose", "off", "hide"):
-                        print(Fore.YELLOW + f"[Expose] Bare targets expose probes/knobs and only accept 'off'. For command tools use ':expose :{target} [stage|direct]'." + Style.RESET_ALL)
+                        print(Fore.YELLOW + f"[Expose] Bare targets expose probes/knobs and only accept 'off'. For command tools use ':expose :{target} [stage|direct] because <activation>'." + Style.RESET_ALL)
                         continue
                     turn_off = mode_arg in ("off", "hide")
                     probe_name = re.sub(r"[^a-z0-9_]", "_", target.lower())[:40].strip("_")
@@ -5872,7 +5973,7 @@ def main():
                         print(Fore.GREEN + f"[Expose] knob '{knob_name}' is now {'hidden from' if turn_off else 'exposed to'} the model's <<PROBE: {knob_name}>> tool." + Style.RESET_ALL)
                         continue
                     candidates = set(probes) | {n for n in tuner.triggers if not _is_shadow_trigger(n, tuner)}
-                    command_hint = f" For command tools use ':expose :{target} [stage|direct]'." if target.lower() in _all_shell_commands() else ""
+                    command_hint = f" For command tools use ':expose :{target} [stage|direct] because <activation>'." if target.lower() in _all_shell_commands() else ""
                     print(Fore.YELLOW + f"[Expose] '{target}' is not an active probe or knob.{did_you_mean(target, candidates)}{command_hint}" + Style.RESET_ALL)
                     continue
                 word = target.lstrip(":").lower()
@@ -5897,10 +5998,18 @@ def main():
                 else:
                     print(Fore.YELLOW + f"[Expose] Unknown mode '{mode_arg}'. Use stage, direct, or off." + Style.RESET_ALL)
                     continue
-                exposed_commands[word] = mode
+                prior_exposure = normalize_command_exposure(exposed_commands.get(word, {}))
+                activation = command_because.strip() if command_because else prior_exposure["activation"]
+                exposed_commands[word] = {
+                    "mode": mode,
+                    "activation": activation,
+                    "steer_magnitude": command_exposure_steer(prior_exposure),
+                }
                 _save_exposed_commands()
                 run_note = "is queued immediately" if mode == "direct" else "is staged for your :accept"
                 print(Fore.GREEN + f"[Expose] ':{word}' is now a model tool -- it calls <<CMD: :{word} ...>> and it {run_note} ({mode})." + Style.RESET_ALL)
+                print(Fore.CYAN + f"         activation: {command_exposure_activation(word, exposed_commands[word])}" + Style.RESET_ALL)
+                print(Fore.CYAN + f"         steer: {command_exposure_steer(exposed_commands[word])}" + Style.RESET_ALL)
                 if word in hidden_commands:
                     print(Fore.CYAN + f"         Note: ':{word}' is still hidden from model-facing writing/help. Reveal it with ':hide off :{word}' if it should be documented too." + Style.RESET_ALL)
                 if word in EXPOSE_META_CMDS:
