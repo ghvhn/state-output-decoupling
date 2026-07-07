@@ -484,7 +484,7 @@ def extract_memory_query(response):
     if not match:
         return None
     query = " ".join(match.group(1).split())
-    return query[:240] if query else None
+    return query[:240] if query else ""
 
 
 def extract_claimmap_payload(response):
@@ -638,7 +638,15 @@ def is_tool_only_response(response):
     if not text:
         return False
     return bool(
-        (extract_memory_query(text) or extract_claimmap_payload(text) or extract_methodmap_query(text) or extract_doc_query(text) or extract_probe_query(text) or extract_help_request(text) or extract_cmd_requests(text))
+        (
+            MEMORY_TOOL_PATTERN.search(text)
+            or extract_claimmap_payload(text)
+            or extract_methodmap_query(text)
+            or extract_doc_query(text)
+            or extract_probe_query(text)
+            or extract_help_request(text)
+            or extract_cmd_requests(text)
+        )
         and not remove_tool_calls(text).strip()
     )
 
@@ -1137,7 +1145,7 @@ def build_priority_mix_direction(model, names, probes, tuner):
     return out
 
 
-def rank_memories_by_probe(model, memory, direction, top_n=6, scan=160):
+def rank_memories_by_probe(model, memory, direction, top_n=6, scan=160, records=None):
     """Score recent memory records by their projection onto a probe's direction
     and return the ones that read FURTHEST from 0 -- the memories the probe lights
     up on most, either sign. Read-only: nothing is observed, credited, or written
@@ -1145,7 +1153,8 @@ def rank_memories_by_probe(model, memory, direction, top_n=6, scan=160):
     strongest first, capped at top_n. Only the last `scan` non-empty records are
     scored, to bound the per-record forward passes."""
     from invariants.engine import _inputs as _q_inputs, _hidden_states as _q_hidden, probe_score as _q_score
-    recs = [r for r in memory.records if (r.text or "").strip()][-scan:]
+    source = memory.records if records is None else list(records)
+    recs = [r for r in source if (r.text or "").strip()][-scan:]
     scored = []
     for r in recs:
         try:
@@ -1979,7 +1988,9 @@ COMMAND_HELP_LINES = [
     "Commands: :help [model]           (this list + your solve-macros; ':help model' shows what",
     "                the MODEL can run on its own; ':help expose [off]' lets it call <<HELP>>)",
     "          :context, :context on, :context off, :context clear",
-    "          :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory boundary",
+    "          :memory, :memory act|talk on|off|status|use [sentence [+probe -probe]]",
+    "                :memory use/search [optional args] uses enabled lanes; empty reflects",
+    "                via :prioritize/farthest-from-0; :expose off memory hides model access",
     "          :methodmap <query>",
     "          :claimmap <first text> || <second text>",
     "          :steermap",
@@ -2107,8 +2118,8 @@ COMMAND_HELP_LINES = [
     "                the hidden state of the model's LAST response; useful for manual calibration)",
     "          :<macro-name> <args>         (run any aliased macro directly, args -> $1..$9)",
     "          <any :command> because <reason>   (logs why you issued it as provenance)",
-    "          :memory use probe <name> | :memory choice probe <name>",
-    "                (stage the memories where probe <name> reads furthest from 0)",
+    "          :memory use [sentence [+probe -probe]] | :memory choice probe <name>",
+    "                (stage memories matching text and/or signed probe relations, farthest from 0)",
     "          :tune exposed_probe_alpha <small>  (also steer along the probes you have",
     "                exposed to the model, lift-weighted; 0 = off)",
 ]
@@ -2256,7 +2267,14 @@ def list_solve_macros(macros_dir=None):
     return out
 
 
-def build_model_help_text(solve_macros=None, exposed_commands=None, exposed_knobs=None, hidden_commands=None):
+def build_model_help_text(
+    solve_macros=None,
+    exposed_commands=None,
+    exposed_knobs=None,
+    hidden_commands=None,
+    memory_tool_exposed=True,
+    memory_lanes=None,
+):
     """Model-facing help: what the model may run ITSELF (its <<...>> tools) vs.
     the operator's ':' commands, which it can only reach by proposing a game."""
     if solve_macros is None:
@@ -2279,7 +2297,6 @@ def build_model_help_text(solve_macros=None, exposed_commands=None, exposed_knob
     lines = [
         HELP_TOOL_HEADER,
         "You can reach these YOURSELF -- emit the tag mid-reply; read-only tools return directly, exposed commands follow their mode:",
-        "  <<MEMORY: query>>          search long-term memory",
         "  <<METHODMAP: query>>       retrieve sanitized methodology maps",
         "  <<DOC: query>>             read from documents shared into this session",
         "  <<CLAIMMAP: A || B>>       weigh two framings against each other",
@@ -2287,6 +2304,11 @@ def build_model_help_text(solve_macros=None, exposed_commands=None, exposed_knob
         "  <<PROBE: name || words>>   score candidate words on an exposed probe sensor",
         "  <<HELP>>                   show this help",
     ]
+    if memory_tool_exposed and memory_lanes:
+        lane_text = ", ".join(memory_lanes)
+        lines.insert(2, f"  <<MEMORY: query>>          search enabled memory lanes ({lane_text}); query may be empty")
+    else:
+        lines.insert(2, "  <<MEMORY: ...>>            unavailable until memory lanes are on and exposed")
     if exposed_knobs:
         lines.append("                             Exposed knobs: " + ", ".join(sorted(exposed_knobs)) + ".")
     if visible_exposed:
@@ -3118,6 +3140,8 @@ def main():
     pending_solve_proposal = None   # a :solve choose/auto macro awaiting :accept
     pending_help_tool_result = None # model asked for <<HELP>>; served next turn
     help_exposed = False            # when on, the model is told it may call <<HELP>>
+    memory_lanes_enabled = {"act": False, "talk": False}
+    memory_tool_exposed = True      # :expose off memory blocks the model's <<MEMORY>> tool
 
     def _stage_for_accept(cmd, why="a game"):
         pending_accept_commands.append(cmd)
@@ -3128,6 +3152,221 @@ def main():
         print(Fore.YELLOW
               + "         Type :accept to run it (or :accept all), :reject to drop it (or :reject all)."
               + Style.RESET_ALL)
+
+    def _memory_lane_name(raw):
+        token = str(raw or "").strip().lower()
+        return {
+            "act": "act",
+            "action": "act",
+            "actions": "act",
+            "talk": "talk",
+            "speech": "talk",
+            "speak": "talk",
+            "conversation": "talk",
+            "convo": "talk",
+        }.get(token)
+
+    def _enabled_memory_lanes():
+        return [lane for lane in ("act", "talk") if memory_lanes_enabled.get(lane)]
+
+    def _memory_record_in_lane(record, lane):
+        tags = set(record.tags or [])
+        if lane == "act":
+            return (
+                "action" in tags
+                or "model_action" in tags
+                or "model_output" in tags
+                or (record.kind == "turn" and record.role == "assistant")
+            )
+        if lane == "talk":
+            return record.kind == "turn" or "conversation_trace" in tags
+        return False
+
+    def _memory_lane_records(lanes):
+        lane_set = set(lanes or [])
+        out, seen = [], set()
+        for record in memory.records:
+            if not (record.text or "").strip():
+                continue
+            if lane_set and not any(_memory_record_in_lane(record, lane) for lane in lane_set):
+                continue
+            rid = record.record_id or id(record)
+            if rid in seen:
+                continue
+            seen.add(rid)
+            out.append(record)
+        return out
+
+    def _memory_search_in_records(query, records, max_records=6):
+        terms = {t for t in str(query or "").lower().replace("_", " ").split() if t}
+        if not terms:
+            return list(records)[-max_records:]
+        source = list(records)
+        scored = []
+        for idx, record in enumerate(source):
+            text_score = _memory_text_score(query, record, idx, len(source))
+            if text_score <= 0:
+                continue
+            scored.append((text_score, idx, record))
+        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [record for _, _, record in scored[:max_records]]
+
+    def _memory_record_haystack(record):
+        return " ".join(
+            [
+                record.kind,
+                record.role or "",
+                record.text or "",
+                " ".join(record.tags or []),
+                json.dumps(record.provenance or {}, ensure_ascii=True, sort_keys=True),
+                json.dumps(record.metrics or {}, ensure_ascii=True, sort_keys=True),
+            ]
+        ).lower()
+
+    def _memory_text_score(query, record, idx=0, total=1):
+        terms = {t for t in str(query or "").lower().replace("_", " ").split() if t}
+        if not terms:
+            return 0.0
+        haystack = _memory_record_haystack(record)
+        hits = sum(1 for term in terms if term in haystack)
+        if hits <= 0:
+            return 0.0
+        return float(hits) + (0.15 * (idx / max(1, total)))
+
+    def _memory_parse_selector(arg):
+        raw = (arg or "").strip()
+        if not raw:
+            return "", []
+        if raw.lower().startswith("probe "):
+            pname = raw.split(None, 1)[1].strip()
+            return "", [(1, pname)]
+        sentence_tokens, signed = [], []
+        for token in raw.split():
+            m = re.fullmatch(r"([+-])([A-Za-z_][A-Za-z0-9_-]*)", token.strip())
+            if m:
+                signed.append((1 if m.group(1) == "+" else -1, m.group(2)))
+            else:
+                sentence_tokens.append(token)
+        return " ".join(sentence_tokens).strip(), signed
+
+    def _resolve_memory_probe_specs(signed_specs):
+        resolved = []
+        for sign, raw_name in signed_specs:
+            pname_raw = str(raw_name or "").strip()
+            pname = (
+                resolve_probe_choice(pname_raw, probes, model=model, config=config, action_name="memory ranking")
+                if pname_raw
+                else None
+            )
+            if not pname or pname not in probes:
+                return [], f"unknown probe '{pname_raw}'"
+            resolved.append((1 if sign >= 0 else -1, pname))
+        return resolved, None
+
+    def _memory_rank_by_sentence_and_probes(sentence, signed_specs, records, *, max_records=6, scan=160):
+        resolved, err = _resolve_memory_probe_specs(signed_specs)
+        if err:
+            return [], err, []
+        source = list(records)
+        if resolved:
+            source = source[-scan:]
+        scored = []
+        from invariants.engine import _inputs as _q_inputs, _hidden_states as _q_hidden, probe_score as _q_score
+        for idx, record in enumerate(source):
+            text_score = _memory_text_score(sentence, record, idx, len(source)) if sentence else 0.0
+            if sentence and not resolved and text_score <= 0:
+                continue
+            probe_values = []
+            if resolved:
+                try:
+                    with torch.no_grad():
+                        q_ids = _q_inputs(model, (record.text or "").strip()[:600])
+                        q_hs = _q_hidden(model, q_ids["input_ids"], q_ids.get("attention_mask"))
+                        for sign, pname in resolved:
+                            raw = float(_q_score(q_hs, probes[pname]["direction"]))
+                            probe_values.append((sign, pname, raw))
+                except Exception:
+                    continue
+            magnitude = sum(abs(raw) for _sign, _pname, raw in probe_values)
+            relation = 0.0
+            pairs = 0
+            for i in range(len(probe_values)):
+                si, _pi, ri = probe_values[i]
+                for j in range(i + 1, len(probe_values)):
+                    sj, _pj, rj = probe_values[j]
+                    desired_same = si == sj
+                    actual_same = (ri >= 0 and rj >= 0) or (ri < 0 and rj < 0)
+                    strength = min(abs(ri), abs(rj))
+                    relation += strength if actual_same == desired_same else -strength
+                    pairs += 1
+            if pairs:
+                relation /= pairs
+            recency = 0.05 * (idx / max(1, len(source)))
+            score = text_score + magnitude + relation + recency
+            if sentence and not resolved and text_score <= 0:
+                continue
+            scored.append((score, score, record))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        probe_desc = " ".join(("+" if sign >= 0 else "-") + pname for sign, pname in resolved)
+        desc_parts = []
+        if sentence:
+            desc_parts.append(f"search:{sentence}")
+        if probe_desc:
+            desc_parts.append(f"probes:{probe_desc}")
+        return [t[2] for t in scored[:max_records]], " ".join(desc_parts) or "reflect", scored[:max_records]
+
+    def _memory_reflection_records(lanes, *, max_records=6):
+        candidates = _memory_lane_records(lanes)
+        lane_note = "+".join(lanes or []) if lanes else "all"
+        ranked_probes = rank_probes(probes, tuner)
+        usable = [r for r in ranked_probes if r["name"] in probes and probes[r["name"]].get("direction")]
+        if not candidates or not usable:
+            return candidates[-max_records:], f"{lane_note}:reflect:recent", []
+        has_priority = any(float(r.get("priority") or 0.0) > 0 for r in usable)
+        top = [r for r in usable if (float(r.get("priority") or 0.0) > 0 or not has_priority)][:5]
+        weights = {
+            r["name"]: (float(r.get("priority") or 0.0) if has_priority else 1.0)
+            for r in top
+        }
+        from invariants.engine import _inputs as _q_inputs, _hidden_states as _q_hidden, probe_score as _q_score
+        scored = []
+        source = candidates[-160:]
+        for idx, record in enumerate(source):
+            try:
+                with torch.no_grad():
+                    q_ids = _q_inputs(model, (record.text or "").strip()[:600])
+                    q_hs = _q_hidden(model, q_ids["input_ids"], q_ids.get("attention_mask"))
+                    score = 0.0
+                    for pname, weight in weights.items():
+                        raw = float(_q_score(q_hs, probes[pname]["direction"]))
+                        score += max(float(weight), 0.0001) * abs(raw)
+            except Exception:
+                continue
+            score += 0.05 * (idx / max(1, len(source)))
+            scored.append((score, score, record))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        desc = f"{lane_note}:reflect:prioritize:" + ",".join(weights)
+        return [t[2] for t in scored[:max_records]], desc, scored[:max_records]
+
+    def _memory_select_records(arg, lanes, *, max_records=6):
+        arg = (arg or "").strip()
+        candidates = _memory_lane_records(lanes)
+        lane_note = "+".join(lanes or []) if lanes else "all"
+        sentence, signed_specs = _memory_parse_selector(arg)
+        if signed_specs:
+            records, desc, ranked = _memory_rank_by_sentence_and_probes(sentence, signed_specs, candidates, max_records=max_records)
+            if desc.startswith("unknown probe"):
+                return [], desc, []
+            return records, f"{lane_note}:{desc}", ranked
+        if sentence:
+            return _memory_search_in_records(sentence, candidates, max_records=max_records), f"{lane_note}:search:{sentence}", []
+        return _memory_reflection_records(lanes, max_records=max_records)
+
+    def _memory_lanes_for_bare_command():
+        return _enabled_memory_lanes()
+
+    def _memory_model_available():
+        return memory_tool_exposed and bool(_enabled_memory_lanes())
 
     def _run_game_ref(name, args=None):
         """Injected into game scripts as run_game(name, args): load and run
@@ -5019,77 +5258,99 @@ def main():
             if user_input.startswith(":memory"):
                 cmd = user_input.strip()
                 tail = cmd[len(":memory"):].strip()
-                if tail in ("", "status"):
-                    print(Fore.CYAN + format_status(memory.status()) + Style.RESET_ALL)
-                elif tail.startswith("recent"):
-                    n = parse_count(tail, 4)
-                    print(Fore.CYAN + memory.format_recent(max_turns=n) + Style.RESET_ALL)
-                elif tail.startswith("search "):
-                    query = tail[len("search "):].strip()
-                    records = memory.search(query, max_records=6, scope=memory.scope)
+                def _show_memory_records(records, desc, ranked=None):
+                    if ranked:
+                        print(Fore.CYAN + f"[Memory] {desc}:" + Style.RESET_ALL)
+                        for _abs, raw, r in ranked:
+                            prev = (r.text or "")[:70].replace("\n", " ")
+                            print(Fore.CYAN + f"  {raw:+.3f}  [{r.kind}] {prev}..." + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + f"[Memory] {desc}: {len(records)} record(s)." + Style.RESET_ALL)
                     print(Fore.CYAN + memory.format_tool_result(records) + Style.RESET_ALL)
-                elif tail.startswith("use probe"):
-                    pname_raw = tail[len("use probe"):].strip()
-                    pname = resolve_probe_choice(pname_raw, probes, model=model, config=config, action_name="memory ranking") if pname_raw else None
-                    if not pname or pname not in probes:
-                        print(Fore.YELLOW + f"[Memory] Unknown probe '{pname_raw}'. Active: {', '.join(sorted(probes)) or 'none'}." + Style.RESET_ALL)
-                        continue
-                    ranked = rank_memories_by_probe(model, memory, probes[pname]["direction"], top_n=6)
-                    if not ranked:
-                        print(Fore.YELLOW + "[Memory] No memories to score." + Style.RESET_ALL)
-                        continue
-                    records = [t[2] for t in ranked]
-                    pending_memory_tool_result = memory.format_tool_result(records)
-                    memory.append_event(
-                        "memory_tool_staged",
-                        tags=["memory_tool", "probe"],
-                        provenance={"query": f"probe:{pname}", "records": len(records)},
-                    )
-                    print(Fore.CYAN + f"[Memory] Staged {len(records)} memories where '{pname}' reads furthest from 0:" + Style.RESET_ALL)
-                    for _abs, raw, r in ranked:
-                        prev = (r.text or "")[:70].replace("\n", " ")
-                        print(Fore.CYAN + f"  {raw:+.3f}  [{r.kind}] {prev}..." + Style.RESET_ALL)
-                    print(Fore.CYAN + pending_memory_tool_result + Style.RESET_ALL)
-                    print(Fore.YELLOW + "[Memory] This tool result will be provided to the next model turn only." + Style.RESET_ALL)
-                elif tail.startswith("action use"):
-                    records = [r for r in memory.records if "action" in r.tags][-6:]
+
+                def _stage_memory_records(records, desc, ranked=None):
+                    nonlocal pending_memory_tool_result
                     if not records:
-                        print(Fore.YELLOW + "[Memory] No recent action memories found." + Style.RESET_ALL)
-                        continue
+                        print(Fore.YELLOW + f"[Memory] No matching records for {desc}." + Style.RESET_ALL)
+                        return
                     pending_memory_tool_result = memory.format_tool_result(records)
                     memory.append_event(
                         "memory_tool_staged",
                         tags=["memory_tool"],
-                        provenance={"query": "action_use", "records": len(records)},
+                        provenance={"query": desc, "records": len(records)},
                     )
-                    print(Fore.CYAN + f"[Memory] Staged {len(records)} recent action memories." + Style.RESET_ALL)
-                    print(Fore.CYAN + pending_memory_tool_result + Style.RESET_ALL)
+                    _show_memory_records(records, f"Staged {desc}", ranked=ranked)
                     print(Fore.YELLOW + "[Memory] This tool result will be provided to the next model turn only." + Style.RESET_ALL)
+
+                def _bare_memory_lanes_or_warn(action):
+                    lanes = _memory_lanes_for_bare_command()
+                    if not lanes:
+                        print(
+                            Fore.YELLOW
+                            + f"[Memory] No memory lanes are enabled for :memory {action}. "
+                            + "Use :memory act on and/or :memory talk on, or call :memory act "
+                            + f"{action} / :memory talk {action} explicitly."
+                            + Style.RESET_ALL
+                        )
+                    return lanes
+
+                if tail in ("", "status"):
+                    print(Fore.CYAN + format_status(memory.status()) + Style.RESET_ALL)
+                    lanes = ", ".join(f"{k}={'on' if v else 'off'}" for k, v in memory_lanes_enabled.items())
+                    access = "available" if _memory_model_available() else "not available"
+                    print(Fore.CYAN + f"         lanes: {lanes}; model <<MEMORY>>: {access} ({'exposed' if memory_tool_exposed else 'expose off'})" + Style.RESET_ALL)
+                elif tail.startswith("recent"):
+                    n = parse_count(tail, 4)
+                    print(Fore.CYAN + memory.format_recent(max_turns=n) + Style.RESET_ALL)
+                elif tail.split(maxsplit=1) and _memory_lane_name(tail.split(maxsplit=1)[0]):
+                    parts = tail.split(maxsplit=2)
+                    lane = _memory_lane_name(parts[0])
+                    action = parts[1].lower() if len(parts) >= 2 else "status"
+                    arg = parts[2].strip() if len(parts) >= 3 else ""
+                    if action in ("on", "enable", "enabled"):
+                        memory_lanes_enabled[lane] = True
+                        print(Fore.GREEN + f"[Memory] {lane} memory ON." + Style.RESET_ALL)
+                    elif action in ("off", "disable", "disabled"):
+                        memory_lanes_enabled[lane] = False
+                        print(Fore.YELLOW + f"[Memory] {lane} memory OFF." + Style.RESET_ALL)
+                    elif action == "status":
+                        print(Fore.CYAN + f"[Memory] {lane} memory is {'ON' if memory_lanes_enabled[lane] else 'OFF'}." + Style.RESET_ALL)
+                    elif action in ("use", "stage"):
+                        records, desc, ranked = _memory_select_records(arg, [lane])
+                        _stage_memory_records(records, desc, ranked=ranked)
+                    elif action == "search":
+                        records, desc, ranked = _memory_select_records(arg, [lane])
+                        _show_memory_records(records, desc, ranked=ranked)
+                    else:
+                        print(Fore.YELLOW + "[Memory] Usage: :memory act|talk on|off|status|use [sentence [+probe -probe]]|search [sentence [+probe -probe]]" + Style.RESET_ALL)
+                elif tail == "search" or tail.startswith("search "):
+                    query = tail[len("search"):].strip()
+                    lanes = _bare_memory_lanes_or_warn("search")
+                    if lanes:
+                        records, desc, ranked = _memory_select_records(query, lanes)
+                        _show_memory_records(records, desc, ranked=ranked)
+                elif tail.startswith("use probe"):
+                    lanes = _bare_memory_lanes_or_warn("use")
+                    if lanes:
+                        records, desc, ranked = _memory_select_records("probe " + tail[len("use probe"):].strip(), lanes)
+                        _stage_memory_records(records, desc, ranked=ranked)
                 elif tail.startswith("all use"):
                     records = memory.records[-10:]
                     if not records:
                         print(Fore.YELLOW + "[Memory] No recent memories found." + Style.RESET_ALL)
                         continue
-                    pending_memory_tool_result = memory.format_tool_result(records)
-                    memory.append_event(
-                        "memory_tool_staged",
-                        tags=["memory_tool"],
-                        provenance={"query": "all_use", "records": len(records)},
-                    )
-                    print(Fore.CYAN + f"[Memory] Staged {len(records)} recent memories of all types." + Style.RESET_ALL)
-                    print(Fore.CYAN + pending_memory_tool_result + Style.RESET_ALL)
-                    print(Fore.YELLOW + "[Memory] This tool result will be provided to the next model turn only." + Style.RESET_ALL)
+                    _stage_memory_records(records, "all:recent")
                 elif tail.startswith("use "):
                     query = tail[len("use "):].strip()
-                    records = memory.search(query, max_records=6, scope=memory.scope)
-                    pending_memory_tool_result = memory.format_tool_result(records)
-                    memory.append_event(
-                        "memory_tool_staged",
-                        tags=["memory_tool"],
-                        provenance={"query": query, "records": len(records)},
-                    )
-                    print(Fore.CYAN + pending_memory_tool_result + Style.RESET_ALL)
-                    print(Fore.YELLOW + "[Memory] This tool result will be provided to the next model turn only." + Style.RESET_ALL)
+                    lanes = _bare_memory_lanes_or_warn("use")
+                    if lanes:
+                        records, desc, ranked = _memory_select_records(query, lanes)
+                        _stage_memory_records(records, desc, ranked=ranked)
+                elif tail == "use":
+                    lanes = _bare_memory_lanes_or_warn("use")
+                    if lanes:
+                        records, desc, ranked = _memory_select_records("", lanes)
+                        _stage_memory_records(records, desc, ranked=ranked)
                 elif tail in ("boundary", "clear"):
                     memory.mark_session_boundary("operator_request")
                     pending_memory_tool_result = None
@@ -5140,7 +5401,7 @@ def main():
                 else:
                     print(
                         Fore.YELLOW
-                        + "[Memory] Commands: :memory, :memory recent [n], :memory search <query>, :memory use <query>, :memory use probe <name>, :memory action use, :memory all use, :memory choice [query], :memory choice probe <name>, :memory boundary"
+                        + "[Memory] Commands: :memory act|talk on|off|status|use [sentence [+probe -probe]]|search [sentence [+probe -probe]], :memory use/search [optional args] (enabled lanes; empty reflects via :prioritize), :memory all use, :memory choice [query|probe <name>], :memory boundary"
                         + Style.RESET_ALL
                     )
                 continue
@@ -5764,7 +6025,18 @@ def main():
                     print(Fore.GREEN + f"[Help] Model help {'EXPOSED -- it may now emit <<HELP>>' if help_exposed else 'hidden from the model'}." + Style.RESET_ALL)
                     continue
                 if harg == "model":
-                    print(Fore.CYAN + build_model_help_text(list_solve_macros(), exposed_commands, exposed_knobs, hidden_commands) + Style.RESET_ALL)
+                    print(
+                        Fore.CYAN
+                        + build_model_help_text(
+                            list_solve_macros(),
+                            exposed_commands,
+                            exposed_knobs,
+                            hidden_commands,
+                            memory_tool_exposed=memory_tool_exposed,
+                            memory_lanes=_enabled_memory_lanes(),
+                        )
+                        + Style.RESET_ALL
+                    )
                     continue
                 if harg:
                     q = harg.split()[0].lstrip(":")
@@ -5919,8 +6191,11 @@ def main():
                 eargs = user_input.strip()[len(":expose"):].split()
                 if not eargs:  # list exposures
                     exposed_probe_names = sorted(n for n in probes if probes[n].get("exposed"))
-                    if not exposed_commands and not exposed_probe_names and not exposed_knobs:
+                    if not exposed_commands and not exposed_probe_names and not exposed_knobs and not memory_tool_exposed:
                         print(Fore.CYAN + "[Expose] Nothing exposed. Use ':expose :command [stage|direct] because <activation>' for command tools, or ':expose <probe|knob>' for model-readable probes/knobs." + Style.RESET_ALL)
+                    lanes = _enabled_memory_lanes()
+                    lane_text = ", ".join(lanes) if lanes else "none enabled"
+                    print(Fore.CYAN + f"[Expose] memory read tool: {'on' if memory_tool_exposed else 'off'} (lanes: {lane_text})" + Style.RESET_ALL)
                     if exposed_commands:
                         for w, record in sorted(exposed_commands.items()):
                             hidden_note = " [hidden from writing/help]" if w in hidden_commands else ""
@@ -5948,6 +6223,11 @@ def main():
                         print(Fore.YELLOW + f"[Expose] Bare targets expose probes/knobs and only accept 'off'. For command tools use ':expose :{target} [stage|direct] because <activation>'." + Style.RESET_ALL)
                         continue
                     turn_off = mode_arg in ("off", "hide")
+                    if target.lower().lstrip(":") == "memory":
+                        memory_tool_exposed = not turn_off
+                        state = "available to" if memory_tool_exposed else "hidden from"
+                        print(Fore.GREEN + f"[Expose] memory is now {state} the model's <<MEMORY: ...>> tool. Operator :memory commands still work." + Style.RESET_ALL)
+                        continue
                     probe_name = re.sub(r"[^a-z0-9_]", "_", target.lower())[:40].strip("_")
                     if probe_name in probes:
                         probes[probe_name]["exposed"] = not turn_off
@@ -8332,7 +8612,14 @@ def main():
             model_game_end = extract_game_end(response)
             model_game_exposed, model_game_hidden = extract_game_expose_hide(response)
             if extract_help_request(response):
-                pending_help_tool_result = build_model_help_text(list_solve_macros(), exposed_commands, exposed_knobs, hidden_commands)
+                pending_help_tool_result = build_model_help_text(
+                    list_solve_macros(),
+                    exposed_commands,
+                    exposed_knobs,
+                    hidden_commands,
+                    memory_tool_exposed=memory_tool_exposed,
+                    memory_lanes=_enabled_memory_lanes(),
+                )
                 print(Fore.CYAN + "[Help] The model asked for help; serving the tool/command reference next turn." + Style.RESET_ALL)
 
             if model_game_exposed or model_game_hidden:
@@ -8512,25 +8799,41 @@ def main():
                 model_methodmap_query = extract_methodmap_query(response)
                 model_probe_query = extract_probe_query(response)
 
-            if model_memory_query and memory_tool_result is None:
-                records = memory.search(model_memory_query, max_records=6, scope=memory.scope)
+            if model_memory_query is not None and memory_tool_result is None:
+                if _memory_model_available():
+                    records, memory_desc, _ranked = _memory_select_records(
+                        model_memory_query,
+                        _enabled_memory_lanes(),
+                        max_records=6,
+                    )
+                    request_desc = memory_desc
+                    result_body = memory.format_tool_result(records)
+                else:
+                    records = []
+                    request_desc = "unavailable"
+                    result_body = (
+                        "[Memory Tool Result]\n"
+                        "Memory is not available to the model. Enable :memory act on and/or "
+                        ":memory talk on, and keep runtime access on with :expose memory."
+                    )
+                display_query = model_memory_query if model_memory_query else "<reflect>"
                 model_memory_tool_result = (
-                    impact_note(f'asked memory for "{model_memory_query}"')
+                    impact_note(f'asked memory for "{display_query}"')
                     + "\n"
-                    + memory.format_tool_result(records)
+                    + result_body
                 )
                 turn_impacts.append(
-                    {"cause": f'asked memory for "{model_memory_query}"', "effect": f"{len(records)} record(s) returned"}
+                    {"cause": f'asked memory for "{display_query}"', "effect": f"{len(records)} record(s) returned"}
                 )
                 memory.append_event(
                     "memory_tool_model_requested",
                     text=model_memory_tool_result,
                     tags=["memory_tool"],
-                    provenance={"query": model_memory_query, "records": len(records)},
+                    provenance={"query": request_desc, "records": len(records)},
                 )
                 print(
                     Fore.CYAN
-                    + f"\n[Memory] Model requested lookup: {model_memory_query}\n"
+                    + f"\n[Memory] Model requested lookup: {display_query}\n"
                     + model_memory_tool_result
                     + Style.RESET_ALL
                     + "\n"
