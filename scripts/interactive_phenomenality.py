@@ -4534,7 +4534,7 @@ def main():
                         "$spawn_state_report\n\n"
                         "Output ONLY runnable shell commands or macro invocations, one per line; no prose, headings, bullets, markdown, or explanations. "
                         "The command reference is authoritative: use any known command/macro that serves the spawned agent's setup, context, calibration, or future workflow. "
-                        "Use :hide/:hide off for documentation and writing visibility. Use :expose/:expose off for runtime tool access, e.g. @agent :expose :command because <activation criteria> grants a callable tool and @agent :hide off :command makes it visible for profile/macro writing. Every tool should have an activation criterion and a steer magnitude; command tools default to explicit-request activation and steer 0.0 because they return command context rather than applying an activation vector. Do not rely on hidden spawn-loader filtering. "
+                        "Use :hide/:hide off for documentation and writing visibility. Use :expose/:expose off for runtime tool access, e.g. @agent :expose :command because <activation criteria> grants a callable tool and @agent :hide off :command makes it visible for profile/macro writing. Every tool should have an activation criterion and a steer magnitude; command tools default to explicit-request activation and steer 0.0 because they return command context rather than applying an activation vector. Exposed probe values steer output through :tune exposed_probe_alpha <small>; sensed tools use their own *_alpha knobs. Do not rely on hidden spawn-loader filtering. "
                         "Use trailing because-clauses to record purpose for context or side-effect commands. "
                         "Use :doc when the spawned agent needs a document as working context; for example :doc readings because <purpose>, followed by :doc read/:doc next/:doc inject when useful. "
                         "Use :queue <future command> for commands that should run later when they become useful or when enough evidence exists; queued commands must still be runnable shell commands. "
@@ -8600,6 +8600,87 @@ def main():
             finally:
                 for h in steer_handles:
                     h.remove()
+
+            def _generate_tool_followup(reply_prompt, *, extra_steer_handles=None, phase="tool follow-up"):
+                """Generate the answer after an explicit tool read with the same
+                exposed output steers as the first pass. Explicit tool steering
+                such as a claimmap tag can pass handles in as extra handles."""
+                _sync_steer_tunables(tuner, config)
+                followup_handles = list(extra_steer_handles or [])
+                prio_alpha_now = tuner.get("prioritize_alpha", 0.0)
+                prio_steered_now = None
+                if prio_alpha_now and prio_alpha_now > 0 and probes:
+                    from invariants.engine import _steer_handles as _p_steer
+                    _mix = prioritize_pin.get("mix")
+                    _pin = prioritize_pin.get("probe")
+                    _pdir, _label, _psign = None, None, 1.0
+                    if _mix:
+                        _md = build_priority_mix_direction(model, _mix, probes, tuner)
+                        if _md:
+                            _pdir, _label, _psign = _md, "mix(" + "+".join(_mix) + ")", 1.0
+                    elif _pin and _pin in probes:
+                        _pdir = probes[_pin].get("direction") or None
+                        _label, _psign = _pin, float(prioritize_pin.get("sign", 1.0) or 1.0)
+                    else:
+                        _pr = rank_probes(probes, tuner)
+                        if _pr and _pr[0]["priority"] > 0 and _pr[0]["lift"] is not None:
+                            _pdir = probes[_pr[0]["name"]].get("direction") or None
+                            _label = _pr[0]["name"]
+                            _psign = 1.0 if _pr[0]["lift"] >= 0 else -1.0
+                    if _pdir:
+                        try:
+                            followup_handles.extend(_p_steer(model, _pdir, list(_pdir.keys()), prio_alpha_now * _psign))
+                            prio_steered_now = (_label, _psign)
+                        except Exception:
+                            prio_steered_now = None
+                if prio_steered_now is not None:
+                    _dir_word = "along" if str(prio_steered_now[0]).startswith("mix(") else ("toward" if prio_steered_now[1] > 0 else "away from")
+                    print(
+                        Fore.MAGENTA
+                        + f"[Prioritize] steering {phase} {_dir_word} {prio_steered_now[0]} "
+                        + f"(alpha {round(prio_alpha_now,4)})."
+                        + Style.RESET_ALL
+                    )
+
+                exposed_alpha_now = tuner.get("exposed_probe_alpha", 0.0)
+                if exposed_alpha_now and exposed_alpha_now > 0 and probes:
+                    exposed_names_now = sorted(n for n in probes if probes[n].get("exposed"))
+                    if exposed_names_now:
+                        from invariants.engine import _steer_handles as _e_steer
+                        _edir = build_priority_mix_direction(model, exposed_names_now, probes, tuner)
+                        if _edir:
+                            try:
+                                followup_handles.extend(_e_steer(model, _edir, list(_edir.keys()), exposed_alpha_now))
+                                print(
+                                    Fore.MAGENTA
+                                    + f"[Exposed] steering {phase} along {len(exposed_names_now)} exposed probe(s) "
+                                    + f"({', '.join(exposed_names_now)}) at alpha {round(exposed_alpha_now, 4)}."
+                                    + Style.RESET_ALL
+                                )
+                            except Exception:
+                                pass
+                        else:
+                            print(
+                                Fore.YELLOW
+                                + "[Exposed] exposed_probe_alpha is set but no exposed probe has credited "
+                                + "lift yet -- steering idle until they accrue outcomes."
+                                + Style.RESET_ALL
+                            )
+                try:
+                    return generate_agentic_text(
+                        model,
+                        instruction=reply_prompt,
+                        config=config,
+                        max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
+                        synthesis_recorder=synthesis_records,
+                        chatty_log=True,
+                        pre_formatted=True,
+                        return_telemetry=True,
+                    )
+                finally:
+                    for h in followup_handles:
+                        h.remove()
+
             model_memory_query = extract_memory_query(response)
             model_claimmap_payload = extract_claimmap_payload(response)
             model_methodmap_query = extract_methodmap_query(response)
@@ -8721,16 +8802,7 @@ def main():
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                response, telemetry = generate_agentic_text(
-                    model,
-                    instruction=prompt,
-                    config=config,
-                    max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
-                    synthesis_recorder=synthesis_records,
-                    chatty_log=True,
-                    pre_formatted=True,
-                    return_telemetry=True,
-                )
+                response, telemetry = _generate_tool_followup(prompt, phase="command tool follow-up")
                 model_memory_query = extract_memory_query(response)
                 model_claimmap_payload = extract_claimmap_payload(response)
                 model_methodmap_query = extract_methodmap_query(response)
@@ -8784,16 +8856,7 @@ def main():
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                response, telemetry = generate_agentic_text(
-                    model,
-                    instruction=prompt,
-                    config=config,
-                    max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
-                    synthesis_recorder=synthesis_records,
-                    chatty_log=True,
-                    pre_formatted=True,
-                    return_telemetry=True,
-                )
+                response, telemetry = _generate_tool_followup(prompt, phase="document tool follow-up")
                 model_memory_query = extract_memory_query(response)
                 model_claimmap_payload = extract_claimmap_payload(response)
                 model_methodmap_query = extract_methodmap_query(response)
@@ -8848,16 +8911,7 @@ def main():
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                response, telemetry = generate_agentic_text(
-                    model,
-                    instruction=prompt,
-                    config=config,
-                    max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
-                    synthesis_recorder=synthesis_records,
-                    chatty_log=True,
-                    pre_formatted=True,
-                    return_telemetry=True,
-                )
+                response, telemetry = _generate_tool_followup(prompt, phase="memory tool follow-up")
                 model_claimmap_payload = extract_claimmap_payload(response)
                 model_methodmap_query = extract_methodmap_query(response)
                 model_probe_query = extract_probe_query(response)
@@ -8909,24 +8963,15 @@ def main():
                         tag_sweep_layers = _tls
                         for _sl in _tls:
                             sweep_state["fires"].append(("claimmap", _sl, tag_alpha, _tds.get(_sl), len(_tls), _tvar))
-                steer_handles = (
+                tag_steer_handles = (
                     claimmap_steer_handles(model, model_claimmap_steer, alpha=tag_alpha, layers=tag_sweep_layers)
                     if model_claimmap_steer else []
                 )
-                try:
-                    response, telemetry = generate_agentic_text(
-                        model,
-                        instruction=prompt,
-                        config=config,
-                        max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
-                        synthesis_recorder=synthesis_records,
-                        chatty_log=True,
-                        pre_formatted=True,
-                        return_telemetry=True,
-                    )
-                finally:
-                    for h in steer_handles:
-                        h.remove()
+                response, telemetry = _generate_tool_followup(
+                    prompt,
+                    extra_steer_handles=tag_steer_handles,
+                    phase="claimmap tool follow-up",
+                )
                 model_methodmap_query = extract_methodmap_query(response)
                 model_probe_query = extract_probe_query(response)
             if model_methodmap_query and methodmap_tool_result is None:
@@ -8961,16 +9006,7 @@ def main():
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                response, telemetry = generate_agentic_text(
-                    model,
-                    instruction=prompt,
-                    config=config,
-                    max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
-                    synthesis_recorder=synthesis_records,
-                    chatty_log=True,
-                    pre_formatted=True,
-                    return_telemetry=True,
-                )
+                response, telemetry = _generate_tool_followup(prompt, phase="methodmap tool follow-up")
             if model_probe_query and (probes or exposed_knobs):
                 # READ-ONLY self-measurement: the model may consult sensors the
                 # operator has exposed (:probe expose <name> or :expose <name>)
@@ -9090,16 +9126,7 @@ def main():
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                response, telemetry = generate_agentic_text(
-                    model,
-                    instruction=prompt,
-                    config=config,
-                    max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
-                    synthesis_recorder=synthesis_records,
-                    chatty_log=True,
-                    pre_formatted=True,
-                    return_telemetry=True,
-                )
+                response, telemetry = _generate_tool_followup(prompt, phase="probe tool follow-up")
             if response:
                 active_memory_tool_result = memory_tool_result or model_memory_tool_result
                 active_orientation_tool_result = orientation_tool_result
@@ -9137,16 +9164,7 @@ def main():
                         session_context=session_context if session_context_enabled else None,
                     )
                     print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                    response, telemetry = generate_agentic_text(
-                        model,
-                        instruction=prompt,
-                        config=config,
-                        max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
-                        synthesis_recorder=synthesis_records,
-                        chatty_log=True,
-                        pre_formatted=True,
-                        return_telemetry=True,
-                    )
+                    response, telemetry = _generate_tool_followup(prompt, phase="tool retry follow-up")
                 response = scrub_unstaged_memory_status(
                     response,
                     memory_tool_result=active_memory_tool_result,
