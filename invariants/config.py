@@ -104,9 +104,8 @@ class AgenticConfig:
     emergent_experts_enabled: bool = False
     committee: Optional[Any] = None
     recent_corrections: list = field(default_factory=list)
-    # Roster bound for expert minting (seeds are unbounded by design -- the
-    # seed count is data: DOMAINS entries + invariants/models/*.pt). Flexible
-    # like every other bound (env TDA_MAX_COMMITTEE_SIZE), never removable:
+    # Roster bound for expert minting / live probe committees. Flexible like
+    # every other bound (env TDA_MAX_COMMITTEE_SIZE), never removable:
     # each extra member is one more parallel branch per routing event.
     max_committee_size: int = field(
         default_factory=lambda: max(1, int(_env_fraction("TDA_MAX_COMMITTEE_SIZE", 6)))
@@ -132,6 +131,28 @@ class AgenticConfig:
     # {expert_name: success_rate, "__mean__": overall} the shell refreshes each
     # turn from the steer map; the engine only reads it.
     expert_proof_weight: float = 0.0
+    # ToT route scoring is a weighted mix, not "entropy is truth." Entropy is
+    # one swappable term; collapse pressure and proof/evidence sit next to it.
+    routing_entropy_weight: float = field(
+        default_factory=lambda: _env_fraction("TDA_ROUTING_ENTROPY_WEIGHT", 1.0)
+    )
+    # Confidence-collapse term. Min-entropy alone can reward the easiest
+    # confident branch. A branch gets credit for reducing entropy by this
+    # margin; extra collapse contributes a separate weighted term instead of
+    # being hidden inside entropy itself.
+    routing_collapse_margin: float = field(
+        default_factory=lambda: _env_fraction("TDA_ROUTING_COLLAPSE_MARGIN", 0.75)
+    )
+    routing_collapse_penalty: float = field(
+        default_factory=lambda: _env_fraction("TDA_ROUTING_COLLAPSE_PENALTY", 1.25)
+    )
+    # Live probe term weight for ToT routing. The interactive shell fills
+    # routing_probe_terms from calibrated probes: high helpful probes lower the
+    # route score; high harmful probes raise it. Uncalibrated probes stay out.
+    routing_probe_weight: float = field(
+        default_factory=lambda: _env_fraction("TDA_ROUTING_PROBE_WEIGHT", 1.0)
+    )
+    routing_probe_terms: list[Dict[str, Any]] = field(default_factory=list)
     
     # High-Level Solver Logic
     max_rounds: int = 5

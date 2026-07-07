@@ -867,6 +867,8 @@ CALIBRATION_BINARY = {"sandbox_success", "words_had_impact"}
 CALIBRATION_CIRCULAR = {
     "claimmap_alpha", "memory_alpha", "steer_fraction", "steer_layer_sweep",
     "response_tokens", "routing_events", "routing_loops", "routing_entropy",
+    "routing_entropy_weight", "routing_collapse_margin",
+    "routing_collapse_penalty", "routing_probe_weight",
     "synthesis_events", "synthesis_steps", "plateau_epsilon",
     "reading_settled_streak", "steer_band_lo", "steer_band_hi",
     "expert_proof_weight", "calibration_gain", "prioritize_alpha",
@@ -2768,6 +2770,22 @@ def _sync_steer_tunables(tuner, config):
     config.entropy_threshold = _sane_fraction(
         tuner.get("routing_entropy", config.entropy_threshold), config.entropy_threshold
     )
+    config.routing_entropy_weight = _sane_fraction(
+        tuner.get("routing_entropy_weight", getattr(config, "routing_entropy_weight", 1.0)),
+        getattr(config, "routing_entropy_weight", 1.0),
+    )
+    config.routing_collapse_margin = _sane_fraction(
+        tuner.get("routing_collapse_margin", getattr(config, "routing_collapse_margin", 0.75)),
+        getattr(config, "routing_collapse_margin", 0.75),
+    )
+    config.routing_collapse_penalty = _sane_fraction(
+        tuner.get("routing_collapse_penalty", getattr(config, "routing_collapse_penalty", 1.25)),
+        getattr(config, "routing_collapse_penalty", 1.25),
+    )
+    config.routing_probe_weight = _sane_fraction(
+        tuner.get("routing_probe_weight", getattr(config, "routing_probe_weight", 1.0)),
+        getattr(config, "routing_probe_weight", 1.0),
+    )
     config.max_synthesis_events = max(
         0, int(_sane_fraction(tuner.get("synthesis_events", config.max_synthesis_events), config.max_synthesis_events))
     )
@@ -2946,6 +2964,10 @@ def main():
     tuner.register("routing_events", config.max_routing_events, kind="coefficient")
     tuner.register("routing_loops", config.max_loops, kind="coefficient")
     tuner.register("routing_entropy", config.entropy_threshold, kind="coefficient")
+    tuner.register("routing_entropy_weight", getattr(config, "routing_entropy_weight", 1.0), kind="coefficient")
+    tuner.register("routing_collapse_margin", getattr(config, "routing_collapse_margin", 0.75), kind="coefficient")
+    tuner.register("routing_collapse_penalty", getattr(config, "routing_collapse_penalty", 1.25), kind="coefficient")
+    tuner.register("routing_probe_weight", getattr(config, "routing_probe_weight", 1.0), kind="coefficient")
     # Proven-expert routing: how hard the ToT winner is nudged toward experts
     # with a good accrued route success rate. 0 = pure entropy (default);
     # earn it from outcomes (:calibrate expert_proof_weight outcome).
@@ -3570,7 +3592,6 @@ def main():
         "recall", "general_knowledge", "common_sense", "problem_solving",
         "adaptability", "consistency", "memory_access",
     }
-
     def _spawn_profile_runnable_lines(raw_lines, base_tuner):
         """Keep spawn profiles executable without imposing a workflow whitelist.
 
@@ -4012,6 +4033,107 @@ def main():
             provenance={"requests": cmd_requests, "direct_count": len(direct_cmds)},
         )
         return result
+
+    def _signed_direction(direction, sign=1.0):
+        if direction is None or (isinstance(direction, dict) and not direction):
+            return None
+        sign = 1.0 if sign >= 0 else -1.0
+        if isinstance(direction, dict):
+            return {k: (v * sign if hasattr(v, "__mul__") else v) for k, v in direction.items()}
+        return direction * sign if hasattr(direction, "__mul__") else direction
+
+    def _refresh_tot_committee_from_live_state():
+        """Build ToT routes from the live tuned/probed shell state.
+
+        This keeps ToT grounded in operator-created controls instead of every
+        vector file the registry can discover. Names are opaque labels; evidence,
+        exposure, and explicit steering are the admission criteria.
+        """
+        from invariants.mesa import Committee, MesaObjective
+
+        committee = Committee()
+        added = set()
+        cap = max(0, int(getattr(config, "max_committee_size", 6) or 0))
+
+        def add_route(name, direction, *, sign=1.0, born="probe"):
+            if cap and len(committee.members) >= cap:
+                return
+            route_name = re.sub(r"[^a-z0-9_]+", "_", str(name or "").lower()).strip("_")[:64]
+            if not route_name or route_name in added:
+                return
+            signed = _signed_direction(direction, sign)
+            if signed is None or (isinstance(signed, dict) and not signed):
+                return
+            committee.register(MesaObjective(route_name, signed, born, lambda state: 1.0))
+            added.add(route_name)
+
+        probe_terms = []
+        route_probe_weight = _sane_fraction(
+            tuner.get("routing_probe_weight", getattr(config, "routing_probe_weight", 1.0)),
+            getattr(config, "routing_probe_weight", 1.0),
+        )
+        ranked = rank_probes(probes, tuner)
+        for row in ranked:
+            lift = row.get("lift")
+            if lift is None or float(row.get("priority") or 0.0) <= 0.0:
+                continue
+            pname = row["name"]
+            pdata = probes.get(pname) or {}
+            direction = pdata.get("direction")
+            if direction is None or (isinstance(direction, dict) and not direction):
+                continue
+            evidence = min(1.0, max(0.0, float(row.get("n") or 0.0) / 20.0))
+            if evidence <= 0.0:
+                continue
+            # Route scores are lower-is-better. Positive lift means "more of
+            # this probe has tracked better turns", so high projection earns a
+            # negative score term. Negative lift reverses that relationship.
+            term_sign = -1.0 if float(lift) >= 0.0 else 1.0
+            probe_terms.append({
+                "name": pname,
+                "direction": direction,
+                "weight": term_sign * route_probe_weight * evidence,
+                "lift": float(lift),
+                "priority": float(row.get("priority") or 0.0),
+                "n": int(row.get("n") or 0),
+            })
+
+        mix = prioritize_pin.get("mix")
+        pin = prioritize_pin.get("probe")
+        if mix:
+            md = build_priority_mix_direction(model, mix, probes, tuner)
+            if md:
+                add_route("mix_" + "_".join(mix), md, born="steer_mix")
+        elif pin and pin in probes:
+            add_route(
+                f"probe_{pin}",
+                probes[pin].get("direction"),
+                sign=float(prioritize_pin.get("sign", 1.0) or 1.0),
+                born="steer_pin",
+            )
+
+        for row in ranked:
+            if cap and len(committee.members) >= cap:
+                break
+            if float(row.get("priority") or 0.0) <= 0:
+                continue
+            pname = row["name"]
+            if pname not in probes:
+                continue
+            lift = row.get("lift")
+            sign = 1.0 if lift is None or float(lift) >= 0 else -1.0
+            add_route(f"probe_{pname}", probes[pname].get("direction"), sign=sign, born="calibrated_probe")
+
+        for pname in sorted(n for n, pdata in probes.items() if pdata.get("exposed")):
+            if cap and len(committee.members) >= cap:
+                break
+            add_route(f"probe_{pname}", probes[pname].get("direction"), born="exposed_probe")
+
+        config.committee = committee
+        config.use_expert_vectors = False
+        config.routing_probe_terms = probe_terms
+        config._live_tot_routes = [m.name for m in committee.members]
+        return config._live_tot_routes
 
     egg_state = {"over": False}  # rising-edge latch for the consciousness egg
     startup_user_input = os.environ.get("PHENOMENALITY_STARTUP_PROMPT")
@@ -8579,6 +8701,7 @@ def main():
             config.expert_proof_scores = (
                 compute_expert_proof_scores(steer_map) if config.expert_proof_weight > 0.0 else {}
             )
+            _refresh_tot_committee_from_live_state()
             claimmap_alpha_used = tuner.get("claimmap_alpha", 0.0) if claimmap_steer_delta else 0.0
             turn_sweep_layers = None
             if claimmap_steer_delta and claimmap_alpha_used > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
@@ -8694,6 +8817,7 @@ def main():
                 exposed output steers as the first pass. Explicit tool steering
                 such as a claimmap tag can pass handles in as extra handles."""
                 _sync_steer_tunables(tuner, config)
+                _refresh_tot_committee_from_live_state()
                 followup_handles = list(extra_steer_handles or [])
                 prio_alpha_now = tuner.get("prioritize_alpha", 0.0)
                 prio_steered_now = None

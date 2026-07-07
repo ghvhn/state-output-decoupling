@@ -54,6 +54,142 @@ def _entropy_from_logits(logits):
     probs = F.softmax(logits.float(), dim=-1)
     return -(probs * torch.log(probs.clamp_min(1e-12))).sum(dim=-1)
 
+
+def _routing_selection_scores(
+    entropies,
+    baseline_entropy,
+    branch_names,
+    *,
+    entropy_weight=1.0,
+    collapse_margin=0.75,
+    collapse_penalty=1.25,
+    proof_weight=0.0,
+    proof_scores=None,
+    extra_terms=None,
+):
+    """Score ToT branches with a swappable weighted mix of terms.
+
+    Entropy is only one term. Raw min-entropy routing can make the easiest
+    confident completion look best because it is cheap to be certain. Collapse
+    pressure, proof/evidence, and future terms sit next to entropy instead of
+    being confused with it. Names stay opaque identifiers; they are used only
+    for evidence keys.
+    """
+    scores = torch.zeros_like(entropies.float())
+    term_contribs = {}
+    e_weight = _sane_fraction(entropy_weight, 1.0)
+    entropy_term = entropies.float() * e_weight
+    scores = scores + entropy_term
+    term_contribs["entropy"] = {
+        name: float(entropy_term[i].item()) for i, name in enumerate(branch_names)
+    }
+
+    baseline = float(baseline_entropy)
+    margin = _sane_fraction(collapse_margin, 0.75)
+    penalty = _sane_fraction(collapse_penalty, 1.25)
+    overcollapse = torch.clamp((baseline - entropies.float()) - margin, min=0.0)
+    collapse_adjustment = overcollapse * penalty
+    scores = scores + collapse_adjustment
+    term_contribs["collapse"] = {
+        name: float(collapse_adjustment[i].item()) for i, name in enumerate(branch_names)
+    }
+
+    proof_bonus = {}
+    proof_scores = proof_scores or {}
+    weight = _sane_fraction(proof_weight, 0.0)
+    proof_term = torch.zeros_like(scores)
+    if weight > 0.0 and proof_scores:
+        proof_mean = proof_scores.get("__mean__")
+        if proof_mean is None:
+            vals = [v for k, v in proof_scores.items() if not str(k).startswith("__")]
+            proof_mean = (sum(vals) / len(vals)) if vals else 0.0
+        for bi, name in enumerate(branch_names):
+            pr = proof_scores.get(name)
+            centered = (float(pr) - float(proof_mean)) if pr is not None else 0.0
+            proof_bonus[name] = centered
+            proof_term[bi] = -weight * centered
+            scores[bi] = scores[bi] + proof_term[bi]
+    term_contribs["proof"] = {
+        name: float(proof_term[i].item()) for i, name in enumerate(branch_names)
+    }
+
+    for term_name, term in (extra_terms or {}).items():
+        try:
+            values, term_weight = term
+            values = values.to(scores.device).float()
+            weighted = values * _sane_signed(term_weight, 0.0)
+        except Exception:
+            continue
+        if weighted.shape != scores.shape:
+            continue
+        scores = scores + weighted
+        term_contribs[str(term_name)] = {
+            name: float(weighted[i].item()) for i, name in enumerate(branch_names)
+        }
+
+    return scores, proof_bonus, term_contribs
+
+
+def _direction_vec_at_layer(direction, layer_idx):
+    if direction is None or (isinstance(direction, dict) and not direction):
+        return None
+    if isinstance(direction, dict):
+        vec = direction.get(layer_idx)
+        if vec is None:
+            vec = direction.get(str(layer_idx))
+        if vec is None:
+            candidates = []
+            for key, value in direction.items():
+                try:
+                    candidates.append((abs(int(key) - int(layer_idx)), value))
+                except (TypeError, ValueError):
+                    continue
+            if candidates:
+                vec = min(candidates, key=lambda item: item[0])[1]
+        if vec is None:
+            return None
+    else:
+        vec = direction
+    if not torch.is_tensor(vec):
+        return None
+    vec = vec.float().reshape(-1)
+    norm = vec.norm()
+    if norm.item() <= 0:
+        return None
+    return vec / norm
+
+
+def _routing_probe_extra_terms(config, h_parallel, layer_idx):
+    """Project live branch states onto calibrated probe axes for route scoring."""
+    specs = getattr(config, "routing_probe_terms", None) or []
+    if not specs:
+        return {}
+    h_branch = h_parallel[:, -1, :].float()
+    h_norm = h_branch.norm(dim=-1).clamp_min(1e-30)
+    terms = {}
+    used_names = set()
+    for spec in specs:
+        if not isinstance(spec, dict):
+            continue
+        name = str(spec.get("name") or "probe").strip() or "probe"
+        key = "probe:" + name
+        if key in used_names:
+            continue
+        vec = _direction_vec_at_layer(spec.get("direction"), layer_idx)
+        if vec is None or vec.numel() != h_branch.shape[-1]:
+            continue
+        try:
+            weight = _sane_signed(spec.get("weight", 0.0), 0.0)
+        except Exception:
+            continue
+        if weight == 0.0:
+            continue
+        values = (h_branch @ vec.to(h_branch.device)) / h_norm
+        terms[key] = (values, weight)
+        used_names.add(key)
+    return terms
+
+
 def _add_last_token_delta(h, delta):
     # Every agentic-side injection (synthesis/cache/organic deltas, urgency)
     # funnels through here, so the shared steering envelope is enforced at this
@@ -84,6 +220,17 @@ def _sane_fraction(value, default):
     except (TypeError, ValueError):
         return default
     if v != v or v in (float("inf"), float("-inf")) or v < 0.0:
+        return default
+    return v
+
+
+def _sane_signed(value, default):
+    """Finite signed scalar for route-score terms that can reward or penalize."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    if v != v or v in (float("inf"), float("-inf")):
         return default
     return v
 
@@ -233,7 +380,7 @@ def get_agentic_handles(
     if config is None:
         config = AgenticConfig()
     if vecs is None:
-        vecs = _global_registry.get_vecs(M)
+        vecs = _global_registry.get_vecs(M) if getattr(config, "use_expert_vectors", True) else {}
     if getattr(config, "committee", None) is None:
         # Open roster over the same seed experts as before: with emergent
         # births disabled (the default) this routes identically to the fixed
@@ -415,30 +562,31 @@ def get_agentic_handles(
                         logits_parallel = M.model.lm_head(h_norm_parallel)
                         entropies = _entropy_from_logits(logits_parallel).squeeze(1) # [N]
                         
-                    # 5. Selection -- by branch entropy, nudged toward PROVEN
-                    # experts. With expert_proof_weight == 0 (default) this is
-                    # exactly argmin(entropy). Otherwise each branch's entropy
-                    # is discounted by its expert's accrued route success rate,
-                    # centered on the overall mean so an UNPROVEN expert (no
-                    # score) stays neutral -- proven experts earn a head start,
-                    # nothing is penalized on no evidence.
+                    # 5. Selection -- by a swappable score mix. Entropy is a
+                    # term, not truth: it sits beside collapse pressure,
+                    # outcome proof, and calibrated probe projections. Branch
+                    # names remain opaque evidence keys.
                     entropy_best_idx = torch.argmin(entropies).item() if num_branches > 0 else 0
                     proof_weight = float(getattr(config, "expert_proof_weight", 0.0) or 0.0)
                     proof_scores = getattr(config, "expert_proof_scores", None) or {}
-                    proof_bonus = {}
-                    if num_branches > 0 and proof_weight > 0.0 and proof_scores:
-                        proof_mean = proof_scores.get("__mean__")
-                        if proof_mean is None:
-                            _vals = [v for k, v in proof_scores.items() if not str(k).startswith("__")]
-                            proof_mean = (sum(_vals) / len(_vals)) if _vals else 0.0
-                        adjusted = entropies.clone()
-                        for bi, name in enumerate(state["branch_names"]):
-                            pr = proof_scores.get(name)
-                            centered = (float(pr) - float(proof_mean)) if pr is not None else 0.0
-                            proof_bonus[name] = centered
-                            adjusted[bi] = entropies[bi] - proof_weight * centered
-                        best_idx = torch.argmin(adjusted).item()
+                    if num_branches > 0:
+                        extra_terms = _routing_probe_extra_terms(config, h_parallel, l_idx)
+                        routing_scores, proof_bonus, routing_score_terms = _routing_selection_scores(
+                            entropies,
+                            entropy,
+                            state["branch_names"],
+                            entropy_weight=getattr(config, "routing_entropy_weight", 1.0),
+                            collapse_margin=getattr(config, "routing_collapse_margin", 0.75),
+                            collapse_penalty=getattr(config, "routing_collapse_penalty", 1.25),
+                            proof_weight=proof_weight,
+                            proof_scores=proof_scores,
+                            extra_terms=extra_terms,
+                        )
+                        best_idx = torch.argmin(routing_scores).item()
                     else:
+                        routing_scores = entropies
+                        proof_bonus = {}
+                        routing_score_terms = {}
                         best_idx = entropy_best_idx
                     best_entropy = entropies[best_idx].item()
                     winner_name = state["branch_names"][best_idx]
@@ -457,12 +605,23 @@ def get_agentic_handles(
                             # "did proof override entropy, and did it help?" is
                             # answerable from the trace.
                             "entropy_winner": state["branch_names"][entropy_best_idx],
+                            "routing_scores": {
+                                name: routing_scores[i].item() for i, name in enumerate(state["branch_names"])
+                            },
+                            "routing_score_terms": dict(routing_score_terms),
+                            "baseline_entropy": entropy,
+                            "entropy_weight": getattr(config, "routing_entropy_weight", 1.0),
+                            "collapse_margin": getattr(config, "routing_collapse_margin", 0.75),
+                            "collapse_penalty": getattr(config, "routing_collapse_penalty", 1.25),
                             "proof_weight": proof_weight,
                             "proof_bonus": dict(proof_bonus),
                         })
                     
                     if config.chatty_log:
-                        ent_str = ", ".join([f"{name[:3]}: {entropies[i]:.2f}" for i, name in enumerate(state["branch_names"])])
+                        ent_str = ", ".join([
+                            f"{name[:3]}: H={entropies[i]:.2f}/S={routing_scores[i]:.2f}"
+                            for i, name in enumerate(state["branch_names"])
+                        ])
                         print(f"    [Agentic ToT] Token Loop {state['total_loops_this_token']} | "
                               f"{ent_str} -> WINNER: {winner_name} (Entropy: {best_entropy:.2f})")
                     
