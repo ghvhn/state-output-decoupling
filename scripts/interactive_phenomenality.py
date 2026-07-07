@@ -1474,6 +1474,9 @@ def save_game_config(path, cfg):
 def command_keeps_semicolons(line):
     """Commands whose arguments may deliberately contain semicolons."""
     low = (line or "").lstrip().lower()
+    if low.startswith("@"):
+        parts = low.split(maxsplit=1)
+        low = parts[1].strip() if len(parts) == 2 else ""
     return low.startswith(":macro ") or low.startswith(":game restore ")
 
 
@@ -1486,7 +1489,7 @@ def split_cmd_tool_commands(cmd):
     c = (cmd or "").strip()
     if not c:
         return []
-    if not c.startswith(":"):
+    if not c.startswith(":") and not c.startswith("@"):
         c = ":" + c
     if command_keeps_semicolons(c):
         return [c]
@@ -1495,40 +1498,63 @@ def split_cmd_tool_commands(cmd):
         p = part.strip()
         if not p:
             continue
-        if not p.startswith(":"):
+        if not p.startswith(":") and not p.startswith("@"):
             p = ":" + p
         out.append(p)
     return out
 
 
-def command_word(cmd):
-    s = (cmd or "").strip()
-    if not s.startswith(":"):
+def normalize_command_target(target):
+    t = str(target or "").strip()
+    if not t:
         return ""
-    toks = s[1:].split()
-    return toks[0].lower() if toks else ""
+    if not t.startswith("@"):
+        t = "@" + t
+    t = t.split()[0].strip()
+    return t if len(t) > 1 else ""
+
+
+def parse_command_route(cmd):
+    """Return (optional @agent target, command word, argument tail)."""
+    s = (cmd or "").strip()
+    target = ""
+    if s.startswith("@"):
+        parts = s.split(maxsplit=1)
+        if len(parts) != 2:
+            return normalize_command_target(parts[0]), "", ""
+        target = normalize_command_target(parts[0])
+        s = parts[1].strip()
+    if not s.startswith(":"):
+        return target, "", ""
+    parts = s[1:].split(maxsplit=1)
+    word = parts[0].lower() if parts else ""
+    tail = parts[1].strip() if len(parts) > 1 else ""
+    return target, word, tail
+
+
+def command_word(cmd):
+    return parse_command_route(cmd)[1]
 
 
 def command_arg_tail(cmd):
-    s = (cmd or "").strip()
-    if s.startswith(":"):
-        s = s[1:].strip()
-    parts = s.split(maxsplit=1)
-    return parts[1].strip() if len(parts) > 1 else ""
+    return parse_command_route(cmd)[2]
 
 
 def apply_command_exposure_args(cmd, exposure):
-    word = command_word(cmd)
+    requested_target, word, supplied = parse_command_route(cmd)
     if not word:
         return cmd
+    target = command_exposure_target(exposure) or requested_target
     fixed = command_exposure_args(exposure)
-    supplied = command_arg_tail(cmd)
     if fixed and supplied:
         if supplied == fixed:
             supplied = ""
         elif supplied.startswith(fixed + " "):
             supplied = supplied[len(fixed):].strip()
-    pieces = [f":{word}"]
+    pieces = []
+    if target:
+        pieces.append(target)
+    pieces.append(f":{word}")
     if fixed:
         pieces.append(fixed)
     if supplied:
@@ -1565,6 +1591,9 @@ def normalize_command_exposure(record):
             or ""
         ).strip()
         args_raw = record.get("args", record.get("fixed_args", ""))
+        target = normalize_command_target(
+            record.get("target", record.get("target_agent", record.get("agent", "")))
+        )
         if isinstance(args_raw, (list, tuple)):
             fixed_args = " ".join(str(x).strip() for x in args_raw if str(x).strip())
         else:
@@ -1574,6 +1603,7 @@ def normalize_command_exposure(record):
         activation = ""
         steer = ""
         fixed_args = ""
+        target = ""
     if mode not in {"direct", "stage"}:
         mode = "stage"
     return {
@@ -1581,6 +1611,7 @@ def normalize_command_exposure(record):
         "activation": activation,
         "steer_magnitude": steer,
         "args": fixed_args,
+        "target": target,
     }
 
 
@@ -1596,7 +1627,8 @@ def command_exposure_activation(word, record):
     activation = command_exposure_custom_activation(record)
     if activation:
         return activation
-    return f"no activation criterion recorded; expose again with ':expose :{word} ... because <activation>'"
+    display = command_exposure_display(word, record, include_args=False)
+    return f"no activation criterion recorded; expose again with ':expose {display} ... because <activation>'"
 
 
 def command_exposure_steer(record):
@@ -1610,6 +1642,22 @@ def command_exposure_raw_steer(record):
 
 def command_exposure_args(record):
     return normalize_command_exposure(record)["args"]
+
+
+def command_exposure_target(record):
+    return normalize_command_exposure(record)["target"]
+
+
+def command_exposure_display(word, record, *, include_args=True):
+    record = normalize_command_exposure(record)
+    target = record["target"]
+    pieces = []
+    if target:
+        pieces.append(target)
+    pieces.append(f":{str(word).lstrip(':').lower()}")
+    if include_args and record["args"]:
+        pieces.append(record["args"])
+    return " ".join(pieces)
 
 
 def normalize_game_config(raw):
@@ -1698,6 +1746,7 @@ def build_session_restore_macro(probes, macro_aliases, exposed_commands, exposed
         if word == "expose":
             continue
         record = normalize_command_exposure(mode)
+        command_target = command_exposure_display(word, record, include_args=False)
         fixed_args = command_exposure_args(record)
         args_suffix = f" {fixed_args}" if fixed_args else ""
         suffix = " direct" if command_exposure_mode(record) == "direct" else ""
@@ -1705,7 +1754,7 @@ def build_session_restore_macro(probes, macro_aliases, exposed_commands, exposed
         steer_suffix = f" steer {steer}" if steer else ""
         because = command_exposure_custom_activation(record)
         because_suffix = f" because {because}" if because else ""
-        lines.append(f":expose :{word}{suffix}{args_suffix}{steer_suffix}{because_suffix}")
+        lines.append(f":expose {command_target}{suffix}{args_suffix}{steer_suffix}{because_suffix}")
         stats["exposed_commands"] += 1
 
     games_dir = os.path.join(root, "games")
@@ -2114,7 +2163,7 @@ COMMAND_HELP_LINES = [
     "          :game no | decline           (decline the game the model just proposed)",
     "          :accept [n|all] | :reject [n|all]  (a game may STAGE a command instead of",
     "                running it; nothing a game chose runs until you accept it here)",
-    "          :expose :<command> [stage|direct] [fixed args...] [steer <magnitude>] [because <activation>] | :expose off <target>",
+    "          :expose [@agent] :<command> [stage|direct] [fixed args...] [steer <magnitude>] [because <activation>] | :expose off [@agent] <target>",
     "                (runtime tool access:",
     "                make/remove a command callable by the model as <<TOOL: :command args>>;",
     "                bare/default = staged for :accept, direct = queued immediately;",
@@ -2368,13 +2417,13 @@ def build_model_help_text(
     if visible_exposed:
         lines.extend([
             "  <<TOOL: :command args>>   trigger an operator-exposed command-backed tool",
+            "                             Routed tools may be shown as <<TOOL: @agent :command args>>.",
             "                             Legacy <<CMD: :command args>> is also accepted.",
             "                             If the tool shows fixed args, provide only the remaining tail.",
             "                             Documented here:",
         ])
         for name, record in sorted(visible_exposed.items()):
-            fixed_args = command_exposure_args(record)
-            display_cmd = f":{name}" + (f" {fixed_args}" if fixed_args else "")
+            display_cmd = command_exposure_display(name, record)
             lines.append(
                 f"                             - {display_cmd} ({command_exposure_mode(record)}); "
                 f"activate when {command_exposure_activation(name, record)}; "
@@ -3840,7 +3889,7 @@ def main():
         visible_cmds = sorted(_all_shell_commands() - hidden_commands)
         hidden = sorted(hidden_commands)
         exposed = [
-            f":{w}{(' ' + command_exposure_args(r)) if command_exposure_args(r) else ''}"
+            f"{command_exposure_display(w, r)}"
             f"({command_exposure_mode(r)}; activate={command_exposure_activation(w, r)}; steer={command_exposure_steer(r)})"
             for w, r in sorted(exposed_commands.items())
         ]
@@ -3997,6 +4046,7 @@ def main():
         for requested in cmd_requests:
             for cmd in split_cmd_tool_commands(requested):
                 seen_any = True
+                requested_target, _, _ = parse_command_route(cmd)
                 word = command_word(cmd)
                 if not word:
                     result_lines.append(f"- refused malformed command: {cmd}")
@@ -4012,6 +4062,17 @@ def main():
                     result_lines.append(f"- refused :{word}; it is exposed but no longer exists as a command.")
                     continue
                 exposure = exposed_commands.get(word, "stage")
+                exposed_target = command_exposure_target(exposure)
+                if requested_target and requested_target != exposed_target:
+                    if exposed_target:
+                        result_lines.append(
+                            f"- refused {requested_target} :{word}; this tool is exposed for {exposed_target} :{word}."
+                        )
+                    else:
+                        result_lines.append(
+                            f"- refused {requested_target} :{word}; :{word} is exposed without an agent route."
+                        )
+                    continue
                 cmd = apply_command_exposure_args(cmd, exposure)
                 mode = command_exposure_mode(exposure)
                 if mode == "direct":
@@ -6380,9 +6441,10 @@ def main():
                     if exposed_commands:
                         for w, record in sorted(exposed_commands.items()):
                             hidden_note = " [hidden from writing/help]" if w in hidden_commands else ""
+                            display_cmd = command_exposure_display(w, record, include_args=False)
                             print(
                                 Fore.CYAN
-                                + f"[Expose] command :{w}  ({command_exposure_mode(record)}){hidden_note}\n"
+                                + f"[Expose] command {display_cmd}  ({command_exposure_mode(record)}){hidden_note}\n"
                                 + f"         activation: {command_exposure_activation(w, record)}\n"
                                 + f"         steer: {command_exposure_steer(record)}"
                                 + Style.RESET_ALL
@@ -6396,12 +6458,30 @@ def main():
                     if len(eargs) < 2:
                         print(Fore.YELLOW + "[Expose] Usage: :expose off <probe|knob|:command>" + Style.RESET_ALL)
                         continue
-                    eargs = [eargs[1], "off"] + eargs[2:]
-                target = eargs[0]
+                    eargs = eargs[1:]
+                    turn_off_prefix = True
+                else:
+                    turn_off_prefix = False
+                target_agent = ""
+                if eargs and eargs[0].startswith("@"):
+                    if len(eargs) < 2 or not eargs[1].startswith(":"):
+                        print(Fore.YELLOW + "[Expose] Usage: :expose @agent :command [stage|direct] [fixed args...] [steer <magnitude>] because <activation>, or :expose off @agent :command." + Style.RESET_ALL)
+                        continue
+                    target_agent = normalize_command_target(eargs[0])
+                    target = eargs[1]
+                    eargs = [target] + (["off"] if turn_off_prefix else []) + eargs[2:]
+                elif turn_off_prefix:
+                    eargs = [eargs[0], "off"] + eargs[1:]
+                    target = eargs[0]
+                else:
+                    target = eargs[0]
                 mode_arg = eargs[1].lower() if len(eargs) > 1 else ""
                 if not target.startswith(":"):
                     if mode_arg not in ("", "on", "expose", "off", "hide"):
                         print(Fore.YELLOW + f"[Expose] Bare targets expose probes/knobs and only accept 'off'. For command-backed tools use ':expose :{target} [stage|direct] [fixed args...] [steer <magnitude>] because <activation>'." + Style.RESET_ALL)
+                        continue
+                    if target_agent:
+                        print(Fore.YELLOW + "[Expose] Agent-routed exposure targets must be commands, e.g. ':expose @agent :command'." + Style.RESET_ALL)
                         continue
                     turn_off = mode_arg in ("off", "hide")
                     if target.lower().lstrip(":") == "memory":
@@ -6491,10 +6571,12 @@ def main():
                     "activation": activation,
                     "steer_magnitude": steer_magnitude,
                     "args": fixed_args,
+                    "target": target_agent,
                 }
                 _save_exposed_commands()
                 run_note = "is queued immediately" if mode == "direct" else "is staged for your :accept"
-                print(Fore.GREEN + f"[Expose] ':{word}' is now a model tool -- it can call <<TOOL: :{word} ...>> when its activation criterion is met, and it {run_note} ({mode})." + Style.RESET_ALL)
+                display_cmd = command_exposure_display(word, exposed_commands[word], include_args=False)
+                print(Fore.GREEN + f"[Expose] '{display_cmd}' is now a model tool -- it can call <<TOOL: {display_cmd} ...>> when its activation criterion is met, and it {run_note} ({mode})." + Style.RESET_ALL)
                 print(Fore.CYAN + f"         fixed args: {fixed_args or '(none; model supplies the full tail)'}" + Style.RESET_ALL)
                 print(Fore.CYAN + f"         activation: {command_exposure_activation(word, exposed_commands[word])}" + Style.RESET_ALL)
                 print(Fore.CYAN + f"         steer: {command_exposure_steer(exposed_commands[word])}" + Style.RESET_ALL)
