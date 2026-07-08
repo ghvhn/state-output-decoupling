@@ -1,0 +1,201 @@
+{
+ "repo": "ghvhn/state-output-decoupling",
+ "updated_at": "2026-07-08T05:45:44+00:00",
+ "clones_by_day": {
+  "2026-06-23": {
+   "count": 0,
+   "uniques": 0
+  },
+  "2026-06-24": {
+   "count": 0,
+   "uniques": 0
+  },
+  "2026-06-25": {
+   "count": 0,
+   "uniques": 0
+  },
+  "2026-06-26": {
+   "count": 72,
+   "uniques": 33
+  },
+  "2026-06-27": {
+   "count": 38,
+   "uniques": 20
+  },
+  "2026-06-28": {
+   "count": 65,
+   "uniques": 31
+  },
+  "2026-06-29": {
+   "count": 23,
+   "uniques": 14
+  },
+  "2026-06-30": {
+   "count": 168,
+   "uniques": 53
+  },
+  "2026-07-01": {
+   "count": 52,
+   "uniques": 26
+  },
+  "2026-07-02": {
+   "count": 17,
+   "uniques": 11
+  },
+  "2026-07-03": {
+   "count": 133,
+   "uniques": 60
+  },
+  "2026-07-04": {
+   "count": 117,
+   "uniques": 50
+  },
+  "2026-07-05": {
+   "count": 336,
+   "uniques": 131
+  },
+  "2026-07-06": {
+   "count": 547,
+   "uniques": 137
+  }
+ },
+ "views_by_day": {
+  "2026-06-23": {
+   "count": 0,
+   "uniques": 0
+  },
+  "2026-06-24": {
+   "count": 0,
+   "uniques": 0
+  },
+  "2026-06-25": {
+   "count": 0,
+   "uniques": 0
+  },
+  "2026-06-26": {
+   "count": 57,
+   "uniques": 2
+  },
+  "2026-06-27": {
+   "count": 11,
+   "uniques": 2
+  },
+  "2026-06-28": {
+   "count": 29,
+   "uniques": 6
+  },
+  "2026-06-29": {
+   "count": 28,
+   "uniques": 2
+  },
+  "2026-06-30": {
+   "count": 58,
+   "uniques": 3
+  },
+  "2026-07-01": {
+   "count": 12,
+   "uniques": 1
+  },
+  "2026-07-02": {
+   "count": 13,
+   "uniques": 1
+  },
+  "2026-07-03": {
+   "count": 42,
+   "uniques": 2
+  },
+  "2026-07-04": {
+   "count": 29,
+   "uniques": 3
+  },
+  "2026-07-05": {
+   "count": 28,
+   "uniques": 3
+  },
+  "2026-07-06": {
+   "count": 70,
+   "uniques": 4
+  }
+ },
+ "last_window": {
+  "fetched_at": "2026-07-08T05:45:44+00:00",
+  "clones_total": 1568,
+  "clones_uniques": 448,
+  "views_total": 377,
+  "views_uniques": 11
+ },
+ "latest_referrers": [
+  {
+   "referrer": "github.com",
+   "count": 77,
+   "uniques": 3
+  },
+  {
+   "referrer": "linkedin.com",
+   "count": 5,
+   "uniques": 3
+  }
+ ],
+ "latest_paths": [
+  {
+   "path": "/ghvhn/state-output-decoupling",
+   "title": "Overview",
+   "count": 135,
+   "uniques": 8
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/graphs/traffic",
+   "title": "/graphs/traffic",
+   "count": 28,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/pulse",
+   "title": "/pulse",
+   "count": 21,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/tree/main",
+   "title": "/tree/main",
+   "count": 18,
+   "uniques": 5
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/commits/main",
+   "title": "/commits/main",
+   "count": 15,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/blob/main/PUBLIC_ANNOUNCEMENT.md",
+   "title": "/blob/main/PUBLIC_ANNOUNCEMENT.md",
+   "count": 11,
+   "uniques": 4
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/tree/main/scripts",
+   "title": "/tree/main/scripts",
+   "count": 7,
+   "uniques": 3
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/tree/main/invariants",
+   "title": "/tree/main/invariants",
+   "count": 6,
+   "uniques": 4
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/branches",
+   "title": "/branches",
+   "count": 6,
+   "uniques": 2
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/blob/main/invariants/agentic_engine.py",
+   "title": "/blob/main/invariants/agentic_engine.py",
+   "count": 5,
+   "uniques": 4
+  }
+ ]
+}
