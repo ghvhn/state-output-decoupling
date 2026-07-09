@@ -4517,6 +4517,35 @@ def consume_probe_args(args):
             idx += 1
     return pname, args[idx:]
 
+def _extract_choice(text, candidates):
+    """Pull the intended candidate out of a free-form model reply.
+
+    'Output ONLY the exact name' is an instruction, not a guarantee: small
+    models append fake dialogue turns ('accuracy_d1536Human: Explain...') or
+    wrap the name in quotes/bullets. Resolution order: exact reply; exact
+    first token (unwrapped); else the candidate at the earliest left-boundary
+    occurrence in the text, longest name winning ties (accuracy_d1536 beats
+    accuracy at the same position). None when nothing matches."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    if text in candidates:
+        return text
+    toks = text.split()
+    if toks:
+        first = re.sub(r"^[\s\-*'\"`:]+|[\s.,'\"`:]+$", "", toks[0])
+        if first in candidates:
+            return first
+    best = None  # ((pos, -len), name)
+    for name in candidates:
+        m = re.search(rf"(?<![A-Za-z0-9_]){re.escape(str(name))}", text)
+        if m:
+            key = (m.start(), -len(str(name)))
+            if best is None or key < best[0]:
+                best = (key, name)
+    return best[1] if best else None
+
+
 def resolve_probe_choice(pname_raw, options, model=None, config=None, action_name=""):
     tokens = pname_raw.split()
     if not tokens:
@@ -4548,20 +4577,31 @@ def resolve_probe_choice(pname_raw, options, model=None, config=None, action_nam
             f"<|start_header_id|>assistant<|end_header_id|>\n\n"
         )
 
-        sug = generate_agentic_text(
-            model,
-            instruction=prompt,
-            config=config,
-            pre_formatted=True,
-            max_new_tokens=20
-        )
+        # Same diagnostic rule as pings/explain: tool-selection meta-talk
+        # must not read from or write into the cognitive cache.
+        _choice_cache_before = (config.cache_enabled, config.cache_write_enabled)
+        config.cache_enabled = False
+        config.cache_write_enabled = False
+        try:
+            sug = generate_agentic_text(
+                model,
+                instruction=prompt,
+                config=config,
+                pre_formatted=True,
+                max_new_tokens=20
+            )
+        finally:
+            config.cache_enabled, config.cache_write_enabled = _choice_cache_before
         sug = sug.strip()
-        if sug in options:
-            print(Fore.GREEN + f"[Choice] The model chose: {sug}" + Style.RESET_ALL)
-            return sug
-        else:
-            print(Fore.YELLOW + f"[Choice] Model selected invalid target '{sug}'. Aborting." + Style.RESET_ALL)
-            return None
+        picked = _extract_choice(sug, plist)
+        if picked is not None:
+            if picked != sug:
+                print(Fore.CYAN + f"[Choice] Extracted '{picked}' from the model's reply." + Style.RESET_ALL)
+            print(Fore.GREEN + f"[Choice] The model chose: {picked}" + Style.RESET_ALL)
+            return picked
+        shown = sug if len(sug) <= 60 else sug[:60] + "..."
+        print(Fore.YELLOW + f"[Choice] Model selected invalid target '{shown}'. Aborting." + Style.RESET_ALL)
+        return None
 
     return pname_raw.replace("probe_", "") if pname_raw.startswith("probe_") else pname_raw
 
