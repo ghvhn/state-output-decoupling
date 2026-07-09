@@ -149,7 +149,7 @@ described: violations print the usage line instead of executing.
   - e.g. `:steer freeze @pin off`
 - `:steer g [probe|@anchor|layer:N|family:name] [source|off] [scale] [offset]` -- Personal gravitational constant: bind one node's G to a live source instead of the global G (prioritize_alpha). A layer G gates/multiplies a body's G where both are set; family:<name> makes the node inherit that family's G. Bare :steer g lists every override.
   - `[probe|@anchor|layer:N|family:name]` (word, optional) -- a body (probe or @anchor), one layer's clock/gate, or a whole family
-  - `[source|off]` (word, optional) -- live source: a number, probe:<name>, knob:<name>, status:ram|vram, lift:<trigger> (fired-vs-unfired outcome lift), outcome:<trigger> (rolling mean of recent credits), family:<name>, or global; off clears back to inherited
+  - `[source|off]` (word, optional) -- live source: a number, probe:<name>, knob:<name>, status:ram|vram|cpu|ram_pct|tokens_per_sec (system vitals), lift:<trigger> (fired-vs-unfired outcome lift), outcome:<trigger> (rolling mean of recent credits), family:<name>, or global; off clears back to inherited
   - `[scale]` (float, optional) -- multiply the source
   - `[offset]` (float, optional) -- add after scaling
   - e.g. `:steer g ambiguity knob:prioritize_alpha 0.5`
@@ -175,7 +175,7 @@ described: violations print the usage line instead of executing.
   - e.g. `:steer pole @pin integrity off`
 - `:steer time <probe|@anchor|layer:N|family:name> <source|off> [scale] [offset]` -- Local clock: align a node's forward-time rate to a live source so its gravity evolves on its own timeline (rate clamped to 0.05..20). off returns the node to the global clock (rate 1).
   - `<probe|@anchor|layer:N|family:name>` (word) -- a body (probe or @anchor), one layer's clock/gate, or a whole family
-  - `<source|off>` (word) -- live source: a number, probe:<name>, knob:<name>, status:ram|vram, lift:<trigger> (fired-vs-unfired outcome lift), outcome:<trigger> (rolling mean of recent credits), family:<name>, or global; off clears back to inherited
+  - `<source|off>` (word) -- live source: a number, probe:<name>, knob:<name>, status:ram|vram|cpu|ram_pct|tokens_per_sec (system vitals), lift:<trigger> (fired-vs-unfired outcome lift), outcome:<trigger> (rolling mean of recent credits), family:<name>, or global; off clears back to inherited
   - `[scale]` (float, optional) -- multiply the source
   - `[offset]` (float, optional) -- add after scaling
   - e.g. `:steer time @sink probe:urgency`

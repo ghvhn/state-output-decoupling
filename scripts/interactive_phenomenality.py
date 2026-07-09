@@ -130,6 +130,62 @@ DEFAULT_COMMAND_PROMPT_PROBES = frozenset({
 })
 
 
+_CPU_TIMES_STATE = {"last": None}
+_LAST_CLOCK = {}
+
+
+def _system_cpu_percent():
+    """System-wide CPU utilization (%) since the LAST call -- the sampling
+    window is whatever elapsed between reads, which for the per-reply stream
+    means 'CPU during this generation'. Pure ctypes (GetSystemTimes), no
+    psutil dependency; 0.0 on the first call or off-Windows."""
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        idle = ctypes.c_ulonglong()
+        kern = ctypes.c_ulonglong()
+        user = ctypes.c_ulonglong()
+        if not k32.GetSystemTimes(ctypes.byref(idle), ctypes.byref(kern), ctypes.byref(user)):
+            return 0.0
+        now = (idle.value, kern.value, user.value)
+        last = _CPU_TIMES_STATE["last"]
+        _CPU_TIMES_STATE["last"] = now
+        if last is None:
+            return 0.0
+        d_idle = now[0] - last[0]
+        d_total = (now[1] - last[1]) + (now[2] - last[2])  # kernel includes idle
+        if d_total <= 0:
+            return 0.0
+        return max(0.0, min(100.0, 100.0 * (d_total - d_idle) / d_total))
+    except Exception:
+        return 0.0
+
+
+def _system_memory_status():
+    """(percent_used, total_gb, available_gb) system-wide, via
+    GlobalMemoryStatusEx -- dwMemoryLoad is the exact number Task Manager
+    shows. Pure ctypes; (0, 0, 0) off-Windows."""
+    try:
+        import ctypes
+
+        class _MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_uint32), ("dwMemoryLoad", ctypes.c_uint32),
+                ("ullTotalPhys", ctypes.c_uint64), ("ullAvailPhys", ctypes.c_uint64),
+                ("ullTotalPageFile", ctypes.c_uint64), ("ullAvailPageFile", ctypes.c_uint64),
+                ("ullTotalVirtual", ctypes.c_uint64), ("ullAvailVirtual", ctypes.c_uint64),
+                ("ullAvailExtendedVirtual", ctypes.c_uint64),
+            ]
+
+        st = _MEMORYSTATUSEX()
+        st.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+            return float(st.dwMemoryLoad), st.ullTotalPhys / 1024 ** 3, st.ullAvailPhys / 1024 ** 3
+    except Exception:
+        pass
+    return 0.0, 0.0, 0.0
+
+
 def load_probe_raw_histories(path=PROBE_RAW_HISTORY_PATH):
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -490,6 +546,10 @@ def field_source_error(spec, probes=None, tuner=None, families=None):
         "ram_peak", "vram_peak", "memory_peak",
         "cuda", "gpu", "gravity_time", "time",
         "gravity_potential", "potential",
+        "cpu", "cpu_pct", "utilization",
+        "sys_ram", "ram_pct", "memory_pct", "mem_load",
+        "tokens_per_sec", "gen_speed", "tps",
+        "gen_seconds", "generation_seconds",
     }:
         return f"unknown status '{name}'"
     if kind == "layer":
@@ -528,6 +588,14 @@ def field_status_value(name):
         return float(_GRAVITY_STATE.get("time") or 1.0)
     if key in ("gravity_potential", "potential"):
         return float(_GRAVITY_STATE.get("phi") or 0.0)
+    if key in ("cpu", "cpu_pct", "utilization"):
+        return _system_cpu_percent()
+    if key in ("sys_ram", "ram_pct", "memory_pct", "mem_load"):
+        return _system_memory_status()[0]
+    if key in ("tokens_per_sec", "gen_speed", "tps"):
+        return float(_LAST_CLOCK.get("tokens_per_sec") or 0.0)
+    if key in ("gen_seconds", "generation_seconds"):
+        return float(_LAST_CLOCK.get("generation_seconds") or 0.0)
     return 0.0
 
 
@@ -2506,7 +2574,8 @@ PROBE_EXPLAIN_SPEC = register_spec(CommandSpec(
 
 _FIELD_NODE = "probe|@anchor|layer:N|family:name"
 _FIELD_NODE_HELP = "a body (probe or @anchor), one layer's clock/gate, or a whole family"
-_FIELD_SOURCE_HELP = ("live source: a number, probe:<name>, knob:<name>, status:ram|vram, "
+_FIELD_SOURCE_HELP = ("live source: a number, probe:<name>, knob:<name>, "
+                      "status:ram|vram|cpu|ram_pct|tokens_per_sec (system vitals), "
                       "lift:<trigger> (fired-vs-unfired outcome lift), outcome:<trigger> "
                       "(rolling mean of recent credits), family:<name>, or global; off clears back to inherited")
 
@@ -10185,7 +10254,16 @@ def main():
                     )
                 else:
                     print(Fore.YELLOW + "[Clock] no generation timed yet this session." + Style.RESET_ALL)
-                for _cs in ("generation_seconds", "vram_gb"):
+                _mem_pct, _mem_total, _mem_avail = _system_memory_status()
+                if _mem_total > 0:
+                    print(
+                        Fore.CYAN
+                        + f"[Clock] system: RAM {_mem_pct:.0f}% used ({_mem_total - _mem_avail:.1f}/{_mem_total:.1f}GB)"
+                        + (f"; last-turn CPU {last_clock['cpu_pct']:.0f}%" if last_clock.get("cpu_pct") else "")
+                        + ". Live sources: status:cpu, status:ram_pct, status:tokens_per_sec."
+                        + Style.RESET_ALL
+                    )
+                for _cs in ("generation_seconds", "vram_gb", "tokens_per_sec", "cpu_pct", "sys_ram_pct"):
                     _ct = tuner.triggers.get(_cs)
                     if _ct and _ct.signals:
                         st = _ct.stats()
@@ -15657,6 +15735,21 @@ def main():
                     _, _, _xcrit = ensure_command_knobs(tuner, _xw)
                     _xcrit.observe(float(_xptrig.signals[-1]))
             commands_since_reply.clear()
+            # System vitals as first-class streams: gen speed and utilization
+            # observed EVERY reply (drawable via :figure, calibratable,
+            # steerable via status:/lift: sources), credited with the turn's
+            # sense when one exists. The CPU window is exactly this
+            # generation because the sampler resets on each read.
+            _tps_val = float(tps or 0.0)
+            _cpu_now = _system_cpu_percent()
+            _sys_mem_pct = _system_memory_status()[0]
+            tuner.observe("tokens_per_sec", _tps_val)
+            tuner.observe("cpu_pct", _cpu_now)
+            tuner.observe("sys_ram_pct", _sys_mem_pct)
+            if turn_sense is not None:
+                tuner.credit("tokens_per_sec", _tps_val, turn_sense)
+                tuner.credit("cpu_pct", _cpu_now, turn_sense)
+                tuner.credit("sys_ram_pct", _sys_mem_pct, turn_sense)
             last_clock = {
                 "generation_seconds": gen_seconds,
                 "tokens_generated": int(_tg or 0),
@@ -15665,8 +15758,11 @@ def main():
                 "vram_reserved_gb": vram_reserved,
                 "vram_peak_gb": vram_peak,
                 "mem_label": mem_label,
+                "cpu_pct": _cpu_now,
+                "sys_ram_pct": _sys_mem_pct,
                 "ts": datetime.datetime.now().strftime("%H:%M:%S"),
             }
+            _LAST_CLOCK.update(last_clock)
             print(
                 Fore.CYAN
                 + f"  [Clock] {gen_seconds:.1f}s"
