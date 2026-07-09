@@ -10259,7 +10259,7 @@ def main():
                     print(
                         Fore.CYAN
                         + f"[Clock] system: RAM {_mem_pct:.0f}% used ({_mem_total - _mem_avail:.1f}/{_mem_total:.1f}GB)"
-                        + (f"; last-turn CPU {last_clock['cpu_pct']:.0f}%" if last_clock.get("cpu_pct") else "")
+                        + (f"; last-turn CPU {last_clock['cpu_pct']:.0f}%" if (last_clock or {}).get("cpu_pct") else "")
                         + ". Live sources: status:cpu, status:ram_pct, status:tokens_per_sec."
                         + Style.RESET_ALL
                     )
