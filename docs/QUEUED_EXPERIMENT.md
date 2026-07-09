@@ -1,13 +1,13 @@
 # Queued After Current Batch
 
-Do not start this while the current `run_overnight.py` GPU batch is still running.
+Do not start this while the current `archive/runners/run_overnight.py` GPU batch is still running.
 
 ## Next Experiment
 
 Run:
 
 ```powershell
-python -u .\run_after_current.py
+python -u .\archive\runners\run_after_current.py
 ```
 
 This launches:

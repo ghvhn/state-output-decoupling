@@ -234,6 +234,8 @@ def select_next_chunk(
     last_thought: str = "",
     mode: str = "order",
     earlier_thoughts: str = "",
+    probe_scores: Optional[dict[tuple[int, int], float]] = None,
+    probe_terms: Optional[list[tuple[int, str]]] = None,
 ) -> Optional[dict[str, Any]]:
     """Pick the next unread chunk across every ingested document — the
     presentation that REPLIES to the model's thought stream.
@@ -269,6 +271,29 @@ def select_next_chunk(
     ]
     if not unread:
         return None
+    # Probe scores are computed by the shell because this module deliberately
+    # has no model/torch dependency. The highest signed score is the unread
+    # chunk most toward +probes and away from -probes. Stable document/chunk
+    # order breaks ties.
+    if probe_scores:
+        scored_unread = [
+            (float(probe_scores[pair]), order, pair)
+            for order, pair in enumerate(unread)
+            if pair in probe_scores
+        ]
+        if scored_unread:
+            score, _order, (si, ci) = max(
+                scored_unread,
+                key=lambda item: (item[0], -item[1]),
+            )
+            return {
+                "session_index": si,
+                "chunk_index": ci,
+                "mode": "probes",
+                "overlap": [],
+                "probe_score": score,
+                "probe_terms": list(probe_terms or []),
+            }
     if mode == "interleave":
         si, ci = min(
             unread,
@@ -334,4 +359,14 @@ def reading_reply_note(pick: dict[str, Any]) -> str:
         return "The reading weaves between documents on its own course, not to match me."
     if pick.get("mode") == "updated":
         return "I'm reading these in the order they were last written; the text doesn't adapt to me."
+    if pick.get("mode") == "probes":
+        terms = " ".join(
+            ("+" if int(sign) >= 0 else "-") + str(name)
+            for sign, name in (pick.get("probe_terms") or [])
+        )
+        score = float(pick.get("probe_score", 0.0))
+        return (
+            f"This unread part was selected by signed probe projection ({terms}; score {score:+.3f}): "
+            "toward + probes and away from - probes."
+        )
     return "I'm reading it in order; the text doesn't adapt to me."

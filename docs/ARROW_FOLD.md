@@ -7,7 +7,7 @@ This is the next probe for the claim:
 Run:
 
 ```powershell
-python -u .\run_arrow_fold.py
+python -u .\archive\runners\run_arrow_fold.py
 ```
 
 Quick pilot:

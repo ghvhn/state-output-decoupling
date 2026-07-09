@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="690" viewBox="0 0 860 690" role="img">
+  <title>steer_map_events.svg</title>
+  <rect width="100%" height="100%" fill="#fbfcfd"/>
+  <style>
+    text { font-family: Inter, Segoe UI, Arial, sans-serif; fill: #172026; }
+    .title { font-size: 22px; font-weight: 700; }
+    .sub { font-size: 13px; fill: #5f6b73; }
+    .label { font-size: 13px; }
+    .small { font-size: 11px; fill: #5f6b73; }
+    .num { font-size: 18px; font-weight: 700; }
+  </style>
+
+  <text class="title" x="28" y="38">Steer map event activity</text>
+  <text class="sub" x="28" y="62">5460 routed synthesis events; counts by expert, action, success</text>
+
+  <text class="label" x="28" y="104">expert:unknown</text>
+  <rect x="230" y="86" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="86" width="279" height="20" rx="4" fill="#2f6fed"/>
+  <text class="num" x="774" y="103">1975</text>
+
+  <text class="label" x="28" y="138">expert:Creative</text>
+  <rect x="230" y="120" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="120" width="228" height="20" rx="4" fill="#13866f"/>
+  <text class="num" x="774" y="137">1612</text>
+
+  <text class="label" x="28" y="172">expert:Social</text>
+  <rect x="230" y="154" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="154" width="123" height="20" rx="4" fill="#c76f1b"/>
+  <text class="num" x="774" y="171">872</text>
+
+  <text class="label" x="28" y="206">expert:Analytical</text>
+  <rect x="230" y="188" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="188" width="110" height="20" rx="4" fill="#b83b4a"/>
+  <text class="num" x="774" y="205">782</text>
+
+  <text class="label" x="28" y="240">expert:efficacy</text>
+  <rect x="230" y="222" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="222" width="5" height="20" rx="4" fill="#7556c8"/>
+  <text class="num" x="774" y="239">38</text>
+
+  <text class="label" x="28" y="274">expert:profile_author_d4096</text>
+  <rect x="230" y="256" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="256" width="1" height="20" rx="4" fill="#537188"/>
+  <text class="num" x="774" y="273">10</text>
+
+  <text class="label" x="28" y="308">expert:estrangment</text>
+  <rect x="230" y="290" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="290" width="1" height="20" rx="4" fill="#a65f2b"/>
+  <text class="num" x="774" y="307">10</text>
+
+  <text class="label" x="28" y="342">action:route_Creative</text>
+  <rect x="230" y="324" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="324" width="195" height="20" rx="4" fill="#4b8f8c"/>
+  <text class="num" x="774" y="341">1379</text>
+
+  <text class="label" x="28" y="376">action:route_Social</text>
+  <rect x="230" y="358" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="358" width="108" height="20" rx="4" fill="#2f6fed"/>
+  <text class="num" x="774" y="375">763</text>
+
+  <text class="label" x="28" y="410">action:route_Analytical</text>
+  <rect x="230" y="392" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="392" width="98" height="20" rx="4" fill="#13866f"/>
+  <text class="num" x="774" y="409">692</text>
+
+  <text class="label" x="28" y="444">action:synthesis_optimizer</text>
+  <rect x="230" y="426" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="426" width="69" height="20" rx="4" fill="#c76f1b"/>
+  <text class="num" x="774" y="443">491</text>
+
+  <text class="label" x="28" y="478">action:channel_cache_delta</text>
+  <rect x="230" y="460" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="460" width="44" height="20" rx="4" fill="#b83b4a"/>
+  <text class="num" x="774" y="477">312</text>
+
+  <text class="label" x="28" y="512">action:channel_expert_branch</text>
+  <rect x="230" y="494" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="494" width="44" height="20" rx="4" fill="#7556c8"/>
+  <text class="num" x="774" y="511">312</text>
+
+  <text class="label" x="28" y="546">action:channel_organic_correctio</text>
+  <rect x="230" y="528" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="528" width="44" height="20" rx="4" fill="#537188"/>
+  <text class="num" x="774" y="545">312</text>
+
+  <text class="label" x="28" y="580">action:channel_synthesis_delta</text>
+  <rect x="230" y="562" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="562" width="44" height="20" rx="4" fill="#a65f2b"/>
+  <text class="num" x="774" y="579">312</text>
+
+  <text class="label" x="28" y="614">not_success</text>
+  <rect x="230" y="596" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="596" width="530" height="20" rx="4" fill="#4b8f8c"/>
+  <text class="num" x="774" y="613">3742</text>
+
+  <text class="label" x="28" y="648">success</text>
+  <rect x="230" y="630" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="630" width="243" height="20" rx="4" fill="#2f6fed"/>
+  <text class="num" x="774" y="647">1718</text>
+
+</svg>

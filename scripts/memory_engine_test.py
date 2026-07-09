@@ -13,9 +13,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from invariants.memory_engine import MemoryEngine, sanitize_methodology_payload
 from scripts.interactive_phenomenality import (
+    AgenticConfig,
+    apply_config_overrides,
+    backfill_scoring_names,
     build_prompt,
+    confident_probe_match,
+    expect_generation_profile,
+    expected_macro_parts,
     extract_memory_query,
+    macro_arg_header_items,
+    queue_macro_text,
+    restore_config_overrides,
     scrub_unstaged_memory_status,
+    suggest_command_catalog,
 )
 
 
@@ -222,6 +232,166 @@ def test_methodology_import_rejects_raw_clause_payloads():
     assert sanitize_methodology_payload(unsafe) is None
 
 
+def test_model_definition_and_feedback_persist_and_retrieve_together():
+    tmp, memory = make_memory()
+    try:
+        definition = memory.append_definition(
+            "probe",
+            "careful_release",
+            ":probe careful_release I test before release. || I release without testing.",
+            authored_by="model",
+        )
+        memory.append_definition_feedback(
+            definition,
+            "operator accepted and minted the probe",
+            verdict="accepted",
+            source="operator",
+        )
+        memory.append_definition_feedback(
+            definition,
+            "last turn labeled positive at signal +0.42",
+            verdict="positive",
+            source="operator",
+            metrics={"signal": 0.42},
+        )
+
+        reloaded = MemoryEngine(
+            path=memory.path,
+            scope="test_scope",
+            include_existing_in_session_view=True,
+        )
+        found = reloaded.find_definition("probe", "careful_release", authored_by="model")
+        assert found is not None
+        assert found.record_id == definition.record_id
+        feedback = reloaded.definition_feedback(found)
+        assert [r.provenance["verdict"] for r in feedback] == ["accepted", "positive"]
+
+        result = reloaded.format_tool_result([found])
+        assert "test before release" in result
+        assert "accepted and minted" in result
+        assert "labeled positive" in result
+        prompt = build_prompt("Should I use careful_release?", memory_tool_result=result)
+        assert "test before release" in prompt
+        assert "accepted and minted" in prompt
+        assert "labeled positive" in prompt
+    finally:
+        tmp.cleanup()
+
+
+def test_weak_reason_match_does_not_select_arbitrary_probe():
+    match, ranked = confident_probe_match(
+        {"neutral": 0.174, "careful_release": 0.169, "fun": 0.08}
+    )
+    assert match is None
+    assert ranked[0] == ("neutral", 0.174)
+
+    match, _ = confident_probe_match(
+        {"careful_release": 0.44, "neutral": 0.21}
+    )
+    assert match == ("careful_release", 0.44)
+
+
+def test_named_backfill_scores_only_named_probe():
+    probes = {"neutral": {}, "fun": {}, "careful_release": {}}
+    assert backfill_scoring_names(probes, ["neutral"]) == ["neutral"]
+    assert backfill_scoring_names(probes, ["neutral"], request_all=True) == list(probes)
+
+
+def test_suggest_command_catalog_lists_all_visible_user_facing_commands():
+    catalog = suggest_command_catalog(
+        hidden_commands={"hide"},
+        macro_aliases={"daily_review": "daily_review.txt"},
+        solve_macros=[("daily_review", "review the latest state", "topic")],
+    )
+    commands = [entry["command"] for entry in catalog]
+
+    assert len(commands) >= 50
+    assert len(commands) == len(set(commands))
+    assert any(cmd.startswith(":probe explain <name>") for cmd in commands)
+    assert any(cmd.startswith(":steer quality <name>") for cmd in commands)
+    assert any(cmd.startswith(":timestamps on|off|status") for cmd in commands)
+    assert any(cmd.startswith(":consider <trigger_metric>") for cmd in commands)
+    assert any(cmd.startswith(":exit | :quit") for cmd in commands)
+    assert any(cmd == ":daily_review <topic>" for cmd in commands)
+    assert not any(cmd.startswith(":hide") for cmd in commands)
+
+    probe_only = suggest_command_catalog(filter_text="probe explain")
+    assert probe_only
+    assert all("probe" in (entry["command"] + " " + entry["summary"]).lower() for entry in probe_only)
+
+    gravity = [entry["command"] for entry in suggest_command_catalog(filter_text="gravity")]
+    assert any(cmd.startswith(":steer g ") for cmd in gravity)
+    assert any(cmd.startswith(":steer family ") for cmd in gravity)
+    assert any(cmd.startswith(":steer quality ") for cmd in gravity)
+    assert any(cmd.startswith(":steer shape ") for cmd in gravity)
+
+
+def test_macro_queue_treats_hash_lines_as_comments():
+    queue = []
+    queue_macro_text(
+        ":expect file invariants/out/macros/demo.txt\n"
+        "# this is an implementation comment, not a prompt turn\n"
+        "write the profile now\n"
+        "# another comment\n"
+        ":probe demo with care || without care\n",
+        queue,
+    )
+    assert [item for item, _front in queue] == [
+        ":expect file invariants/out/macros/demo.txt",
+        "write the profile now",
+        ":probe demo with care || without care",
+    ]
+    assert all(not item.lstrip().startswith("#") for item, _front in queue)
+
+
+def test_expect_macro_uses_low_memory_utility_profile_and_restores_config():
+    cfg = AgenticConfig()
+    cfg.synthesis_enabled = True
+    cfg.cache_enabled = True
+    cfg.cache_write_enabled = True
+    cfg.max_routing_events = 4
+    cfg.max_loops = 3
+    cfg.routing_probe_terms = [{"probe": "macro_author", "weight": 1.0}]
+
+    profile = expect_generation_profile({"type": "macro", "name": "tune_tokens"})
+    assert profile is not None
+    saved = apply_config_overrides(cfg, profile["overrides"])
+    try:
+        assert cfg.synthesis_enabled is False
+        assert cfg.cache_enabled is False
+        assert cfg.cache_write_enabled is False
+        assert cfg.max_routing_events == 0
+        assert cfg.max_loops == 0
+        assert cfg.routing_probe_terms == []
+    finally:
+        restore_config_overrides(cfg, saved)
+
+    assert cfg.synthesis_enabled is True
+    assert cfg.cache_enabled is True
+    assert cfg.cache_write_enabled is True
+    assert cfg.max_routing_events == 4
+    assert cfg.max_loops == 3
+    assert cfg.routing_probe_terms == [{"probe": "macro_author", "weight": 1.0}]
+    assert expect_generation_profile({"type": "var", "name": "x"}) is None
+
+
+def test_expected_macro_parts_preserves_args_comment_without_running_comments():
+    commands, arg_specs, comments = expected_macro_parts(
+        "# args: target, amount=2\n"
+        "# comment only; never executed\n"
+        ":probe $target I track $target || I ignore $target\n"
+        "ordinary prose should not become a command\n"
+        ":steer $target $amount\n"
+    )
+
+    assert commands == [
+        ":probe $target I track $target || I ignore $target",
+        ":steer $target $amount",
+    ]
+    assert macro_arg_header_items(arg_specs) == ["target", "amount=2"]
+    assert "# comment only; never executed" in comments
+
+
 TESTS = [
     test_memory_engine_is_tool_not_prompt_builder,
     test_turns_are_logged_with_provenance_and_reloaded,
@@ -235,6 +405,13 @@ TESTS = [
     test_activation_trace_records_artifact_reference_not_tensor_blob,
     test_methodology_import_keeps_sanitized_maps_only,
     test_methodology_import_rejects_raw_clause_payloads,
+    test_model_definition_and_feedback_persist_and_retrieve_together,
+    test_weak_reason_match_does_not_select_arbitrary_probe,
+    test_named_backfill_scores_only_named_probe,
+    test_suggest_command_catalog_lists_all_visible_user_facing_commands,
+    test_macro_queue_treats_hash_lines_as_comments,
+    test_expect_macro_uses_low_memory_utility_profile_and_restores_config,
+    test_expected_macro_parts_preserves_args_comment_without_running_comments,
 ]
 
 

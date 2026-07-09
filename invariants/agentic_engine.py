@@ -538,6 +538,8 @@ def get_agentic_handles(
                                     if v is None and v_dir:
                                         v = next(iter(v_dir.values()))
                                     v_dir = v
+                                if v_dir is None:
+                                    continue
                                 v_dir = v_dir.to(h.device).to(h.dtype)
                                 h_parallel[bi, -1, :] += _cap_steer(step * (v_dir / v_dir.norm()), h_parallel[bi, -1, :])
                         
@@ -977,6 +979,109 @@ def get_agentic_handles(
         
     return handles, state
 
+class GenerationCall:
+    """One generate_agentic_text invocation, parsed and validated up front.
+
+    Centralizes the three fragile parts of spawning a generation:
+
+    - positional-argument resolution: a dict is vecs, a string is the
+      instruction; duplicates or unrecognized types are rejected by name
+      at the call boundary instead of crashing later in the tokenizer;
+    - legacy option remapping onto AgenticConfig fields (e.g.
+      allow_synthesis -> synthesis_enabled), unknown options rejected
+      before any state is touched;
+    - the per-call config mutations (chatty_log, generation deadline and
+      budget) that MUST be undone: apply()/restore() are symmetric, and
+      restore() is a safe no-op when apply() never ran, so it can sit in
+      a finally that also covers setup failures.
+    """
+
+    LEGACY_ALIASES = {"allow_synthesis": "synthesis_enabled"}
+
+    def __init__(
+        self,
+        *,
+        positional=(),
+        instruction="",
+        vecs=None,
+        config=None,
+        legacy_overrides=None,
+        max_new_tokens=None,
+        max_tool_calls=None,
+        chatty_log=None,
+        max_time=None,
+    ):
+        from invariants.config import AgenticConfig
+
+        self.config = config if config is not None else AgenticConfig()
+        self.instruction = instruction
+        self.vecs = vecs
+        self.chatty_log = chatty_log
+        self.max_time = float(max_time) if (max_time is not None and max_time > 0) else None
+        self._saved = None
+
+        for arg in positional or ():
+            if isinstance(arg, dict):
+                if self.vecs is not None:
+                    raise TypeError("generate_agentic_text received vecs more than once.")
+                self.vecs = arg
+            elif isinstance(arg, str):
+                if self.instruction:
+                    raise TypeError("generate_agentic_text received instruction more than once.")
+                self.instruction = arg
+            else:
+                raise TypeError(
+                    "generate_agentic_text can't interpret positional "
+                    f"{type(arg).__name__!r}; pass instruction=... or vecs=... by name."
+                )
+
+        config_fields = set(getattr(self.config, "__dataclass_fields__", {}).keys())
+        unknown = []
+        for key, value in (legacy_overrides or {}).items():
+            target = self.LEGACY_ALIASES.get(key, key)
+            if target in config_fields:
+                setattr(self.config, target, value)
+            else:
+                unknown.append(key)
+        if unknown:
+            raise TypeError(f"Unknown generate_agentic_text options: {', '.join(sorted(unknown))}")
+
+        self.max_new_tokens = (
+            max_new_tokens if max_new_tokens is not None else self.config.max_new_tokens
+        )
+        self.max_tool_calls = (
+            max_tool_calls if max_tool_calls is not None else getattr(self.config, "max_tool_calls", 8)
+        )
+
+    def apply(self):
+        """Mutate config for this generation, remembering what to undo."""
+        cfg = self.config
+        self._saved = {
+            "chatty_log": cfg.chatty_log,
+            "_generation_deadline": getattr(cfg, "_generation_deadline", None),
+            "_generation_budget_sec": getattr(cfg, "_generation_budget_sec", None),
+        }
+        if self.chatty_log is not None:
+            cfg.chatty_log = self.chatty_log
+        if self.max_time is not None:
+            cfg._generation_deadline = time.time() + self.max_time
+            cfg._generation_budget_sec = self.max_time
+        else:
+            cfg._generation_deadline = None
+            cfg._generation_budget_sec = None
+        return self
+
+    def restore(self):
+        """Undo apply(); safe no-op when apply() never ran."""
+        if self._saved is None:
+            return
+        cfg = self.config
+        cfg.chatty_log = self._saved["chatty_log"]
+        cfg._generation_deadline = self._saved["_generation_deadline"]
+        cfg._generation_budget_sec = self._saved["_generation_budget_sec"]
+        self._saved = None
+
+
 @torch.no_grad()
 def generate_agentic_text(
     M,
@@ -1000,70 +1105,44 @@ def generate_agentic_text(
     system_prompt=None,
     **legacy_overrides,
 ):
-    from invariants.config import AgenticConfig
-    if config is None:
-        config = AgenticConfig()
-
-    for arg in positional:
-        if isinstance(arg, dict):
-            if vecs is not None:
-                raise TypeError("generate_agentic_text received vecs more than once.")
-            vecs = arg
-        elif instruction:
-            raise TypeError("generate_agentic_text received instruction more than once.")
-        else:
-            instruction = arg
-
-    legacy_aliases = {
-        "allow_synthesis": "synthesis_enabled",
-    }
-    config_fields = set(getattr(config, "__dataclass_fields__", {}).keys())
-    for key, value in list(legacy_overrides.items()):
-        target = legacy_aliases.get(key, key)
-        if target in config_fields:
-            setattr(config, target, value)
-            legacy_overrides.pop(key)
-    if legacy_overrides:
-        unknown = ", ".join(sorted(legacy_overrides))
-        raise TypeError(f"Unknown generate_agentic_text options: {unknown}")
-    if chatty_log is not None:
-        original_chatty_log = config.chatty_log
-        config.chatty_log = chatty_log
-    else:
-        original_chatty_log = config.chatty_log
-
-    inputs = _inputs(M, instruction, pre_formatted=pre_formatted, system_prompt=system_prompt)
-    original_plen = inputs["input_ids"].shape[1]
-    
-    # We still allow max_new_tokens override here because it's per-generation
-    if max_new_tokens is None:
-        max_new_tokens = config.max_new_tokens
-    if max_tool_calls is None:
-        max_tool_calls = getattr(config, "max_tool_calls", 8)
-
-    previous_deadline = getattr(config, "_generation_deadline", None)
-    previous_budget = getattr(config, "_generation_budget_sec", None)
-    if max_time is not None and max_time > 0:
-        config._generation_deadline = time.time() + float(max_time)
-        config._generation_budget_sec = float(max_time)
-    else:
-        config._generation_deadline = None
-        config._generation_budget_sec = None
-    
-    handles, state = get_agentic_handles(
-        M,
+    call = GenerationCall(
+        positional=positional,
+        instruction=instruction,
         vecs=vecs,
-        belief_vec=belief_vec,
-        humility_vec=humility_vec,
         config=config,
-        synthesis_recorder=synthesis_recorder,
+        legacy_overrides=legacy_overrides,
+        max_new_tokens=max_new_tokens,
+        max_tool_calls=max_tool_calls,
+        chatty_log=chatty_log,
+        max_time=max_time,
     )
-    state["confidence_stabilization"] = confidence_stabilization
-    # One channel accumulator per GENERATION, surviving mid-run hook
-    # re-registration, so the emitted stats cover the whole call.
-    steer_channels = state["steer_channels"]
+    config = call.config
+    instruction = call.instruction
+    vecs = call.vecs
+    max_new_tokens = call.max_new_tokens
+    max_tool_calls = call.max_tool_calls
 
+    # Config is mutated for exactly the span of this call. Setup (tokenize,
+    # hook registration) lives INSIDE the try so a failure there can no
+    # longer leak deadline/chatty state into the next generation.
+    call.apply()
+    handles = []
     try:
+        inputs = _inputs(M, instruction, pre_formatted=pre_formatted, system_prompt=system_prompt)
+        original_plen = inputs["input_ids"].shape[1]
+        handles, state = get_agentic_handles(
+            M,
+            vecs=vecs,
+            belief_vec=belief_vec,
+            humility_vec=humility_vec,
+            config=config,
+            synthesis_recorder=synthesis_recorder,
+        )
+        state["confidence_stabilization"] = confidence_stabilization
+        # One channel accumulator per GENERATION, surviving mid-run hook
+        # re-registration, so the emitted stats cover the whole call.
+        steer_channels = state["steer_channels"]
+
         from transformers import StoppingCriteriaList, LogitsProcessorList, LogitsProcessor
         from invariants.tool_utils import (
             FinalAnswerStoppingCriteria,
@@ -1292,9 +1371,7 @@ def generate_agentic_text(
             h.remove()
         if mid_chunk_hook is not None and hasattr(mid_chunk_hook, "cleanup"):
             mid_chunk_hook.cleanup()
-        config._generation_deadline = previous_deadline
-        config.chatty_log = original_chatty_log
-        config._generation_budget_sec = previous_budget
+        call.restore()
 
     if synthesis_recorder is not None:
         # Emitted EVERY generation, even all-zero, so labeled runs carry the

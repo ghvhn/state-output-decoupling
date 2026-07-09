@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="622" viewBox="0 0 860 622" role="img">
+  <title>interactive_memory_activity.svg</title>
+  <rect width="100%" height="100%" fill="#fbfcfd"/>
+  <style>
+    text { font-family: Inter, Segoe UI, Arial, sans-serif; fill: #172026; }
+    .title { font-size: 22px; font-weight: 700; }
+    .sub { font-size: 13px; fill: #5f6b73; }
+    .label { font-size: 13px; }
+    .small { font-size: 11px; fill: #5f6b73; }
+    .num { font-size: 18px; font-weight: 700; }
+  </style>
+
+  <text class="title" x="28" y="38">Interactive memory activity</text>
+  <text class="sub" x="28" y="62">8606 records across 176 sessions; top kinds, roles, and tags</text>
+
+  <text class="label" x="28" y="104">kind:event</text>
+  <rect x="230" y="86" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="86" width="329" height="20" rx="4" fill="#2f6fed"/>
+  <text class="num" x="774" y="103">4775</text>
+
+  <text class="label" x="28" y="138">kind:internal_trace</text>
+  <rect x="230" y="120" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="120" width="188" height="20" rx="4" fill="#13866f"/>
+  <text class="num" x="774" y="137">2733</text>
+
+  <text class="label" x="28" y="172">kind:turn</text>
+  <rect x="230" y="154" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="154" width="64" height="20" rx="4" fill="#c76f1b"/>
+  <text class="num" x="774" y="171">929</text>
+
+  <text class="label" x="28" y="206">kind:self_concept_trace</text>
+  <rect x="230" y="188" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="188" width="11" height="20" rx="4" fill="#b83b4a"/>
+  <text class="num" x="774" y="205">168</text>
+
+  <text class="label" x="28" y="240">kind:methodology</text>
+  <rect x="230" y="222" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="222" width="0" height="20" rx="4" fill="#7556c8"/>
+  <text class="num" x="774" y="239">1</text>
+
+  <text class="label" x="28" y="274">role:none</text>
+  <rect x="230" y="256" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="256" width="530" height="20" rx="4" fill="#537188"/>
+  <text class="num" x="774" y="273">7677</text>
+
+  <text class="label" x="28" y="308">role:user</text>
+  <rect x="230" y="290" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="290" width="33" height="20" rx="4" fill="#a65f2b"/>
+  <text class="num" x="774" y="307">492</text>
+
+  <text class="label" x="28" y="342">role:assistant</text>
+  <rect x="230" y="324" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="324" width="30" height="20" rx="4" fill="#4b8f8c"/>
+  <text class="num" x="774" y="341">437</text>
+
+  <text class="label" x="28" y="376">tag:internal</text>
+  <rect x="230" y="358" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="358" width="200" height="20" rx="4" fill="#2f6fed"/>
+  <text class="num" x="774" y="375">2901</text>
+
+  <text class="label" x="28" y="410">tag:trace</text>
+  <rect x="230" y="392" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="392" width="188" height="20" rx="4" fill="#13866f"/>
+  <text class="num" x="774" y="409">2733</text>
+
+  <text class="label" x="28" y="444">tag:document</text>
+  <rect x="230" y="426" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="426" width="180" height="20" rx="4" fill="#c76f1b"/>
+  <text class="num" x="774" y="443">2615</text>
+
+  <text class="label" x="28" y="478">tag:routing_trace</text>
+  <rect x="230" y="460" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="460" width="158" height="20" rx="4" fill="#b83b4a"/>
+  <text class="num" x="774" y="477">2291</text>
+
+  <text class="label" x="28" y="512">tag:routing</text>
+  <rect x="230" y="494" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="494" width="158" height="20" rx="4" fill="#7556c8"/>
+  <text class="num" x="774" y="511">2291</text>
+
+  <text class="label" x="28" y="546">tag:expert_choice</text>
+  <rect x="230" y="528" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="528" width="158" height="20" rx="4" fill="#537188"/>
+  <text class="num" x="774" y="545">2291</text>
+
+  <text class="label" x="28" y="580">tag:document_chunk</text>
+  <rect x="230" y="562" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="562" width="118" height="20" rx="4" fill="#a65f2b"/>
+  <text class="num" x="774" y="579">1718</text>
+
+</svg>

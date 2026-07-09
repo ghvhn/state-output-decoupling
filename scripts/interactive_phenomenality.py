@@ -1,3 +1,4 @@
+import ast
 import datetime
 import glob
 import json
@@ -116,11 +117,1129 @@ _PROBES_SHOW_ACT = False
 _PROBES_SHOW_TALK = True
 _last_completion = None
 _pending_expect = None
+PROBE_RAW_HISTORY_PATH = os.path.join(ROOT, "invariants", "out", "probe_raw_history.json")
+DEFAULT_COMMAND_PROMPT_PROBES = frozenset({
+    "command_author",      # legacy :suggest helper
+    "persona_author",
+    "persona_selector",
+    "profile_author",
+    "macro_author",
+    "solve_goal",
+    "doc_rewriter",
+    "premise_author",
+})
+
+
+def load_probe_raw_histories(path=PROBE_RAW_HISTORY_PATH):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        source = payload.get("probes", payload) if isinstance(payload, dict) else {}
+        return {
+            str(name): [float(value) for value in list(values)[-40:]]
+            for name, values in source.items()
+            if isinstance(values, list)
+        }
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def save_probe_raw_histories(probes, path=PROBE_RAW_HISTORY_PATH):
+    """Persist raw projection baselines once per scoring pass, not per probe."""
+    try:
+        path = os.fspath(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        payload = {
+            "version": 1,
+            "probes": {
+                str(name): [float(value) for value in list(data.get("history") or [])[-40:]]
+                for name, data in probes.items()
+            },
+        }
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, sort_keys=True)
+        os.replace(tmp, path)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def centered_probe_observation(pdata, raw):
+    """Append a raw projection and return its centered signal when baselined.
+
+    None means this was the first observation: it seeds the baseline and must
+    not masquerade as a genuine zero-valued centered measurement.
+
+    A probe marked frozen keeps scoring against its existing baseline but the
+    baseline itself stops moving -- the inertial half of the gravity split, so
+    a heavy mass cannot habituate to the motion it itself induces.
+    """
+    hist = pdata["history"]
+    if not hist:
+        if not pdata.get("frozen"):
+            hist.append(float(raw))
+        return None
+    sig = float(raw) - (sum(hist) / len(hist))
+    if not pdata.get("frozen"):
+        hist.append(float(raw))
+    return sig
+
+
+def probe_is_released(pdata):
+    return bool((pdata or {}).get("released", False))
+
+
+def set_probe_released(probes, name, released=True, probe_dir=None):
+    """Make a probe observational-only while keeping it visible and persisted."""
+    if name not in probes:
+        return False
+    probes[name]["released"] = bool(released)
+    directory = probe_dir or os.path.join(ROOT, "invariants", "out", "probes")
+    path = os.path.join(directory, f"{name}.pt")
+    if os.path.isfile(path):
+        try:
+            payload = torch.load(path, weights_only=True)
+            payload["released"] = bool(released)
+            torch.save(payload, path)
+        except Exception:
+            pass
+    return True
+
+
+def set_probe_field(probes, name, key, value, probe_dir=None):
+    """Set a per-probe physics coefficient (mass, frozen, ...) and persist it."""
+    if name not in probes:
+        return False
+    probes[name][key] = value
+    directory = probe_dir or os.path.join(ROOT, "invariants", "out", "probes")
+    path = os.path.join(directory, f"{name}.pt")
+    if os.path.isfile(path):
+        try:
+            payload = torch.load(path, weights_only=True)
+            payload[key] = value
+            torch.save(payload, path)
+        except Exception:
+            pass
+    return True
+
+
+# --- gravity prioritize: probes as masses in latent space -------------------
+# Instead of pinning one direction and shoving with constant alpha, every
+# probe becomes a mass sitting at its unit direction on the residual sphere.
+# Each forward pass, every token's state is pulled along the sphere tangent
+# toward (or, for negative mass, away from) each probe, weighted by
+# mass / ((1 - cos) + eps)^2 -- an inverse-square law in cosine distance, so
+# the force depends on WHERE the state is, not on a fixed target. eps smooths
+# capture: as the state approaches a mass the tangent vanishes, so it settles
+# instead of oscillating. The gravitational and inertial halves are decoupled
+# per probe: mass sets the pull it exerts; frozen pins its own baseline.
+GRAVITY_EPS = 0.05            # capture radius in (1 - cos); force fades smoothly inside it
+GRAVITY_NORM_FRACTION = 0.05  # saturated field strength per unit G, as a fraction of each token's residual norm
+
+
+def gravity_field_masses(probes, tuner):
+    """Resolve each probe to a signed mass: an explicit ':steer mass' override
+    wins; otherwise the probe's evidence-weighted lift (negative lift = a
+    repulsor). Masses are normalized so total |mass| = 1; global, personal,
+    family, and layer G then carry magnitude while the field remains stable as
+    probes accumulate."""
+    ranked = None
+    masses = []
+    configured = steer_bodies()["fields"]
+    set_laws = steer_bodies()["sets"]
+    quality_layer_member = any(
+        node.startswith("layer:")
+        and node not in set(law.get("excluded") or [])
+        for law in set_laws.values()
+        for node in (law.get("members") or {})
+    )
+    layer_g_configured = any(
+        node.startswith("layer:") and cfg.get("g") is not None
+        for node, cfg in configured.items()
+    )
+    for name, pdata in probes.items():
+        dirs = pdata.get("direction") or {}
+        node_key = f"probe:{name}"
+        if not dirs or probe_is_released(pdata) or (configured.get(node_key) or {}).get("excluded"):
+            continue  # released probes are observational-only: no force
+        m = pdata.get("mass")
+        if m is None:
+            if ranked is None:
+                ranked = {r["name"]: r for r in rank_probes(probes, tuner)}
+            lift = (ranked.get(name) or {}).get("lift")
+            # A personal/family G is an explicit request for this probe to be a
+            # field body. Before it has enough credited outcomes for a live
+            # lift, give it neutral unit mass rather than silently omitting it.
+            personal = configured.get(node_key) or {}
+            quality_member = any(
+                node_key in (law.get("members") or {})
+                and node_key not in set(law.get("excluded") or [])
+                for law in set_laws.values()
+            )
+            m = float(lift) if lift is not None else (
+                1.0 if personal.get("g") is not None or personal.get("family")
+                or layer_g_configured or quality_member or quality_layer_member
+                else 0.0
+            )
+        m = float(m)
+        if abs(m) < 1e-9:
+            continue
+        masses.append((name, m, dirs))
+    for name, body in steer_bodies()["anchors"].items():
+        if (configured.get(f"anchor:{name}") or {}).get("excluded"):
+            continue
+        m = float(body.get("mass", 1.0) or 0.0)
+        dirs = body.get("dirs") or {}
+        if abs(m) < 1e-9 or not dirs:
+            continue
+        masses.append((f"@{name}", m, dirs))
+    total = sum(abs(m) for _n, m, _d in masses)
+    if total <= 0:
+        return []
+    return [(n, m / total, d) for n, m, d in masses]
+
+
+# --- typed bodies: anchors, poles, and interaction laws ----------------------
+# Anchors are precision masses: exact points in latent space (captured states
+# or copied probe directions), pinned by default. Poles type the bodies;
+# a law couples two pole families -- magnetism with more poles and more kinds:
+# families interact only where a law says so, same-sign repels and opposite
+# attracts (times the law's k, which can flip it). Laws accelerate BODIES,
+# never the instruments: only unfrozen anchors move; probe directions are
+# sensors and stay put. The live state feels every body only through gravity.
+STEER_BODIES_PATH = os.path.join(ROOT, "invariants", "out", "steer_bodies.pt")
+_STEER_BODIES = {
+    "loaded": False,
+    "anchors": {},
+    "probe_poles": {},
+    "laws": {},
+    "fields": {},
+    "g_families": {},
+    "qualities": {},
+    "sets": {},
+}
+
+
+def steer_bodies():
+    """Lazy-load the persisted bodies state: anchors {name: {dirs, mass,
+    frozen, poles}}, probe_poles {probe: {family: +/-1}}, laws {(a, b): k},
+    fields {node: {g, time, shape, family, excluded}}, named g_families,
+    quality formulas, and law-defined sets with per-member compliance/time."""
+    if not _STEER_BODIES["loaded"]:
+        _STEER_BODIES["loaded"] = True
+        try:
+            if os.path.isfile(STEER_BODIES_PATH):
+                payload = torch.load(STEER_BODIES_PATH, weights_only=True)
+                _STEER_BODIES["anchors"] = payload.get("anchors", {}) or {}
+                _STEER_BODIES["probe_poles"] = payload.get("probe_poles", {}) or {}
+                _STEER_BODIES["laws"] = {
+                    tuple(k.split("|", 1)): float(v)
+                    for k, v in (payload.get("laws", {}) or {}).items()
+                }
+                _STEER_BODIES["fields"] = payload.get("fields", {}) or {}
+                _STEER_BODIES["g_families"] = payload.get("g_families", {}) or {}
+                _STEER_BODIES["qualities"] = payload.get("qualities", {}) or {}
+                _STEER_BODIES["sets"] = payload.get("sets", {}) or {}
+        except Exception:
+            pass
+    for key in ("anchors", "probe_poles", "laws", "fields", "g_families", "qualities", "sets"):
+        _STEER_BODIES.setdefault(key, {})
+    return _STEER_BODIES
+
+
+def save_steer_bodies():
+    try:
+        state = steer_bodies()
+        os.makedirs(os.path.dirname(STEER_BODIES_PATH), exist_ok=True)
+        torch.save({
+            "anchors": state["anchors"],
+            "probe_poles": state["probe_poles"],
+            "laws": {"|".join(k): float(v) for k, v in state["laws"].items()},
+            "fields": state["fields"],
+            "g_families": state["g_families"],
+            "qualities": state["qualities"],
+            "sets": state["sets"],
+        }, STEER_BODIES_PATH)
+    except Exception:
+        pass
+
+
+def initialize_field_system(tuner, default_g=None):
+    """Load/migrate every flexible-field surface and enable the field engine.
+
+    This activates capability, not arbitrary behavior: existing personal Gs,
+    families, qualities, sets, clocks, formulas, laws, and exclusions remain
+    authoritative. It does not invent laws, unfreeze anchors, or force a
+    nonzero law-step/doppler value.
+    """
+    state = steer_bodies()
+    coefficient_defaults = {
+        "prioritize_alpha": 0.0,
+        "prioritize_gravity": 0.0,
+        "gravity_doppler": 0.0,
+        "gravity_law_step": 0.0,
+    }
+    for name, default in coefficient_defaults.items():
+        tuner.register(name, default, kind="coefficient")
+        tuner.triggers[name].kind = "coefficient"
+    tuner.register("gravity_potential", 0.0, kind="threshold")
+    tuner.register("gravity_time", 1.0, kind="threshold")
+    if default_g is not None:
+        tuner.set("prioritize_alpha", float(default_g))
+    tuner.set("prioritize_gravity", 1.0)
+    save_steer_bodies()  # persist newly added schema keys for older payloads
+    return {
+        "default_g": float(tuner.get("prioritize_alpha", 0.0)),
+        "anchors": len(state["anchors"]),
+        "families": len(state["g_families"]),
+        "qualities": len(state["qualities"]),
+        "sets": len(state["sets"]),
+        "fields": len(state["fields"]),
+        "laws": len(state["laws"]),
+        "excluded": sum(1 for cfg in state["fields"].values() if cfg.get("excluded")),
+    }
+
+
+def parse_pole_spec(spec):
+    """'truth+' / 'truth-' / 'truth' -> (family, sign). Bare family = +."""
+    s = str(spec or "").strip().lower()
+    sign = 1
+    if s.endswith("+"):
+        s = s[:-1]
+    elif s.endswith("-"):
+        s = s[:-1]
+        sign = -1
+    s = re.sub(r"[^a-z0-9_]", "_", s).strip("_")
+    return (s, sign) if s else (None, 0)
+
+
+def parse_field_source(raw, scale=1.0, offset=0.0):
+    """Parse a live coefficient source used by personal G and local clocks.
+
+    Sources are deliberately small and inspectable: a constant, the global G,
+    a probe's latest centered reading, a tuner knob, a process status, a named
+    G family, or a trigger's OUTCOME channel (lift:<trigger> = fired-vs-unfired
+    outcome lift; outcome:<trigger> = rolling mean of recent credited
+    outcomes) -- outcomes exert force, not just appear on maps. Scale and
+    offset let unlike units be aligned explicitly.
+    """
+    text = str(raw or "").strip()
+    try:
+        return {
+            "kind": "constant",
+            "value": float(text),
+            "scale": float(scale),
+            "offset": float(offset),
+        }
+    except ValueError:
+        pass
+    low = text.lower()
+    if low in ("global", "g", "prioritize_alpha"):
+        kind, name = "global", "prioritize_alpha"
+    elif ":" in low:
+        kind, name = low.split(":", 1)
+        kind = {"gfamily": "family", "memory": "status"}.get(kind, kind)
+    else:
+        return None
+    if kind not in ("probe", "knob", "status", "family", "layer", "lift", "outcome") or not name:
+        return None
+    return {
+        "kind": kind,
+        "name": name,
+        "scale": float(scale),
+        "offset": float(offset),
+    }
+
+
+def format_field_source(spec):
+    if not spec:
+        return "global"
+    if spec.get("kind") == "constant":
+        base = f"{float(spec.get('value', 0.0)):g}"
+    elif spec.get("kind") == "global":
+        base = "global"
+    else:
+        base = f"{spec.get('kind')}:{spec.get('name')}"
+    scale = float(spec.get("scale", 1.0))
+    offset = float(spec.get("offset", 0.0))
+    if scale != 1.0 or offset != 0.0:
+        base += f" * {scale:g} + {offset:g}"
+    return base
+
+
+def field_source_error(spec, probes=None, tuner=None, families=None):
+    """Return a precise typo/error for a live source, or None when usable."""
+    if not spec:
+        return "empty source"
+    kind, name = spec.get("kind"), spec.get("name")
+    if kind == "probe" and name not in (probes or {}):
+        return f"no probe named '{name}'"
+    if kind == "knob" and (tuner is None or name not in tuner.triggers):
+        return f"no knob/stream named '{name}'"
+    if kind in ("lift", "outcome") and (
+        tuner is None
+        or (name not in tuner.triggers and f"probe_{name}" not in tuner.triggers)
+    ):
+        return f"no credited trigger named '{name}' ({kind}: reads its outcome channel)"
+    if kind == "family" and name not in (families or {}):
+        return f"no G family named '{name}'"
+    if kind == "status" and name not in {
+        "ram", "vram", "memory", "memory_live",
+        "ram_reserved", "vram_reserved", "memory_reserved",
+        "ram_peak", "vram_peak", "memory_peak",
+        "cuda", "gpu", "gravity_time", "time",
+        "gravity_potential", "potential",
+    }:
+        return f"unknown status '{name}'"
+    if kind == "layer":
+        try:
+            if int(name) < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return f"invalid layer '{name}'"
+    return None
+
+
+def latest_probe_field_value(name, probes, tuner):
+    trig = tuner.triggers.get(f"probe_{name}") if tuner is not None else None
+    if trig is not None and trig.signals:
+        return float(trig.signals[-1])
+    pdata = (probes or {}).get(name) or {}
+    hist = list(pdata.get("history") or [])
+    if len(hist) >= 2:
+        return float(hist[-1]) - (sum(hist[:-1]) / len(hist[:-1]))
+    return 0.0
+
+
+def field_status_value(name):
+    """Read a live, local status without adding a hard psutil dependency."""
+    live, reserved, peak, label = _memory_footprint_gb()
+    key = str(name or "").lower()
+    if key in ("ram", "vram", "memory", "memory_live"):
+        return float(live)
+    if key in ("ram_reserved", "vram_reserved", "memory_reserved"):
+        return float(reserved)
+    if key in ("ram_peak", "vram_peak", "memory_peak"):
+        return float(peak)
+    if key in ("cuda", "gpu"):
+        return 1.0 if torch.cuda.is_available() else 0.0
+    if key in ("gravity_time", "time"):
+        return float(_GRAVITY_STATE.get("time") or 1.0)
+    if key in ("gravity_potential", "potential"):
+        return float(_GRAVITY_STATE.get("phi") or 0.0)
+    return 0.0
+
+
+def trigger_outcome_value(kind, name, tuner, window=12):
+    """Outcome as a live force. lift:<trigger> = its current fired-vs-unfired
+    outcome lift (0 until both sides have evidence); outcome:<trigger> = the
+    mean of its last `window` credited outcomes. The credit channel stays
+    observe-only on the threshold itself -- THIS is the explicit route by
+    which outcomes push back on the field, as a G/time/strength source."""
+    if tuner is None:
+        return 0.0
+    trig = tuner.triggers.get(name) or tuner.triggers.get(f"probe_{name}")
+    if trig is None or not trig.outcomes:
+        return 0.0
+    if kind == "lift":
+        lift = trig.outcome_stats().get("lift")
+        return float(lift) if lift is not None else 0.0
+    tail = list(trig.outcomes)[-max(1, int(window)):]
+    return sum(float(o) for _s, o in tail) / len(tail)
+
+
+def resolve_field_source(
+    spec, probes=None, tuner=None, families=None, fields=None, _seen=None, channel="g"
+):
+    if not spec:
+        return float(tuner.get("prioritize_alpha", 0.0)) if tuner is not None else 0.0
+    kind = spec.get("kind")
+    if kind == "constant":
+        base = float(spec.get("value", 0.0))
+    elif kind == "global":
+        base = float(tuner.get("prioritize_alpha", 0.0)) if tuner is not None else 0.0
+    elif kind == "probe":
+        base = latest_probe_field_value(spec.get("name"), probes, tuner)
+    elif kind == "knob":
+        base = float(tuner.get(spec.get("name"), 0.0)) if tuner is not None else 0.0
+    elif kind == "status":
+        base = field_status_value(spec.get("name"))
+    elif kind in ("lift", "outcome"):
+        base = trigger_outcome_value(kind, spec.get("name"), tuner)
+    elif kind == "layer":
+        name = str(spec.get("name", "0"))
+        seen = set(_seen or ())
+        marker = f"layer:{name}"
+        if marker in seen:
+            return 1.0
+        seen.add(marker)
+        layer_cfg = (fields or {}).get(marker) or {}
+        if layer_cfg.get("time") is None:
+            base = 1.0
+        else:
+            base = resolve_field_source(
+                layer_cfg["time"], probes, tuner, families, fields, seen, "time"
+            )
+    elif kind == "family":
+        name = spec.get("name")
+        seen = set(_seen or ())
+        if name in seen:
+            return 0.0
+        seen.add(name)
+        fam = (families or {}).get(name) or {}
+        inherited = fam.get("time") if channel == "time" else fam.get("g")
+        if inherited is None and channel == "time":
+            inherited = {"kind": "constant", "value": 1.0}
+        base = resolve_field_source(
+            inherited, probes, tuner, families=families, fields=fields,
+            _seen=seen, channel=channel,
+        )
+    else:
+        base = 0.0
+    return base * float(spec.get("scale", 1.0)) + float(spec.get("offset", 0.0))
+
+
+def canonical_field_node(raw, probes=None, anchors=None, families=None):
+    """Return the persisted node key for a probe, anchor, layer, or family."""
+    text = str(raw or "").strip()
+    low = text.lower()
+    probes = probes or {}
+    anchors = anchors or {}
+    families = families or {}
+    if text in probes:
+        return f"probe:{text}"
+    if low.startswith("probe:") and text.split(":", 1)[1] in probes:
+        return f"probe:{text.split(':', 1)[1]}"
+    aname = re.sub(r"[^a-z0-9_]", "_", text.lstrip("@").lower()).strip("_")
+    if text.startswith("@") and aname in anchors:
+        return f"anchor:{aname}"
+    if low.startswith("anchor:") and aname.split("_", 1)[-1] in anchors:
+        return f"anchor:{aname.split('_', 1)[-1]}"
+    if low.startswith("layer:"):
+        try:
+            layer = int(low.split(":", 1)[1])
+            return f"layer:{layer}" if layer >= 0 else None
+        except ValueError:
+            return None
+    if low.startswith(("family:", "gfamily:")):
+        name = low.split(":", 1)[1]
+        return f"family:{name}" if name in families else None
+    return None
+
+
+def field_target_config(raw, probes=None, create=False):
+    bodies = steer_bodies()
+    key = canonical_field_node(
+        raw,
+        probes=probes,
+        anchors=bodies["anchors"],
+        families=bodies["g_families"],
+    )
+    if not key:
+        return None, None
+    if key.startswith("family:"):
+        name = key.split(":", 1)[1]
+        return key, bodies["g_families"].get(name)
+    if create:
+        return key, bodies["fields"].setdefault(key, {})
+    return key, bodies["fields"].get(key)
+
+
+def parse_field_shape(tokens):
+    """Parse a radial influence profile in cosine-distance coordinates."""
+    if not tokens:
+        return None
+    kind = tokens[0].lower()
+    aliases = {"inverse": "point", "inverse_square": "point", "hollow": "shell", "holoid": "shell"}
+    kind = aliases.get(kind, kind)
+    try:
+        if kind == "point":
+            return {"kind": "point"}
+        if kind == "gaussian" and len(tokens) >= 2:
+            return {"kind": "gaussian", "width": max(float(tokens[1]), 1e-4)}
+        if kind == "shell" and len(tokens) >= 3:
+            return {
+                "kind": "shell",
+                "radius": max(float(tokens[1]), 0.0),
+                "width": max(float(tokens[2]), 1e-4),
+            }
+        if kind == "plateau" and len(tokens) >= 3:
+            return {
+                "kind": "plateau",
+                "radius": max(float(tokens[1]), 0.0),
+                "edge": max(float(tokens[2]), 1e-4),
+            }
+    except ValueError:
+        return None
+    return None
+
+
+def format_field_shape(shape):
+    shape = shape or {"kind": "point"}
+    kind = shape.get("kind", "point")
+    if kind == "gaussian":
+        return f"gaussian width={float(shape.get('width', 0.2)):g}"
+    if kind == "shell":
+        return (
+            f"shell radius={float(shape.get('radius', 0.5)):g} "
+            f"width={float(shape.get('width', 0.1)):g}"
+        )
+    if kind == "plateau":
+        return (
+            f"plateau radius={float(shape.get('radius', 0.5)):g} "
+            f"edge={float(shape.get('edge', 0.1)):g}"
+        )
+    return "point inverse-square"
+
+
+def _gravity_kernel(distance, shape, eps=GRAVITY_EPS):
+    """Signed radial profile. A shell reverses inside its radius, so its
+    equilibrium is a hollow surface rather than the original center point."""
+    shape = shape or {"kind": "point"}
+    kind = shape.get("kind", "point")
+    if kind == "gaussian":
+        width = max(float(shape.get("width", 0.2)), 1e-4)
+        return torch.exp(-0.5 * (distance / width) ** 2)
+    if kind == "shell":
+        radius = max(float(shape.get("radius", 0.5)), 0.0)
+        width = max(float(shape.get("width", 0.1)), 1e-4)
+        delta = distance - radius
+        z = delta / width
+        return z * torch.exp(-0.5 * z ** 2)
+    if kind == "plateau":
+        radius = max(float(shape.get("radius", 0.5)), 0.0)
+        edge = max(float(shape.get("edge", 0.1)), 1e-4)
+        return torch.sigmoid((radius - distance) / edge)
+    return 1.0 / (distance + eps) ** 2
+
+
+QUALITY_FORMULA_DEFAULT = "1/(d+0.05)**2"
+_QUALITY_BINOPS = {
+    ast.Add: lambda a, b: a + b,
+    ast.Sub: lambda a, b: a - b,
+    ast.Mult: lambda a, b: a * b,
+    ast.Div: lambda a, b: a / b,
+    ast.Pow: lambda a, b: a ** b,
+}
+_QUALITY_UNARYOPS = {
+    ast.UAdd: lambda a: a,
+    ast.USub: lambda a: -a,
+}
+
+
+def _quality_formula_node(node, d):
+    """Evaluate an allowlisted scalar expression over cosine distance `d`."""
+    if isinstance(node, ast.Expression):
+        return _quality_formula_node(node.body, d)
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return float(node.value)
+    if isinstance(node, ast.Name) and node.id == "d":
+        return d
+    if isinstance(node, ast.BinOp) and type(node.op) in _QUALITY_BINOPS:
+        return _QUALITY_BINOPS[type(node.op)](
+            _quality_formula_node(node.left, d),
+            _quality_formula_node(node.right, d),
+        )
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _QUALITY_UNARYOPS:
+        return _QUALITY_UNARYOPS[type(node.op)](_quality_formula_node(node.operand, d))
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        args = [_quality_formula_node(arg, d) for arg in node.args]
+        if node.func.id == "abs" and len(args) == 1:
+            return torch.abs(args[0]) if torch.is_tensor(args[0]) else abs(args[0])
+        if node.func.id == "exp" and len(args) == 1:
+            return torch.exp(torch.as_tensor(args[0], device=d.device, dtype=d.dtype))
+        if node.func.id == "sqrt" and len(args) == 1:
+            return torch.sqrt(torch.as_tensor(args[0], device=d.device, dtype=d.dtype).clamp_min(0))
+        if node.func.id == "log" and len(args) == 1:
+            return torch.log(torch.as_tensor(args[0], device=d.device, dtype=d.dtype).clamp_min(1e-12))
+        if node.func.id == "tanh" and len(args) == 1:
+            return torch.tanh(torch.as_tensor(args[0], device=d.device, dtype=d.dtype))
+        if node.func.id == "sigmoid" and len(args) == 1:
+            return torch.sigmoid(torch.as_tensor(args[0], device=d.device, dtype=d.dtype))
+    raise ValueError("formula may use only d, numbers, + - * / **, and abs/exp/sqrt/log/tanh/sigmoid")
+
+
+def quality_formula_value(expr, distance):
+    """Safe tensor formula with finite saturation before the outer steer cap."""
+    tree = ast.parse(str(expr or QUALITY_FORMULA_DEFAULT), mode="eval")
+    value = _quality_formula_node(tree, distance)
+    value = torch.as_tensor(value, device=distance.device, dtype=distance.dtype)
+    return torch.nan_to_num(value, nan=0.0, posinf=1e6, neginf=-1e6).clamp(-1e6, 1e6)
+
+
+def validate_quality_formula(expr):
+    try:
+        quality_formula_value(expr, torch.tensor(0.37))
+        return None
+    except (SyntaxError, ValueError, TypeError, ZeroDivisionError) as exc:
+        return str(exc)
+
+
+def parse_time_vector(raw):
+    try:
+        values = [float(v) for v in str(raw or "").split(",") if str(v).strip()]
+    except ValueError:
+        return None
+    return values if values else None
+
+
+def time_vector_value(values, index):
+    values = list(values or [1.0])
+    return float(values[min(max(int(index), 0), len(values) - 1)])
+
+
+def quality_terms_for_body(body_key, probes=None, tuner=None):
+    """Resolve every non-excluded set law that includes this body."""
+    bodies = steer_bodies()
+    terms = []
+    for set_name, law in sorted(bodies["sets"].items()):
+        if body_key in set(law.get("excluded") or []):
+            continue
+        member = (law.get("members") or {}).get(body_key)
+        if not member:
+            continue
+        quality_name = law.get("quality")
+        quality = bodies["qualities"].get(quality_name) or {}
+        if not quality:
+            continue
+        strength = resolve_field_source(
+            quality.get("strength") or {"kind": "constant", "value": 1.0},
+            probes, tuner, bodies["g_families"], bodies["fields"],
+        )
+        compliance = resolve_field_source(
+            member.get("compliance") or {"kind": "constant", "value": 1.0},
+            probes, tuner, bodies["g_families"], bodies["fields"],
+        )
+        amplitude = float(strength) * float(compliance)
+        if abs(amplitude) < 1e-12:
+            continue
+        terms.append({
+            "set": set_name,
+            "quality": quality_name,
+            "formula": quality.get("formula") or QUALITY_FORMULA_DEFAULT,
+            "amplitude": amplitude,
+            "time_vector": list(member.get("time_vector") or [1.0]),
+        })
+    return terms
+
+
+def field_entry_config(body_name, layer, probes=None, tuner=None):
+    """Resolve personal -> family -> layer settings for one mass at one layer."""
+    bodies = steer_bodies()
+    fields = bodies["fields"]
+    families = bodies["g_families"]
+    body_key = (
+        f"anchor:{body_name[1:]}" if str(body_name).startswith("@")
+        else f"probe:{body_name}"
+    )
+    own = fields.get(body_key) or {}
+    fam = families.get(own.get("family")) or {}
+    layer_cfg = fields.get(f"layer:{int(layer)}") or {}
+
+    g_spec = own.get("g")
+    if g_spec is None:
+        g_spec = fam.get("g")
+    layer_g = layer_cfg.get("g")
+    if g_spec is None and layer_g is not None:
+        # A layer can own G even when global G is zero.
+        g = resolve_field_source(layer_g, probes, tuner, families, fields)
+    else:
+        if g_spec is None:
+            g_spec = {"kind": "global", "name": "prioritize_alpha"}
+        g = resolve_field_source(g_spec, probes, tuner, families, fields)
+    if g_spec is not None and layer_g is not None:
+        # When both are explicit, the layer is a gate/multiplier over personal G.
+        g *= resolve_field_source(layer_cfg["g"], probes, tuner, families, fields)
+
+    time_spec = own.get("time")
+    if time_spec is None:
+        time_spec = fam.get("time")
+    tau = resolve_field_source(
+        time_spec, probes, tuner, families, fields, channel="time"
+    ) if time_spec else 1.0
+    if layer_cfg.get("time") is not None:
+        tau *= resolve_field_source(
+            layer_cfg["time"], probes, tuner, families, fields, channel="time"
+        )
+    tau = max(0.05, min(20.0, float(tau)))
+
+    shape = own.get("shape") or fam.get("shape") or layer_cfg.get("shape") or {"kind": "point"}
+    qualities = (
+        quality_terms_for_body(body_key, probes, tuner)
+        + quality_terms_for_body(f"layer:{int(layer)}", probes, tuner)
+    )
+    return {
+        "g": float(g),
+        "time": tau,
+        "shape": shape,
+        "family": own.get("family"),
+        "qualities": qualities,
+        "excluded": bool(own.get("excluded") or layer_cfg.get("excluded")),
+    }
+
+
+def law_coupling(poles_i, poles_j, laws):
+    """Net signed coupling between two typed bodies. For each declared law
+    (famA, famB, k): contribution = -sign_i * sign_j * k, so with k > 0 like
+    poles repel and unlike attract; k < 0 flips the convention. Families
+    without a law exert nothing on each other -- selective interaction."""
+    total = 0.0
+    for (fa, fb), k in laws.items():
+        for a, b in ((fa, fb), (fb, fa)) if fa != fb else ((fa, fb),):
+            si = (poles_i or {}).get(a)
+            sj = (poles_j or {}).get(b)
+            if si and sj:
+                total += -float(si) * float(sj) * float(k)
+    return total
+
+
+def apply_body_laws(tuner, probes=None, eps=GRAVITY_EPS):
+    """One Euler step of the typed inter-body forces, moving only UNFROZEN
+    anchors (per-layer, on the unit sphere; same inverse-square kernel as the
+    field). Step size = the gravity_law_step knob; 0 = statics only."""
+    step = float(tuner.get("gravity_law_step", 0.0)) if tuner is not None else 0.0
+    if step <= 0:
+        return 0
+    bodies = steer_bodies()
+    anchors = bodies["anchors"]
+    laws = bodies["laws"]
+    if not anchors or not laws:
+        return 0
+    # sources: every anchor, plus typed probes as immobile sources
+    sources = []
+    for name, a in anchors.items():
+        sources.append((f"@{name}", a.get("poles") or {}, float(a.get("mass", 1.0) or 0.0), a.get("dirs") or {}))
+    for pname, ppoles in bodies["probe_poles"].items():
+        pdata = (probes or {}).get(pname)
+        if not pdata or not ppoles:
+            continue
+        pm = pdata.get("mass")
+        sources.append((pname, ppoles, float(pm) if pm is not None else 1.0,
+                        pdata.get("direction") or {}))
+    moved = 0
+    for name, a in anchors.items():
+        if a.get("frozen", True):
+            continue
+        poles_i = a.get("poles") or {}
+        dirs = a.get("dirs") or {}
+        if not poles_i or not dirs:
+            continue
+        for L, x in list(dirs.items()):
+            xt = x if torch.is_tensor(x) else torch.as_tensor(x)
+            xt = xt.detach().float()
+            xn = xt / xt.norm().clamp_min(1e-6)
+            force = torch.zeros_like(xn)
+            for sname, poles_j, mj, jdirs in sources:
+                if sname == f"@{name}" or abs(mj) < 1e-9:
+                    continue
+                k_eff = law_coupling(poles_i, poles_j, laws)
+                if abs(k_eff) < 1e-12:
+                    continue
+                v = jdirs.get(L)
+                if v is None:
+                    continue
+                vt = (v if torch.is_tensor(v) else torch.as_tensor(v)).detach().float()
+                vn = vt / vt.norm().clamp_min(1e-6)
+                cos = float((xn * vn).sum())
+                tangent = vn - cos * xn
+                force = force + (k_eff * mj / ((1.0 - cos) + eps) ** 2) * tangent
+            if force.abs().sum() > 0:
+                newx = xn + step * force
+                dirs[L] = (newx / newx.norm().clamp_min(1e-6))
+                moved += 1
+    if moved:
+        save_steer_bodies()
+    return moved
+
+
+def capture_anchor_dirs(model, text, max_chars=600):
+    """Capture per-layer mean hidden states of `text` as anchor coordinates --
+    an exact, reproducible point in latent space."""
+    from invariants.engine import _inputs as _a_inputs, _hidden_states as _a_hidden
+    ids = _a_inputs(model, text[:max_chars])
+    hs = _a_hidden(model, ids["input_ids"], ids.get("attention_mask"))
+    dirs = {}
+    for L, h in enumerate(hs):
+        try:
+            dirs[int(L)] = h[0].float().mean(dim=0).detach().cpu()
+        except Exception:
+            continue
+    return dirs
+
+
+_GRAVITY_STATE = {"accum": None, "prev_cos": {}, "velocity": {}, "phi": None, "time": None}
+
+
+def flush_gravity_telemetry(tuner=None):
+    """Fold last generation's field telemetry into per-mass radial VELOCITY
+    (the sensing half of doppler: what is moving toward/away between turns)
+    and emit gravity_potential / gravity_time as live tuner streams -- so
+    'change time in an area' can drive any tempo knob through the existing
+    ':tune <knob> dynamic +gravity_time' machinery."""
+    acc = _GRAVITY_STATE.get("accum")
+    _GRAVITY_STATE["accum"] = None
+    if not acc or not acc.get("n"):
+        return
+    n = acc["n"]
+    phi = acc.get("phi", 0.0) / n
+    t_mean = acc.get("time", 0.0) / n
+    _GRAVITY_STATE["phi"], _GRAVITY_STATE["time"] = phi, t_mean
+    vel = {}
+    for nm, csum in (acc.get("cos") or {}).items():
+        c = csum / max(acc.get("cnt", {}).get(nm, 1), 1)
+        prev = _GRAVITY_STATE["prev_cos"].get(nm)
+        if prev is not None:
+            vel[nm] = c - prev
+        _GRAVITY_STATE["prev_cos"][nm] = c
+    if vel:
+        _GRAVITY_STATE["velocity"] = vel
+    if tuner is not None:
+        try:
+            tuner.observe("gravity_potential", float(phi))
+            tuner.observe("gravity_time", float(t_mean))
+        except Exception:
+            pass
+
+
+def gravity_velocities():
+    """Per-mass radial velocity from the last two field turns (+approaching)."""
+    return dict(_GRAVITY_STATE.get("velocity") or {})
+
+
+def _gravity_pull(h_float, entries, G, eps=GRAVITY_EPS, doppler=0.0,
+                  vstate=None, vkey=None, taus=None, names=None, telem=None,
+                  time_index=0):
+    """Pure field math. h_float: (..., D) float32 hidden states; entries:
+    legacy [(unit_direction(D), mass)] or field dictionaries with direction,
+    mass, personal g, time, shape, and name. Returns the additive pull, bounded
+    by tanh(|field|) so stacked masses saturate instead of exploding, and
+    scaled to each token's own residual norm.
+
+    doppler > 0 makes the coupling velocity-aware: attention to a mass is not
+    line-of-sight distance alone but how fast the state is moving toward or
+    away from it (change in last-position cos between forwards; approaching
+    damps the pull, receding restores it -- a damped field that settles).
+
+    Per-entry time coefficients are local clock rates: they scale how much
+    change this field can produce in one shell step, while radial velocity is
+    measured against the same clock. telem accumulates potential, local time,
+    and per-mass cos for the sensing/stream side."""
+    structured = any(isinstance(item, dict) for item in entries)
+    normalized = []
+    for idx, item in enumerate(entries):
+        if isinstance(item, dict):
+            normalized.append((
+                item["direction"],
+                float(item.get("mass", 0.0)),
+                float(item.get("g", G)),
+                float(item.get("time", 1.0)),
+                item.get("shape") or {"kind": "point"},
+                item.get("name", str(idx)),
+                list(item.get("qualities") or []),
+            ))
+        else:
+            v_hat, mass = item[:2]
+            tau = taus[idx] if taus and idx < len(taus) and taus[idx] is not None else 1.0
+            name = names[idx] if names and idx < len(names) else str(idx)
+            normalized.append((v_hat, float(mass), 1.0, float(tau), {"kind": "point"}, name, []))
+    s_norm = h_float.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+    s_hat = h_float / s_norm
+    cos_list = [(s_hat * item[0]).sum(-1, keepdim=True) for item in normalized]
+    scalars = None
+    T_local = 1.0
+    if doppler or normalized or telem is not None:
+        scalars = []
+        for (_v_hat, m, g_i, tau_i, shape, _name, qualities), cos_t in zip(normalized, cos_list):
+            c = float(cos_t.reshape(-1)[-1])
+            d = torch.tensor(max(0.0, 1.0 - c))
+            q_scalar = sum(
+                abs(float(term.get("amplitude", 0.0)))
+                * abs(time_vector_value(term.get("time_vector"), time_index))
+                * abs(float(quality_formula_value(term.get("formula"), d)))
+                for term in qualities
+            )
+            proximity = abs(m) * (
+                abs(g_i) * abs(float(_gravity_kernel(d, shape, eps=eps))) + q_scalar
+            )
+            scalars.append((c, proximity, tau_i))
+        wsum = sum(p for _c, p, _tau in scalars)
+        if wsum > 1e-12:
+            T_local = sum(p * tau for _c, p, tau in scalars) / wsum
+        T_local = max(0.05, min(20.0, T_local))
+    pull = torch.zeros_like(h_float)
+    for idx, ((v_hat, m, g_i, tau_i, shape, _name, qualities), cos) in enumerate(zip(normalized, cos_list)):
+        distance = (1.0 - cos).clamp_min(0.0)
+        w = (m * g_i * tau_i) * _gravity_kernel(distance, shape, eps=eps)
+        for term in qualities:
+            q_time = time_vector_value(term.get("time_vector"), time_index)
+            w = w + (
+                m * tau_i * float(term.get("amplitude", 0.0)) * q_time
+                * quality_formula_value(term.get("formula"), distance)
+            )
+        if doppler and vstate is not None:
+            cos_now = scalars[idx][0] if scalars else float(cos.reshape(-1)[-1])
+            prev = vstate.get((vkey, idx))
+            vstate[(vkey, idx)] = cos_now
+            if prev is not None:
+                v_rad = (cos_now - prev) / max(tau_i, 0.05)
+                w = w * max(0.25, min(4.0, 1.0 - doppler * v_rad))
+        tangent = v_hat - cos * s_hat
+        pull = pull + w * tangent
+    if telem is not None and scalars is not None:
+        telem["phi"] = telem.get("phi", 0.0) + sum(p for _c, p, _tau in scalars)
+        telem["time"] = telem.get("time", 0.0) + T_local
+        telem["n"] = telem.get("n", 0) + 1
+        cmap = telem.setdefault("cos", {})
+        cnt = telem.setdefault("cnt", {})
+        for i, item in enumerate(normalized):
+            nm = item[5]
+            cmap[nm] = cmap.get(nm, 0.0) + scalars[i][0]
+            cnt[nm] = cnt.get(nm, 0) + 1
+    mag = pull.norm(dim=-1, keepdim=True)
+    direction = pull / mag.clamp_min(1e-6)
+    outside_g = 1.0 if structured else float(G)
+    return outside_g * GRAVITY_NORM_FRACTION * torch.tanh(mag) * direction * s_norm
+
+
+def build_gravity_field_handles(model, probes, tuner, cap_fraction=None):
+    """Install the field as per-layer forward hooks; returns (handles, desc).
+    Every applied push still passes through the engine's _cap_steer envelope,
+    and the pull is computed under no_grad so TTT synthesis cannot smuggle an
+    uncapped gradient copy of it. Anchors join probes as masses; if the law
+    step is on, typed inter-body forces move the unfrozen anchors first."""
+    from invariants.engine import _cap_steer
+    flush_gravity_telemetry(tuner)
+    apply_body_laws(tuner, probes)
+    masses = gravity_field_masses(probes, tuner)
+    if not masses:
+        return [], "no masses yet (no probe/anchor has an explicit mass or a credited lift)"
+    doppler = float(tuner.get("gravity_doppler", 0.0))
+    vstate = {} if doppler else None
+    telem = {}
+    _GRAVITY_STATE["accum"] = telem
+    per_layer = {}
+    configs = []
+    for _name, m, dirs in masses:
+        for L, v in dirs.items():
+            try:
+                Li = int(L)
+            except (TypeError, ValueError):
+                continue
+            vt = v if torch.is_tensor(v) else torch.as_tensor(v)
+            vt = vt.detach().to(model.device, torch.float32)
+            vn = vt.norm().clamp_min(1e-6)
+            cfg = field_entry_config(_name, Li, probes, tuner)
+            configs.append((_name, Li, cfg))
+            if cfg["excluded"] or (
+                abs(cfg["g"]) < 1e-12 and not cfg["qualities"]
+            ):
+                continue
+            per_layer.setdefault(Li, []).append({
+                "direction": vt / vn,
+                "mass": float(m),
+                "g": cfg["g"],
+                "time": cfg["time"],
+                "shape": cfg["shape"],
+                "name": _name,
+                "qualities": cfg["qualities"],
+            })
+    if not per_layer:
+        return [], "all personal/family/global G sources currently resolve to zero"
+    handles = []
+    for Li, entries in sorted(per_layer.items()):
+        clock = {"index": 0}
+        def hook(module, inp, out, entries=entries, cap_fraction=cap_fraction,
+                 doppler=doppler, vstate=vstate, vkey=Li, telem=telem,
+                 clock=clock):
+            h = out[0] if isinstance(out, tuple) else out
+            with torch.no_grad():
+                add = _gravity_pull(
+                    h.detach().float(), entries, 1.0, doppler=doppler,
+                    vstate=vstate, vkey=vkey, telem=telem,
+                    time_index=clock["index"],
+                )
+                clock["index"] += 1
+            newh = h + _cap_steer(add.to(h.dtype), h, cap_fraction=cap_fraction)
+            if isinstance(out, tuple):
+                return (newh,) + tuple(out[1:])
+            return newh
+        try:
+            handles.append(model.model.model.layers[Li].register_forward_hook(hook))
+        except Exception:
+            continue
+    top = sorted(masses, key=lambda t: -abs(t[1]))[:3]
+    n_rep = sum(1 for _n, m, _d in masses if m < 0)
+    frozen = sorted(n for n in probes if probes[n].get("frozen"))
+    anchors = steer_bodies()["anchors"]
+    personal = sum(
+        1 for _n, _L, cfg in configs
+        if cfg["family"] or cfg["shape"].get("kind") != "point"
+        or cfg["time"] != 1.0
+    )
+    quality_count = sum(
+        len(entry.get("qualities") or [])
+        for entries in per_layer.values()
+        for entry in entries
+    )
+    desc = (
+        f"{len(masses)} masses over {len(handles)} layer(s); top "
+        + ", ".join(f"{n} {m:+.2f}" for n, m, _d in top)
+        + (f"; {n_rep} repulsor(s)" if n_rep else "")
+        + (f"; {len(anchors)} anchor(s)" if anchors else "")
+        + (f"; doppler k={doppler:g}" if doppler else "")
+        + (f"; {personal} shaped/family/time layer-entry(s)" if personal else "")
+        + (f"; {quality_count} quality-law layer-entry(s)" if quality_count else "")
+        + (f"; frozen: {', '.join(frozen)}" if frozen else "")
+    )
+    return handles, desc
+
+
+PROBE_PING_ELICITOR = "..."
+
+
+def command_history_digest(records, scope, limit=12, max_chars=1200):
+    """Compact 'what was run and what it caused' digest for generation
+    commands: the operator's recent :commands (archived user turns)
+    interleaved with the event records their handlers logged -- staged tools,
+    calibrations, benchmark results, impacts. Newest last."""
+    picked = []
+    for r in reversed(list(records or [])):
+        if getattr(r, "scope", None) != scope:
+            continue
+        kind = getattr(r, "kind", "") or ""
+        text = (getattr(r, "text", "") or "").strip().replace("\n", " ")
+        if not text:
+            continue
+        if kind == "turn":
+            if getattr(r, "role", "") != "user" or not text.startswith(":"):
+                continue
+            picked.append(f"ran {text[:110]}")
+        else:
+            picked.append(f"[{kind}] {text[:110]}")
+        if len(picked) >= limit:
+            break
+    if not picked:
+        return "(no command history yet)"
+    out, used = [], 0
+    for ln in reversed(picked):  # chronological, newest last
+        used += len(ln) + 1
+        if used > max_chars:
+            break
+        out.append(ln)
+    return "\n".join(out)
+
 
 def load_prompt(name, default_template, required_substring=None, **kwargs):
     import os, string
     prompt_dir = os.path.join(ROOT, "invariants", "out", "prompts")
     prompt_path = os.path.join(prompt_dir, f"{name}.txt")
+    def missing_required(template):
+        if not required_substring:
+            return False
+        if isinstance(required_substring, (list, tuple, set, frozenset)):
+            return any(str(s) not in template for s in required_substring)
+        return str(required_substring) not in template
     if not os.path.isdir(prompt_dir):
         try: os.makedirs(prompt_dir, exist_ok=True)
         except: pass
@@ -138,7 +1257,7 @@ def load_prompt(name, default_template, required_substring=None, **kwargs):
             needs_update = False
             if "$command_hints_strNote" in template or "$because_ctxWrite" in template:
                 needs_update = True
-            elif required_substring and required_substring not in template:
+            elif missing_required(template):
                 needs_update = True
                 
             if needs_update:
@@ -150,12 +1269,17 @@ def load_prompt(name, default_template, required_substring=None, **kwargs):
     try:
         return string.Template(template).safe_substitute(**kwargs)
     except:
-        return default_template
+        try:
+            return string.Template(default_template).safe_substitute(**kwargs)
+        except:
+            return default_template
 
 def queue_macro_text(text, queue):
     bundled = []
     current_text = []
     for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
         if line.startswith(":"):
             if current_text:
                 bundled.append("\n".join(current_text).strip())
@@ -170,6 +1294,68 @@ def queue_macro_text(text, queue):
     bundled = [(item, True) for item in bundled]
     queue[:0] = bundled
 
+
+EXPECT_LOW_MEMORY_TYPES = {"macro", "autocomplete"}
+
+
+def expect_generation_profile(pending_expect):
+    """Return the bounded generation profile for utility expectation turns."""
+    etype = (pending_expect or {}).get("type")
+    if etype not in EXPECT_LOW_MEMORY_TYPES:
+        return None
+    return {
+        "name": etype,
+        "label": "macro authoring" if etype == "macro" else "autocomplete",
+        "overrides": {
+            "synthesis_enabled": False,
+            "force_synthesis": False,
+            "cache_enabled": False,
+            "cache_write_enabled": False,
+            "max_synthesis_events": 0,
+            "max_synthesis_steps": 0,
+            "max_routing_events": 0,
+            "max_loops": 0,
+            "expert_proof_weight": 0.0,
+            "expert_proof_scores": {},
+            "routing_probe_terms": [],
+        },
+    }
+
+
+def apply_config_overrides(config, overrides):
+    saved = {}
+    for key, value in (overrides or {}).items():
+        saved[key] = getattr(config, key, None)
+        setattr(config, key, value)
+    return saved
+
+
+def restore_config_overrides(config, saved):
+    for key, value in (saved or {}).items():
+        setattr(config, key, value)
+
+
+def expected_macro_parts(response):
+    """Extract runnable macro commands plus the optional '# args:' header."""
+    cmd_lines = []
+    arg_specs = []
+    comments = []
+    for raw in (response or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("```"):
+            continue
+        if line.startswith("# args:"):
+            arg_specs = parse_macro_arg_header(line[len("# args:"):])
+            comments.append(line)
+            continue
+        if line.startswith("#"):
+            comments.append(line)
+            continue
+        if line.startswith(":"):
+            cmd_lines.append(line)
+    return cmd_lines, arg_specs, comments
+
+
 def score_probes_on_text(model, text, probes, tuner, turn_row=None, turn_sense=None, label_prefix="Probe Score"):
     if not probes or not text:
         return
@@ -177,11 +1363,13 @@ def score_probes_on_text(model, text, probes, tuner, turn_row=None, turn_sense=N
     from invariants.engine import _inputs as _p_inputs, _hidden_states as _p_hidden, probe_score
     p_ids = _p_inputs(model, text[:600])
     p_hs = _p_hidden(model, p_ids["input_ids"], p_ids.get("attention_mask"))
+    seeded = []
     for pname, pdata in probes.items():
         raw = probe_score(p_hs, pdata["direction"])
-        hist = pdata["history"]
-        sig = raw - (sum(hist) / len(hist)) if hist else 0.0
-        hist.append(raw)
+        sig = centered_probe_observation(pdata, raw)
+        if sig is None:
+            seeded.append(pname)
+            continue
         tuner.observe(f"probe_{pname}", sig)
         if turn_row is not None:
             turn_row[f"probe_{pname}"] = float(sig)
@@ -189,10 +1377,23 @@ def score_probes_on_text(model, text, probes, tuner, turn_row=None, turn_sense=N
             print(Fore.CYAN + f"  [{label_prefix}] {pname}: {sig:+.3f}" + Style.RESET_ALL, flush=True)
         if turn_sense is not None:
             tuner.credit(f"probe_{pname}", sig, turn_sense)
+    save_probe_raw_histories(probes)
+    if seeded:
+        print(
+            Fore.CYAN
+            + f"  [Probe Seed] initialized raw baselines for {len(seeded)} probe(s); "
+            + "centered readings begin on their next scored text."
+            + Style.RESET_ALL,
+            flush=True,
+        )
 
 def generate_agentic_text(*args, **kwargs):
     if "vecs" not in kwargs and _ACTIVE_PROBES:
-        vecs = {pname: pdata["direction"] for pname, pdata in _ACTIVE_PROBES.items() if "direction" in pdata}
+        vecs = {
+            pname: pdata["direction"]
+            for pname, pdata in _ACTIVE_PROBES.items()
+            if "direction" in pdata and not probe_is_released(pdata)
+        }
         if vecs:
             kwargs["vecs"] = vecs
             
@@ -222,7 +1423,7 @@ from invariants.trigger_tuner import TriggerTuner
 from dataclasses import dataclass, field
 import typing
 
-def _split_macro_commands(raw_str):
+def _split_macro_commands(raw_str, split_colon_commands=True):
     cmds = []
     curr = []
     i = 0
@@ -242,7 +1443,7 @@ def _split_macro_commands(raw_str):
             curr = []
             i += 1
             continue
-        elif raw_str[i:i+2] == ' :':
+        elif split_colon_commands and raw_str[i:i+2] == ' :':
             cmds.append("".join(curr).strip())
             curr = [':']
             i += 2
@@ -372,6 +1573,136 @@ def infer_task_grounding_low(user_input, response):
     return bool(prompt_is_concrete and response_is_self_referential and not response_has_task_anchor)
 
 
+def format_field_prompt_context(tuner=None, probes=None, max_chars=5000):
+    """Compact factual field state for model-facing prompts.
+
+    This reports mechanics and live definitions, not permission. Command/tool
+    access remains governed by :expose and the existing operator guardrails.
+    """
+    state = steer_bodies()
+    probes = probes or {}
+    enabled = bool(tuner and tuner.get("prioritize_gravity", 0.0) > 0)
+    has_state = any(
+        state.get(key)
+        for key in ("anchors", "probe_poles", "laws", "fields", "g_families", "qualities", "sets")
+    )
+    if not enabled and not has_state:
+        return None
+
+    def _get(name, default=0.0):
+        return float(tuner.get(name, default)) if tuner is not None else float(default)
+
+    lines = [
+        "[Field Context — live shell state, not user prose]",
+        (
+            f"enabled={enabled}; default_G={_get('prioritize_alpha'):g}; "
+            f"doppler={_get('gravity_doppler'):g}; law_step={_get('gravity_law_step'):g}; "
+            f"active_probes={','.join(sorted(probes)) or '(none)'}"
+        ),
+        (
+            "Mechanics available: personal/layer G, G families, local clocks, shaped fields, "
+            "safe quality formulas over d=1-cos, law-defined sets, signed compliance, "
+            "forward-time vectors, set exclusion, and whole-field exclusion."
+        ),
+        "This state does not grant command access; only exposed tools may be called by the model.",
+    ]
+
+    for fname, cfg in sorted(state["g_families"].items()):
+        g_spec = cfg.get("g")
+        time_spec = cfg.get("time")
+        g_now = resolve_field_source(
+            g_spec, probes, tuner, state["g_families"], state["fields"]
+        )
+        time_now = resolve_field_source(
+            time_spec or {"kind": "constant", "value": 1.0},
+            probes, tuner, state["g_families"], state["fields"], channel="time",
+        )
+        lines.append(
+            f"family:{fname} G<-{format_field_source(g_spec)}={g_now:+g} "
+            f"time<-{format_field_source(time_spec) if time_spec else '1'}={time_now:g} "
+            f"shape={format_field_shape(cfg.get('shape'))}"
+        )
+
+    for node, cfg in sorted(state["fields"].items()):
+        parts = []
+        if cfg.get("family"):
+            parts.append(f"family:{cfg['family']}")
+        if cfg.get("g") is not None:
+            parts.append(f"G<-{format_field_source(cfg['g'])}")
+        if cfg.get("time") is not None:
+            parts.append(f"time<-{format_field_source(cfg['time'])}")
+        if cfg.get("shape") is not None:
+            parts.append(f"shape={format_field_shape(cfg['shape'])}")
+        if cfg.get("excluded"):
+            parts.append("HARD-EXCLUDED from entire field")
+        if parts:
+            lines.append(f"{node} " + " ".join(parts))
+
+    for name, anchor in sorted(state["anchors"].items()):
+        poles = ",".join(
+            f"{family}{'+' if sign > 0 else '-'}"
+            for family, sign in sorted((anchor.get("poles") or {}).items())
+        ) or "(none)"
+        lines.append(
+            f"anchor:@{name} mass={float(anchor.get('mass', 1.0)):+g} "
+            f"{'frozen' if anchor.get('frozen', True) else 'mobile'} "
+            f"poles={poles} layers={len(anchor.get('dirs') or {})}"
+        )
+
+    for name, poles_cfg in sorted(state["probe_poles"].items()):
+        poles = ",".join(
+            f"{family}{'+' if sign > 0 else '-'}"
+            for family, sign in sorted((poles_cfg or {}).items())
+        )
+        if poles:
+            lines.append(f"probe:{name} poles={poles}")
+
+    for qname, cfg in sorted(state["qualities"].items()):
+        strength = cfg.get("strength") or {"kind": "constant", "value": 1.0}
+        now = resolve_field_source(
+            strength, probes, tuner, state["g_families"], state["fields"]
+        )
+        lines.append(
+            f"quality:{qname} formula={cfg.get('formula', QUALITY_FORMULA_DEFAULT)} "
+            f"strength<-{format_field_source(strength)}={now:+g}"
+        )
+
+    for lname, law in sorted(state["sets"].items()):
+        excluded = set(law.get("excluded") or [])
+        members = law.get("members") or {}
+        if not members and not excluded:
+            lines.append(f"set:{lname} quality:{law.get('quality', '(unset)')} (empty)")
+            continue
+        for node, member in sorted(members.items()):
+            if node in excluded:
+                detail = "EXCLUDED (exact zero)"
+            else:
+                compliance = member.get("compliance") or {"kind": "constant", "value": 1.0}
+                c_now = resolve_field_source(
+                    compliance, probes, tuner, state["g_families"], state["fields"]
+                )
+                detail = (
+                    f"compliance<-{format_field_source(compliance)}={c_now:+g} "
+                    f"time={member.get('time_vector') or [1.0]}"
+                )
+            lines.append(
+                f"set:{lname} quality:{law.get('quality', '(unset)')} -> {node} {detail}"
+            )
+        for node in sorted(excluded - set(members)):
+            lines.append(
+                f"set:{lname} quality:{law.get('quality', '(unset)')} -> {node} "
+                "EXCLUDED (exact zero; not otherwise a member)"
+            )
+
+    for (left, right), k in sorted(state["laws"].items()):
+        lines.append(f"pole-law {left}<->{right} k={float(k):+g}")
+
+    text = "\n".join(lines)
+    if len(text) > max_chars:
+        text = text[: max_chars - 44] + "\n[field context truncated at prompt budget]"
+    return text
+
+
 def build_prompt(
     user_input,
     memory_tool_result=None,
@@ -384,21 +1715,28 @@ def build_prompt(
     command_tool_result=None,
     game_tool_result=None,
     help_tool_result=None,
+    field_context=None,
     session_context=None,
     active_u_name=None,
 ):
-    # Bare mode (default): the model sees NO system message, no persona, no tool
+    # Bare mode (default): the model sees NO system message and no persona. The
+    # only standing shell-generated text is compact factual field state when
+    # the flexible field engine is active/configured.
     # instructions, not even Llama's "Cutting Knowledge Date" preamble -- only
     # prior turns and the current message, in the native chat format. Everything
-    # that makes this more than stock Llama lives in the activations (ToT,
-    # synthesis, cache, organic correction, ClaimMap steering), not in text.
+    # Field context describes shell mechanics/state but does not apply them;
+    # actual control still lives in the activations (ToT, synthesis, cache,
+    # organic correction, ClaimMap steering, and the field hooks), not prose.
     #
     # Tool RESULTS are still folded in when the activations reach for a tool, but
     # as plain context, never as tool syntax the model was taught. The returned
     # string is fully formatted -- generate with pre_formatted=True so it is
     # tokenized raw (no second chat-template wrap).
     if memory_tool_result:
-        budget = max(0, MAX_PROMPT_CHARS - len(user_input) - 512)
+        budget = max(
+            0,
+            MAX_PROMPT_CHARS - len(user_input) - len(field_context or "") - 512,
+        )
         if len(memory_tool_result) > budget:
             memory_tool_result = memory_tool_result[:budget] + "\n[memory truncated]"
     tool_blocks = [
@@ -414,6 +1752,7 @@ def build_prompt(
             command_tool_result,
             game_tool_result,
             help_tool_result,
+            field_context,
         )
         if block
     ]
@@ -701,6 +2040,594 @@ def format_status(status):
         f"         session_records={status['session_records']} "
         f"session_turns={status['session_turns']} total_records={status['total_records']}"
     )
+
+
+class CommandUsageError(Exception):
+    """A command's arguments don't parse. Carries the usage line; the main
+    loop prints it as guidance and aborts only that command -- never a
+    traceback, never logged as a shell error."""
+
+    def __init__(self, message, usage=None):
+        super().__init__(message)
+        self.usage = usage
+
+
+class CommandArgs:
+    """Total-access parser for a command's argument string.
+
+    Wraps the text after a command word and makes every read safe: positional
+    reads return a default instead of raising IndexError, typed reads return
+    a default instead of raising ValueError, and the require* forms raise
+    CommandUsageError -- which the main loop turns into the command's usage
+    line. Handlers must not index a raw .split() directly; routed through
+    this class, a malformed command can only ever end in a usage message.
+    """
+
+    def __init__(self, raw, usage=None):
+        self.raw = (raw or "").strip()
+        self.usage = usage
+        self.tokens = self.raw.split()
+
+    def __bool__(self):
+        return bool(self.tokens)
+
+    def __len__(self):
+        return len(self.tokens)
+
+    def __iter__(self):
+        return iter(self.tokens)
+
+    def fail(self, message=None):
+        """Abort the command with its usage line (via the main-loop handler)."""
+        raise CommandUsageError(message or "malformed command", usage=self.usage)
+
+    def get(self, i, default=None, lower=False):
+        """tokens[i], or `default` when out of range. Never raises."""
+        if not (-len(self.tokens) <= i < len(self.tokens)):
+            return default
+        tok = self.tokens[i]
+        return tok.lower() if lower else tok
+
+    def require(self, i, what="argument"):
+        """tokens[i], or CommandUsageError naming the missing piece."""
+        tok = self.get(i)
+        if tok is None:
+            self.fail(f"missing {what}")
+        return tok
+
+    def int(self, i, default=None, lo=None, hi=None):
+        """tokens[i] as int, clamped to [lo, hi]; `default` when absent/unparseable."""
+        tok = self.get(i)
+        if tok is None:
+            return default
+        try:
+            val = int(tok)
+        except (TypeError, ValueError):
+            return default
+        if lo is not None:
+            val = max(lo, val)
+        if hi is not None:
+            val = min(hi, val)
+        return val
+
+    def float(self, i, default=None, lo=None, hi=None):
+        """tokens[i] as float, clamped to [lo, hi]; `default` when absent/unparseable."""
+        tok = self.get(i)
+        if tok is None:
+            return default
+        try:
+            val = float(tok)
+        except (TypeError, ValueError):
+            return default
+        if lo is not None:
+            val = max(lo, val)
+        if hi is not None:
+            val = min(hi, val)
+        return val
+
+    def rest(self, i=0, default=""):
+        """Tokens from position i onward as one spaced string; never raises."""
+        return " ".join(self.tokens[i:]) or default
+
+    def tail(self, i=1, default=""):
+        """The RAW text after token i-1 (original spacing/`||` preserved) --
+        for free-text arguments like framings and `because` clauses."""
+        if i <= 0:
+            return self.raw or default
+        pos = 0
+        for tok in self.tokens[:i]:
+            pos = self.raw.index(tok, pos) + len(tok)
+        out = self.raw[pos:].strip()
+        return out or default
+
+    def has(self, word):
+        """Case-insensitive whole-token flag check."""
+        w = word.lower()
+        return any(t.lower() == w for t in self.tokens)
+
+    def take(self, *names):
+        """If the first token (lowered) is one of `names`, return a CommandArgs
+        over the remainder (raw spacing preserved); else None. Replaces the
+        `x == "kw" or x.startswith("kw ")` + manual-slice pattern."""
+        head = self.get(0, lower=True)
+        if head not in names:
+            return None
+        return CommandArgs(self.raw[len(self.tokens[0]):], usage=self.usage)
+
+    def with_usage(self, usage):
+        """Same args, now carrying the usage line require*/fail will report."""
+        self.usage = usage
+        return self
+
+
+from types import SimpleNamespace
+
+
+class ArgSpec:
+    """One declared command argument: its name, type, list position (order),
+    and requiredness -- the single source for both parsing and documentation.
+
+    CommandSpec.parse() coerces tokens by `kind`, and usage()/help render
+    from the same fields, so the written contract cannot drift from what the
+    parser actually accepts.
+
+    kinds:
+      word  -- one token, kept verbatim
+      name  -- one token, sanitized to [a-z0-9_] (probe/composite identifier)
+      int   -- one token, integer; lo/hi clamp after parsing
+      float -- one token, float; lo/hi clamp after parsing
+      text  -- the rest of the line, raw spacing preserved (must be last)
+    variadic=True (last positional only) consumes every remaining token.
+    """
+
+    KINDS = ("word", "name", "int", "float", "text")
+
+    def __init__(self, name, kind="word", required=True, default=None,
+                 display=None, lo=None, hi=None, variadic=False, choices=None, help=""):
+        if kind not in self.KINDS:
+            raise ValueError(f"unknown ArgSpec kind {kind!r}")
+        self.name = name
+        self.kind = kind
+        self.required = required
+        self.default = default
+        self.choices = tuple(c.lower() for c in choices) if choices else None
+        self.display = display or ("|".join(self.choices) if self.choices else name)
+        self.lo = lo
+        self.hi = hi
+        self.variadic = variadic
+        self.help = help
+
+    def render(self):
+        inner = self.display + (" ..." if self.variadic else "")
+        return f"<{inner}>" if self.required else f"[{inner}]"
+
+    def coerce(self, tok, fail):
+        if self.kind == "name":
+            return re.sub(r"[^a-z0-9_]", "_", tok.lower())[:40]
+        if self.kind in ("int", "float"):
+            caster = int if self.kind == "int" else float
+            try:
+                val = caster(tok)
+            except (TypeError, ValueError):
+                fail(f"{self.name} must be {'an integer' if self.kind == 'int' else 'a number'}, got '{tok}'")
+            if self.lo is not None:
+                val = max(self.lo, val)
+            if self.hi is not None:
+                val = min(self.hi, val)
+            return val
+        if self.choices is not None:
+            low = tok.lower()
+            if low not in self.choices:
+                fail(f"{self.name} must be one of {'|'.join(self.choices)}, got '{tok}'")
+            return low
+        return tok
+
+
+class TrailingOpt:
+    """A declared trailing keyword group, e.g. 'band 16 24' at the end of the
+    argument text. Stripped off before positional parsing so greedy text
+    arguments (framings, signed mixes) never swallow it. Absent -> None."""
+
+    def __init__(self, keyword, value_names, kind="int", transform=None, help=""):
+        self.keyword = keyword
+        self.value_names = tuple(value_names)
+        self.kind = kind
+        self.transform = transform
+        self.help = help
+
+    def render(self):
+        vals = " ".join(f"<{v}>" for v in self.value_names)
+        return f"[{self.keyword} {vals}]"
+
+    def strip(self, raw, fail):
+        """Return (raw_without_group, parsed_value_or_None)."""
+        pattern = (
+            r"(?:^|\s)" + re.escape(self.keyword)
+            + "".join(r"\s+(\S+)" for _ in self.value_names)
+            + r"\s*$"
+        )
+        m = re.search(pattern, raw or "", re.IGNORECASE)
+        if not m:
+            return (raw or "").strip(), None
+        caster = int if self.kind == "int" else (float if self.kind == "float" else str)
+        values = []
+        for name, tok in zip(self.value_names, m.groups()):
+            try:
+                values.append(caster(tok))
+            except (TypeError, ValueError):
+                fail(f"{self.keyword} {name} must be {'an integer' if self.kind == 'int' else 'a number'}, got '{tok}'")
+        value = self.transform(*values) if self.transform is not None else tuple(values)
+        return raw[: m.start()].strip(), value
+
+
+class CommandSpec:
+    """A shell command's full argument contract, declared once.
+
+    The declaration IS the documentation: argument names, types, order,
+    defaults, and trailing option groups are written here and nowhere else.
+    parse() is total -- every violation raises CommandUsageError carrying the
+    auto-generated usage line (the main loop prints it as guidance, no
+    traceback), and a successful parse returns a namespace with every
+    declared name bound. :help and docs/COMMANDS.md render from the same
+    object, so behavior and reference cannot drift.
+    """
+
+    def __init__(self, path, summary, args=(), opts=(), examples=()):
+        self.path = path
+        self.summary = summary
+        self.args = list(args)
+        self.opts = list(opts)
+        self.examples = list(examples)
+        seen_optional = False
+        for i, a in enumerate(self.args):
+            if (a.kind == "text" or a.variadic) and i != len(self.args) - 1:
+                raise ValueError(f"{path}: text/variadic argument '{a.name}' must be last")
+            if a.required and seen_optional:
+                raise ValueError(f"{path}: required argument '{a.name}' after an optional one")
+            seen_optional = seen_optional or not a.required
+        names = [a.name for a in self.args] + [o.keyword for o in self.opts]
+        if len(names) != len(set(names)):
+            raise ValueError(f"{path}: duplicate argument names in declaration")
+
+    def usage(self):
+        parts = [self.path]
+        parts.extend(a.render() for a in self.args)
+        parts.extend(o.render() for o in self.opts)
+        return " ".join(parts)
+
+    def help_entry(self):
+        """Lines for :help, generated from the declaration."""
+        lines = [self.usage(), f"      {self.summary}"]
+        for a in self.args:
+            opt = "" if a.required else "optional"
+            kind = a.kind if a.kind != "word" else ""
+            meta = ", ".join(x for x in (kind, opt) if x)
+            meta = f" ({meta})" if meta else ""
+            lines.append(f"      {a.render()}{meta}: {a.help}" if a.help else f"      {a.render()}{meta}")
+        for o in self.opts:
+            lines.append(f"      {o.render()}: {o.help}" if o.help else f"      {o.render()}")
+        for ex in self.examples:
+            lines.append(f"      e.g. {ex}")
+        return lines
+
+    def fail(self, message):
+        """Abort the command with this spec's usage line (main-loop handler
+        prints it) -- for handler-level violations the grammar can't express."""
+        raise CommandUsageError(message, usage=self.usage())
+
+    def parse(self, raw):
+        """Parse the text after the command path; infallible by contract."""
+        raw = (raw or "").strip()
+        values = {}
+        for opt in self.opts:
+            raw, values[opt.keyword] = opt.strip(raw, self.fail)
+        args = CommandArgs(raw, usage=self.usage())
+        i = 0
+        for spec in self.args:
+            if spec.kind == "text":
+                text = args.tail(i)
+                if not text and spec.required:
+                    self.fail(f"missing {spec.name}")
+                values[spec.name] = text or spec.default
+                i = len(args.tokens)
+            elif spec.variadic:
+                toks = args.tokens[i:]
+                if not toks and spec.required:
+                    self.fail(f"missing {spec.name}")
+                values[spec.name] = [spec.coerce(t, self.fail) for t in toks] if toks else list(spec.default or [])
+                i = len(args.tokens)
+            else:
+                tok = args.get(i)
+                if tok is None:
+                    if spec.required:
+                        self.fail(f"missing {spec.name}")
+                    values[spec.name] = spec.default
+                else:
+                    values[spec.name] = spec.coerce(tok, self.fail)
+                    i += 1
+        if i < len(args.tokens):
+            self.fail(f"unexpected argument(s): {' '.join(args.tokens[i:])}")
+        return SimpleNamespace(**values)
+
+
+COMMAND_SPECS = {}
+
+
+def register_spec(spec):
+    COMMAND_SPECS[spec.path] = spec
+    return spec
+
+
+def _hidden_command_words(hidden_commands):
+    return {str(h).lstrip(":").lower() for h in (hidden_commands or [])}
+
+
+def spec_help_entries(query, hidden_commands=None):
+    """Help entries generated from declared CommandSpecs. Matches on any word
+    of the command path (':help probe' lists every :probe spec; ':help
+    backfill' finds the one), mirroring find_command_help_entries. Pass
+    hidden_commands on model-facing surfaces so hidden commands stay hidden."""
+    q = (query or "").strip().split()[0].lstrip(":").lower() if (query or "").strip() else ""
+    if not q:
+        return []
+    hidden = _hidden_command_words(hidden_commands)
+    entries = []
+    for path in sorted(COMMAND_SPECS):
+        words = {w.lstrip(":").lower() for w in path.split()}
+        if q in words and not (words & hidden):
+            entries.append(COMMAND_SPECS[path].help_entry())
+    return entries
+
+
+def render_specs_md(hidden_commands=None):
+    """Markdown section for docs/COMMANDS.md and every model-facing command
+    reference, generated from the registered CommandSpec declarations -- same
+    objects that parse, so it cannot drift. hidden_commands filters specs off
+    model-facing surfaces by the same word-match rule as the legacy lines."""
+    hidden = _hidden_command_words(hidden_commands)
+    body = []
+    for path in sorted(COMMAND_SPECS):
+        if {w.lstrip(":").lower() for w in path.split()} & hidden:
+            continue
+        spec = COMMAND_SPECS[path]
+        body.append(f"- `{spec.usage()}` -- {spec.summary}")
+        for a in spec.args:
+            opt = "" if a.required else ", optional"
+            kind = a.kind if a.kind != "word" else "word"
+            desc = f" -- {a.help}" if a.help else ""
+            body.append(f"  - `{a.render()}` ({kind}{opt}){desc}")
+        for o in spec.opts:
+            desc = f" -- {o.help}" if o.help else ""
+            body.append(f"  - `{o.render()}` (trailing option){desc}")
+        for ex in spec.examples:
+            body.append(f"  - e.g. `{ex}`")
+    if not body:
+        return ""
+    out = [
+        "",
+        "## Declared argument contracts",
+        "",
+        "Generated from the `CommandSpec` declarations in",
+        "`scripts/interactive_phenomenality.py` -- the same objects that parse",
+        "these commands. Argument order and types below are enforced, not",
+        "described: violations print the usage line instead of executing.",
+        "",
+    ]
+    out.extend(body)
+    out.append("")
+    return "\n".join(out)
+
+
+def _band_layers(lo, hi):
+    return list(range(min(lo, hi), max(lo, hi) + 1))
+
+
+BAND_OPT = TrailingOpt(
+    "band", ("lo", "hi"), kind="int", transform=_band_layers,
+    help="explicit reading depth: inclusive layer indices lo..hi",
+)
+
+PROBE_ADOPT_SPEC = register_spec(CommandSpec(
+    ":probe adopt",
+    "Adopt stored dimension vector(s) as live probes.",
+    args=[ArgSpec("stems", kind="name", variadic=True, display="dim",
+                  help="stored vector name(s): invariants/<dim>_vector.pt, <dim>.pt, or the saved-probe dir")],
+    opts=[BAND_OPT],
+    examples=[":probe adopt ambiguity disagreement warranted_confidence band 16 24"],
+))
+
+PROBE_COMPOSE_SPEC = register_spec(CommandSpec(
+    ":probe compose",
+    "Mint a composite probe from a signed mix of active/stored probes (weights allowed: 0.5*curiosity).",
+    args=[
+        ArgSpec("name", kind="name", help="composite probe name"),
+        ArgSpec("mix", kind="text",
+                help="signed mix over probe names, e.g. ambiguity + disagreement - validated_flow"),
+    ],
+    opts=[BAND_OPT],
+    examples=[":probe compose memory_need ambiguity + disagreement - validated_flow - warranted_confidence"],
+))
+
+PROBE_BACKFILL_SPEC = register_spec(CommandSpec(
+    ":probe backfill",
+    "Rebuild named probe stream(s) from archived replies. A name scores only "
+    "that probe; all explicitly scores every active probe into joint rows.",
+    args=[
+        ArgSpec("name", kind="word", display="name|all|choose",
+                help="probe to rebuild; all = every active probe; choose = the model picks the thinnest"),
+        ArgSpec("limit", kind="int", required=False, lo=1, display="n",
+                help="only the last n archived replies"),
+    ],
+    examples=[":probe backfill accuracy 200"],
+))
+
+PROBE_EXPLAIN_SPEC = register_spec(CommandSpec(
+    ":probe explain",
+    "Default = activation ping: briefly steer along the probe's own direction "
+    "(envelope-capped, baseline frozen so it cannot habituate) and print what "
+    "the nudge evokes. This is a qualitative sanity check and can be generic "
+    "or off-target. Append 'prompt' for the stored-definition explanation "
+    "grounded in the probe's WITH/WITHOUT framings.",
+    args=[
+        ArgSpec("name", help="probe to ping; choose/auto lets the model pick the probe"),
+        ArgSpec("alpha", kind="word", required=False, display="alpha|choose",
+                help="ping strength (signed float; negative pings away; default 1); "
+                     "'choose' adopts the live calibrated G (prioritize_alpha) when one exists"),
+        ArgSpec("mode", required=False, choices=("prompt", "words", "verbal"), display="prompt",
+                help="ask for the stored-definition explanation instead of the activation ping"),
+    ],
+    examples=[":probe explain neutral", ":probe explain neutral 2.5",
+              ":probe explain neutral choose", ":probe explain self_model prompt"],
+))
+
+
+# --- The physics vocabulary: tuning, steering, and calibration ARE gravity. -
+# Every probe is a body: a mass sitting at its direction on the unit sphere.
+# Each token's hidden state is pulled along the sphere tangent toward (or away
+# from) every body, pull ~ mass / (d + eps)^2 with d = 1 - cos. Steering
+# commands place and shape the bodies; tuning sets the field's live constants
+# (G, envelope cap, doppler, law step); calibration sets a body's firing
+# horizon from its own observed orbits. Every push stays inside the envelope.
+
+_FIELD_NODE = "probe|@anchor|layer:N|family:name"
+_FIELD_NODE_HELP = "a body (probe or @anchor), one layer's clock/gate, or a whole family"
+_FIELD_SOURCE_HELP = ("live source: a number, probe:<name>, knob:<name>, status:ram|vram, "
+                      "lift:<trigger> (fired-vs-unfired outcome lift), outcome:<trigger> "
+                      "(rolling mean of recent credits), family:<name>, or global; off clears back to inherited")
+
+STEER_FIELD_SPEC = register_spec(CommandSpec(
+    ":steer field",
+    "The field master switch (alias :steer gravity). init loads/migrates every "
+    "field surface without inventing laws or unfreezing bodies; on/off flips "
+    "prioritize_gravity (while on, the field REPLACES pin/mix steering); "
+    "status shows G, masses (normalized, signed), overrides, and quality members.",
+    args=[
+        ArgSpec("action", required=False, default="status",
+                choices=("init", "full", "flex", "flexible", "on", "off", "status"),
+                display="init|on|off|status", help="what to do with the field"),
+        ArgSpec("G", kind="float", required=False,
+                help="default global G (prioritize_alpha) to set alongside init/on"),
+    ],
+    examples=[":steer field init 0.1", ":steer gravity on", ":steer field"],
+))
+
+STEER_MASS_SPEC = register_spec(CommandSpec(
+    ":steer mass",
+    "Set a body's gravitational coefficient. Positive mass attracts the hidden "
+    "state, negative repels; masses are normalized (|sum|=1) when the field "
+    "applies. auto returns the mass to its live signed evidence lift each turn.",
+    args=[
+        ArgSpec("probe", help="an active probe: a mass at its direction"),
+        ArgSpec("m", display="m|auto", help="signed mass (negative = repulsor) or auto = live signed lift"),
+    ],
+    examples=[":steer mass ambiguity -0.5", ":steer mass fun auto"],
+))
+
+STEER_G_SPEC = register_spec(CommandSpec(
+    ":steer g",
+    "Personal gravitational constant: bind one node's G to a live source "
+    "instead of the global G (prioritize_alpha). A layer G gates/multiplies a "
+    "body's G where both are set; family:<name> makes the node inherit that "
+    "family's G. Bare :steer g lists every override.",
+    args=[
+        ArgSpec("node", required=False, display=_FIELD_NODE, help=_FIELD_NODE_HELP),
+        ArgSpec("source", required=False, display="source|off", help=_FIELD_SOURCE_HELP),
+        ArgSpec("scale", kind="float", required=False, default=1.0, help="multiply the source"),
+        ArgSpec("offset", kind="float", required=False, default=0.0, help="add after scaling"),
+    ],
+    examples=[":steer g ambiguity knob:prioritize_alpha 0.5", ":steer g layer:18 status:ram", ":steer g fun off"],
+))
+
+STEER_TIME_SPEC = register_spec(CommandSpec(
+    ":steer time",
+    "Local clock: align a node's forward-time rate to a live source so its "
+    "gravity evolves on its own timeline (rate clamped to 0.05..20). off "
+    "returns the node to the global clock (rate 1).",
+    args=[
+        ArgSpec("node", display=_FIELD_NODE, help=_FIELD_NODE_HELP),
+        ArgSpec("source", display="source|off", help=_FIELD_SOURCE_HELP),
+        ArgSpec("scale", kind="float", required=False, default=1.0, help="multiply the source"),
+        ArgSpec("offset", kind="float", required=False, default=0.0, help="add after scaling"),
+    ],
+    examples=[":steer time @sink probe:urgency", ":steer time family:senses knob:clock_rate 2.0"],
+))
+
+STEER_FREEZE_SPEC = register_spec(CommandSpec(
+    ":steer freeze",
+    "Inertial coefficient: the body keeps PULLING but stops MOVING itself. A "
+    "frozen probe's rolling baseline stops drifting (it cannot habituate to "
+    "its own gravity); a frozen anchor stops responding to laws. off thaws.",
+    args=[
+        ArgSpec("body", display="probe|@anchor", help="the mass to freeze or thaw"),
+        ArgSpec("flag", required=False, choices=("off", "false"), display="off",
+                help="thaw: the baseline drifts / the anchor moves under laws again"),
+    ],
+    examples=[":steer freeze curiosity", ":steer freeze @pin off"],
+))
+
+STEER_POLE_SPEC = register_spec(CommandSpec(
+    ":steer pole",
+    "Type a body with a signed pole in a concept family. Poled bodies exert "
+    "force on each other ONLY where a ':steer law' couples their families -- "
+    "selective magnetism layered over the universal field.",
+    args=[
+        ArgSpec("body", display="probe|@anchor", help="the mass to type"),
+        ArgSpec("pole", display="family[+|-]", help="family name with optional sign (default +)"),
+        ArgSpec("flag", required=False, choices=("off", "remove"), display="off",
+                help="remove this pole from the body"),
+    ],
+    examples=[":steer pole honesty integrity+", ":steer pole @pin integrity off"],
+))
+
+STEER_LAW_SPEC = register_spec(CommandSpec(
+    ":steer law",
+    "Couple two pole families: k>0 like poles repel / unlike attract, k<0 "
+    "flips, off removes; unlisted pairs are INERT. ':tune gravity_law_step' "
+    "integrates the forces -- only unfrozen anchors move, probes never do. "
+    "Bare :steer law lists the laws and the step.",
+    args=[
+        ArgSpec("famA", required=False, help="first pole family"),
+        ArgSpec("famB", required=False, help="second pole family"),
+        ArgSpec("k", required=False, display="k|off", help="signed coupling constant, or off to remove"),
+    ],
+    examples=[":steer law integrity chaos -0.3", ":steer law integrity chaos off"],
+))
+
+TUNE_SPEC = register_spec(CommandSpec(
+    ":tune",
+    "Read or set a live constant of the physics: global G (prioritize_alpha), "
+    "the envelope cap every push must stay inside (steer_cap_fraction), the "
+    "steering depth (steer_band), doppler (velocity-aware pull), the law "
+    "integrator (gravity_law_step), and every trigger threshold. Bare :tune "
+    "is the observatory -- each constant with its observed fire-rate, signal "
+    "spread, and outcome lift. '<knob> auto' derives the value from recorded "
+    "telemetry instead of assertion.",
+    args=[
+        ArgSpec("knob", required=False, help="the constant to touch; bare = list them all"),
+        ArgSpec("setting", kind="text", required=False,
+                help="new value, or: auto [percentile] (from telemetry), choice (model picks), "
+                     "dynamic +probe -probe (probe-driven)"),
+    ],
+    examples=[":tune", ":tune steer_cap_fraction auto", ":tune prioritize_alpha 0.1",
+              ":tune learning dynamic +ambiguity-consensus"],
+))
+
+CALIBRATE_SPEC = register_spec(CommandSpec(
+    ":calibrate",
+    "Place a body's firing horizon from its own observed orbits: move the "
+    "threshold to the p-th percentile of its recorded signals (calibration "
+    "routes: percentile of own signals, observed push ratios for the cap, "
+    "per-layer outcomes for the band; circular/binary knobs are REFUSED). "
+    "Anchored forms (+probe -probe) pull the horizon toward rows where the "
+    "anchors co-fired. Bare :calibrate lists every route.",
+    args=[
+        ArgSpec("probe", required=False, help="trigger/knob to calibrate; bare = list routes"),
+        ArgSpec("args", kind="text", required=False,
+                help="percentile (default 50), 'outcome', 'intent', anchors like +accuracy -denial, "
+                     "or '<probe>:timestamps on|off'"),
+    ],
+    examples=[":calibrate accuracy", ":calibrate fun self_intent", ":calibrate accuracy:timestamps on"],
+))
 
 
 def parse_count(text, default):
@@ -1060,10 +2987,16 @@ def rank_probes(probes, tuner):
         st = trig.outcome_stats()
         lift = st.get("lift")
         n = int(st.get("n_credited", 0) or 0)
-        priority = (abs(float(lift)) * min(1.0, n / 20.0)) if lift is not None else 0.0
+        released = probe_is_released(probes[pname])
+        priority = (
+            (abs(float(lift)) * min(1.0, n / 20.0))
+            if lift is not None and not released
+            else 0.0
+        )
         ranked.append({
             "name": pname, "priority": priority, "lift": lift, "n": n,
             "exposed": bool(probes[pname].get("exposed", False)),
+            "released": released,
         })
     ranked.sort(key=lambda r: -r["priority"])
     return ranked
@@ -1127,7 +3060,7 @@ def build_priority_mix_direction(model, names, probes, tuner):
     normalized. {} when nothing carries weight yet."""
     weighted = []
     for nm in names:
-        if nm not in probes:
+        if nm not in probes or probe_is_released(probes[nm]):
             continue
         trig = tuner.triggers.get(f"probe_{nm}")
         st = trig.outcome_stats() if trig else {}
@@ -1152,6 +3085,90 @@ def build_priority_mix_direction(model, names, probes, tuner):
     return out
 
 
+def build_priority_landscape_direction(model, target, probes, tuner, top_k=5, neighbor_scale=0.35):
+    """Anchor one probe while carrying the current priority field with it.
+
+    Unlike :steer <probe>, this is not only a single-vector pin: the target is
+    given a fixed anchor weight, and the current evidence-weighted field of the
+    top probes is folded in around it. This lets :prioritize <target> mean
+    "move the live landscape so this can become salient" without pretending the
+    evidence-ranked table changes immediately.
+    """
+    if target not in probes or probe_is_released(probes[target]):
+        return {}
+    target_dir = probes[target].get("direction") or {}
+    if not target_dir:
+        return {}
+
+    ranked = rank_probes(probes, tuner)
+    neighbors = []
+    max_abs = 0.0
+    for row in ranked:
+        nm = row.get("name")
+        if not nm or nm == target or nm not in probes or probe_is_released(probes[nm]):
+            continue
+        trig = tuner.triggers.get(f"probe_{nm}")
+        st = trig.outcome_stats() if trig else {}
+        lift = st.get("lift")
+        n = int(st.get("n_credited", 0) or 0)
+        if lift is None:
+            continue
+        w = float(lift) * min(1.0, n / 20.0)
+        d = probes[nm].get("direction") or {}
+        if w and d:
+            neighbors.append((nm, w, d))
+            max_abs = max(max_abs, abs(w))
+        if len(neighbors) >= int(top_k):
+            break
+
+    out = {}
+    for L in sorted(target_dir):
+        acc = target_dir[L].to(model.device).float().reshape(-1)
+        if max_abs > 0:
+            for _, w, d in neighbors:
+                if L not in d:
+                    continue
+                acc = acc + d[L].to(model.device).float().reshape(-1) * (neighbor_scale * w / max_abs)
+        nrm = acc.norm()
+        if nrm.item() > 0:
+            out[int(L)] = acc / nrm
+    return out
+
+
+def resolve_priority_direction(model, probes, tuner, priority_pin):
+    """Return (direction, label, sign) for the current prioritize steering mode."""
+    priority_pin = priority_pin or {}
+    mix = priority_pin.get("mix")
+    landscape = priority_pin.get("landscape")
+    pin = priority_pin.get("probe")
+    if mix:
+        md = build_priority_mix_direction(model, mix, probes, tuner)
+        if md:
+            return md, "mix(" + "+".join(mix) + ")", 1.0
+    if landscape and landscape in probes and not probe_is_released(probes[landscape]):
+        ld = build_priority_landscape_direction(model, landscape, probes, tuner)
+        if ld:
+            return ld, f"landscape({landscape})", 1.0
+    if pin and pin in probes and not probe_is_released(probes[pin]):
+        return probes[pin].get("direction") or None, pin, float(priority_pin.get("sign", 1.0) or 1.0)
+    ranked = rank_probes(probes, tuner)
+    if ranked and ranked[0]["priority"] > 0 and ranked[0]["lift"] is not None:
+        return (
+            probes[ranked[0]["name"]].get("direction") or None,
+            ranked[0]["name"],
+            1.0 if ranked[0]["lift"] >= 0 else -1.0,
+        )
+    return None, None, 1.0
+
+
+def priority_direction_word(label, sign):
+    if str(label or "").startswith("mix("):
+        return "along"
+    if str(label or "").startswith("landscape("):
+        return "through"
+    return "toward" if sign > 0 else "away from"
+
+
 def rank_memories_by_probe(model, memory, direction, top_n=6, scan=160, records=None):
     """Score recent memory records by their projection onto a probe's direction
     and return the ones that read FURTHEST from 0 -- the memories the probe lights
@@ -1174,6 +3191,77 @@ def rank_memories_by_probe(model, memory, direction, top_n=6, scan=160, records=
         scored.append((abs(raw), raw, r))
     scored.sort(key=lambda t: t[0], reverse=True)
     return scored[:top_n]
+
+
+def score_unread_document_chunks_by_probes(
+    model,
+    sessions,
+    probes,
+    signed_specs,
+    *,
+    cache=None,
+    scan=160,
+):
+    """Score unread document chunks toward +probes and away from -probes.
+
+    One hidden-state pass scores every requested probe for a chunk. Raw probe
+    projections are appropriate for ranking: subtracting each probe's fixed
+    rolling baseline would shift every candidate equally and not change order.
+    The cache is process-local and keyed by content SHA, chunk, probe name, and
+    direction object, so re-minting a same-named probe cannot reuse stale scores.
+    Returns (score_by_(session,chunk), newly_scored_chunks, candidates_scored).
+    """
+    resolved = [
+        (1 if int(sign) >= 0 else -1, str(name), probes[str(name)]["direction"])
+        for sign, name in (signed_specs or [])
+        if str(name) in probes and probes[str(name)].get("direction")
+    ]
+    if not resolved:
+        return {}, 0, 0
+    cache = cache if cache is not None else {}
+    candidates = [
+        (si, ci)
+        for si, session in enumerate(sessions or [])
+        for ci in range(int(session.get("chunk_count", 0)))
+        if ci not in (session.get("read") or set())
+    ][: max(1, int(scan))]
+    if not candidates:
+        return {}, 0, 0
+
+    from invariants.engine import _inputs as _q_inputs, _hidden_states as _q_hidden, probe_score as _q_score
+    out = {}
+    newly_scored = 0
+    for si, ci in candidates:
+        session = sessions[si]
+        sha = str(session.get("sha256") or session.get("source_path") or si)
+        raw_values = {}
+        missing = []
+        for sign, pname, direction in resolved:
+            key = (sha, int(ci), pname, id(direction))
+            if key in cache:
+                raw_values[pname] = float(cache[key])
+            else:
+                missing.append((pname, direction, key))
+        if missing:
+            try:
+                text = str((session.get("chunks") or [])[ci]).strip()[:600]
+                with torch.no_grad():
+                    q_ids = _q_inputs(model, text)
+                    q_hs = _q_hidden(model, q_ids["input_ids"], q_ids.get("attention_mask"))
+                    for pname, direction, key in missing:
+                        raw = float(_q_score(q_hs, direction))
+                        cache[key] = raw
+                        raw_values[pname] = raw
+                newly_scored += 1
+            except Exception:
+                continue
+        if len(raw_values) != len(resolved):
+            continue
+        out[(si, ci)] = sum(
+            sign * raw_values[pname]
+            for sign, pname, _direction in resolved
+        ) / len(resolved)
+    return out, newly_scored, len(candidates)
 
 
 # The ONLY macro lines `:macro strip` keeps: commands that actually mutate a
@@ -1248,6 +3336,67 @@ def parse_doc_rewrite_request(dargs):
     if low.endswith(" rewrite"):
         return {"source": s[:-len(" rewrite")].strip().strip('"'), "output": None}
     return None
+
+
+def parse_doc_read_request(dargs, probe_names, max_autoread=20):
+    """Parse :doc read modifiers, including signed probe-guided selection."""
+    count, mode = 1, "order"
+    until_settled, explicit_count = False, False
+    until_probe = None
+    signed_probe_specs = []
+    available = {str(name).lower() for name in (probe_names or [])}
+    mode_aliases = {"weave": "interleave", "mtime": "updated", "chrono": "updated"}
+    tokens = str(dargs or "").split()
+    if tokens and tokens[0].lower() == "read":
+        tokens = tokens[1:]
+    for extra in tokens:
+        token = extra.strip().lower()
+        signed_match = re.fullmatch(r"([+-])([a-z_][a-z0-9_-]*)", token)
+        if signed_match:
+            pname = signed_match.group(2).replace("-", "_")
+            if pname.startswith("probe_") and pname[len("probe_"):] in available:
+                pname = pname[len("probe_"):]
+            if pname not in available:
+                return None, (
+                    f"Unknown signed read probe '{signed_match.group(2)}'. "
+                    f"Active: {', '.join(sorted(available)) or 'none'}."
+                )
+            spec = (1 if signed_match.group(1) == "+" else -1, pname)
+            prior_sign = next((sign for sign, name in signed_probe_specs if name == pname), None)
+            if prior_sign is not None and prior_sign != spec[0]:
+                return None, f"Probe '{pname}' cannot be both toward (+) and away (-) in one read."
+            if spec not in signed_probe_specs:
+                signed_probe_specs.append(spec)
+        elif token in {"order", "reply", "interleave", "weave", "updated", "mtime", "chrono"}:
+            mode = mode_aliases.get(token, token)
+        elif token in {"satisfied", "settled", "until"}:
+            until_settled = True
+        elif token.startswith("probe_") or token in available:
+            pname = token[len("probe_"):] if token.startswith("probe_") else token
+            if pname not in available:
+                return None, (
+                    f"Unknown stop probe '{pname}'. "
+                    f"Active: {', '.join(sorted(available)) or 'none'}."
+                )
+            until_probe = pname
+            until_settled = False
+        else:
+            try:
+                count = int(token)
+                explicit_count = True
+            except ValueError:
+                return None, f"Unrecognized :doc read argument '{extra}'."
+    if (until_settled or until_probe) and not explicit_count:
+        count = max_autoread
+    count = max(1, min(int(max_autoread), count))
+    return {
+        "remaining": count,
+        "mode": mode,
+        "probe_specs": signed_probe_specs,
+        "until_settled": until_settled,
+        "until_probe": until_probe,
+        "settled_streak": 0,
+    }, None
 
 
 def unique_rewrite_path(path):
@@ -1360,6 +3509,8 @@ def build_probe_init_macro(probes):
             continue
         if probes[name].get("exposed"):
             lines.append(f":probe expose {name}")
+        if probe_is_released(probes[name]):
+            lines.append(f":probe release {name}")
     return lines
 
 
@@ -1480,6 +3631,20 @@ def command_keeps_semicolons(line):
     return low.startswith(":macro ") or low.startswith(":game restore ")
 
 
+def command_takes_colon_command_arg(line):
+    """Commands where a later ':word' is an argument, not a chained command."""
+    low = (line or "").lstrip().lower()
+    if low.startswith("@"):
+        parts = low.split(maxsplit=1)
+        low = parts[1].strip() if len(parts) == 2 else ""
+    return (
+        low.startswith(":expose ")
+        or low.startswith(":hide ")
+        or low.startswith(":suggest ")
+        or low.startswith(":queue ")
+    )
+
+
 def split_cmd_tool_commands(cmd):
     """Split a model <<TOOL: ...>> request into shell commands.
 
@@ -1538,6 +3703,91 @@ def command_word(cmd):
 
 def command_arg_tail(cmd):
     return parse_command_route(cmd)[2]
+
+
+EXPOSE_STAGE_WORDS = ("stage", "staged", "accept", "on", "expose")
+EXPOSE_DIRECT_WORDS = ("direct", "run", "trust", "free")
+
+
+def parse_expose_prefix(eargs):
+    """Normalize the tokens after ':expose' into
+    (turn_off, target_agent, mode_prefix, rest).
+
+    Canonical grammar puts the mode BEFORE the command --
+    ':expose [off] [@agent] [stage|direct] :command [fixed args...]' --
+    so fixed args can never collide with a mode keyword. '@agent' and the
+    mode may appear in either order; a mode word is only consumed when a
+    ':command' (or '@agent :command') follows it, so bare probe/knob targets
+    are untouched. mode_prefix is None when no leading mode was given -- the
+    legacy trailing position (':expose :cmd direct args') still applies then.
+    """
+    toks = list(eargs)
+    turn_off = False
+    if toks and toks[0].lower() in ("off", "hide", "unexpose"):
+        turn_off = True
+        toks = toks[1:]
+    target_agent = ""
+    mode_prefix = None
+    for _ in range(2):
+        if not toks:
+            break
+        if toks[0].startswith("@") and len(toks) > 1 and not target_agent:
+            target_agent = toks[0]
+            toks = toks[1:]
+            continue
+        low = toks[0].lower()
+        if (
+            mode_prefix is None
+            and (low in EXPOSE_STAGE_WORDS or low in EXPOSE_DIRECT_WORDS)
+            and len(toks) > 1
+            and (toks[1].startswith(":") or toks[1].startswith("@"))
+        ):
+            mode_prefix = "direct" if low in EXPOSE_DIRECT_WORDS else "stage"
+            toks = toks[1:]
+            continue
+        break
+    return turn_off, target_agent, mode_prefix, toks
+
+
+def validate_command_autocomplete(
+    response,
+    prefix="",
+    *,
+    known_commands=(),
+    probe_names=(),
+    knob_names=(),
+):
+    """Normalize one completion and reject locally-detectable invalid syntax."""
+    lines = [line.strip() for line in (response or "").splitlines() if line.strip()]
+    if len(lines) != 1:
+        return None, "the model did not return exactly one command line"
+    candidate = lines[0].strip().strip("`").strip()
+    if len(candidate) >= 2 and candidate[0] == candidate[-1] and candidate[0] in {"'", '"'}:
+        candidate = candidate[1:-1].strip()
+    if prefix and not candidate.startswith(prefix):
+        return None, f"the completion does not start with {prefix!r}"
+    if not candidate.startswith(":"):
+        return None, "the completion is not an operator command"
+
+    if command_word(candidate) == "expose":
+        args = candidate.split()[1:]
+        _turn_off, _target_agent, _mode, rest = parse_expose_prefix(args)
+        if not rest:
+            return None, "the :expose completion has no probe, knob, or :command target"
+        target = rest[0]
+        if target.startswith(":"):
+            word = target.lstrip(":").lower()
+            allowed = {str(name).lstrip(":").lower() for name in known_commands}
+            if word == "expose" or word not in allowed:
+                return None, f"{target!r} is not an exposable command"
+        else:
+            sensor = re.sub(r"[^a-z0-9_]", "_", target.lower())[:40].strip("_")
+            readable = {str(name).lower() for name in probe_names}
+            readable.update(str(name).lower() for name in knob_names)
+            readable.add("memory")
+            if sensor not in readable:
+                return None, f"{target!r} is not an active probe or knob"
+    return candidate, None
 
 
 def apply_command_exposure_args(cmd, exposure):
@@ -1746,15 +3996,17 @@ def build_session_restore_macro(probes, macro_aliases, exposed_commands, exposed
         if word == "expose":
             continue
         record = normalize_command_exposure(mode)
-        command_target = command_exposure_display(word, record, include_args=False)
+        # canonical order: [@agent] [mode] :command [fixed args...] -- mode
+        # before the command so fixed args never collide with mode keywords.
+        agent_prefix = f"{command_exposure_target(record)} " if command_exposure_target(record) else ""
+        mode_word = "direct " if command_exposure_mode(record) == "direct" else ""
         fixed_args = command_exposure_args(record)
         args_suffix = f" {fixed_args}" if fixed_args else ""
-        suffix = " direct" if command_exposure_mode(record) == "direct" else ""
         steer = command_exposure_raw_steer(record)
         steer_suffix = f" steer {steer}" if steer else ""
         because = command_exposure_custom_activation(record)
         because_suffix = f" because {because}" if because else ""
-        lines.append(f":expose {command_target}{suffix}{args_suffix}{steer_suffix}{because_suffix}")
+        lines.append(f":expose {agent_prefix}{mode_word}:{str(word).lstrip(':').lower()}{args_suffix}{steer_suffix}{because_suffix}")
         stats["exposed_commands"] += 1
 
     games_dir = os.path.join(root, "games")
@@ -1897,6 +4149,20 @@ def parse_macro_arg_header(header):
     ]
 
 
+def macro_arg_header_items(arg_specs):
+    """Render parsed/raw macro arg specs back to '# args:' header tokens."""
+    out = []
+    for spec in arg_specs or []:
+        if isinstance(spec, dict):
+            item = spec.get("header") or spec.get("name") or spec.get("raw")
+        else:
+            item = str(spec)
+        item = str(item or "").strip()
+        if item:
+            out.append(item)
+    return out
+
+
 def substitute_macro_params(text, args):
     """Fill $1..$9 (positional), $@ (all args), and named $args in a macro body.
     A param with no supplied arg collapses to empty -- named params behave like
@@ -2031,15 +4297,15 @@ def resolve_probe_choice(pname_raw, options, model=None, config=None, action_nam
         if not model or not config:
             print(Fore.RED + "[Error] Model not available for choice." + Style.RESET_ALL)
             return None
-        
+
         plist = list(options.keys()) if isinstance(options, dict) else list(options)
         refs = tokens[1:]
         ref_str = ""
         if refs:
             ref_str = f"The user has provided the following reference guidance: {' '.join(refs)}\nUse this guidance to inform your selection.\n\n"
-            
+
         print(Fore.CYAN + f"[{base.capitalize()}] Asking the model to select a target for '{action_name}'..." + Style.RESET_ALL)
-        
+
         prompt = (
             f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
             f"You are selecting a target parameter/probe for the action: '{action_name}'.\n"
@@ -2064,14 +4330,970 @@ def resolve_probe_choice(pname_raw, options, model=None, config=None, action_nam
         else:
             print(Fore.YELLOW + f"[Choice] Model selected invalid target '{sug}'. Aborting." + Style.RESET_ALL)
             return None
-            
+
     return pname_raw.replace("probe_", "") if pname_raw.startswith("probe_") else pname_raw
+
+
+# --- :figures -- draw the state-output figures ------------------------------
+# Delegates to scripts/make_lesswrong_figures.py in a subprocess. Building
+# needs matplotlib, which the repo venv does not carry, so the wrapper finds
+# the first interpreter that can draw (this process's python, then PATH
+# pythons) and caches the answer. Listing needs no matplotlib at all -- the
+# figure script imports it lazily.
+FIGURES_SCRIPT = os.path.join(ROOT, "scripts", "make_lesswrong_figures.py")
+_FIGURES_PYTHON = {"exe": None}
+
+
+def _find_figures_python():
+    import importlib.util
+    if importlib.util.find_spec("matplotlib") is not None:
+        return sys.executable
+    if _FIGURES_PYTHON["exe"]:
+        return _FIGURES_PYTHON["exe"]
+    import shutil
+    import subprocess
+    seen = {os.path.normcase(os.path.abspath(sys.executable))}
+    for name in ("python", "python3", "py"):
+        exe = shutil.which(name)
+        if not exe:
+            continue
+        key = os.path.normcase(os.path.abspath(exe))
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            ok = subprocess.run(
+                [exe, "-c", "import matplotlib"], capture_output=True, timeout=60
+            ).returncode == 0
+        except Exception:
+            ok = False
+        if ok:
+            _FIGURES_PYTHON["exe"] = exe
+            return exe
+    return None
+
+
+def _run_figures_script(args, require_mpl=True):
+    """Run the figure script with args; returns (ok, printable lines)."""
+    import subprocess
+    exe = _find_figures_python() if require_mpl else sys.executable
+    if not exe:
+        return False, [
+            "no python with matplotlib found (checked this process and PATH pythons).",
+            "install one -- e.g.  python -m pip install matplotlib  -- then retry :figures",
+        ]
+    try:
+        proc = subprocess.run(
+            [exe, FIGURES_SCRIPT] + list(args),
+            capture_output=True, text=True, cwd=ROOT, timeout=300,
+        )
+    except Exception as exc:
+        return False, [f"figure run failed to start: {exc}"]
+    lines = [l for l in (proc.stdout or "").splitlines() if l.strip()]
+    if proc.returncode != 0:
+        tail = [l for l in (proc.stderr or "").splitlines() if l.strip()][-6:]
+        return False, (lines + tail) or [f"figure run exited {proc.returncode} with no output"]
+    return True, lines or ["(no output)"]
+
+
+# --- :figure -- draw live tracked shell values ------------------------------
+# Singular :figure is the live telemetry command: it reads the same named
+# streams that :tune, :calibrate, :label, and :probe values use. Plural
+# :figures stays the publication-figure builder above.
+LIVE_FIGURE_DIR = os.path.join(ROOT, "invariants", "out", "figures")
+LIVE_FIGURE_COLORS = (
+    "#2f6fed", "#13866f", "#c76f1b", "#b83b4a", "#7556c8",
+    "#537188", "#a65f2b", "#4b8f8c", "#6f7c85", "#9467bd",
+)
+
+
+def _figure_esc(value):
+    import html
+    return html.escape(str(value), quote=True)
+
+
+def _figure_slug(value):
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value)).strip("._-")
+    return text[:90] or "live"
+
+
+def _figure_float(value):
+    import math
+    if isinstance(value, bool):
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _figure_numeric_keys(turn_log):
+    keys = set()
+    for row in turn_log:
+        for key, value in row.items():
+            if key != "ts" and _figure_float(value) is not None:
+                keys.add(key)
+    return keys
+
+
+def _figure_rows_for_key(turn_log, key, limit):
+    rows = list(turn_log)
+    if limit is not None:
+        rows = rows[-limit:]
+    values = []
+    for row in rows:
+        if key in row:
+            v = _figure_float(row.get(key))
+            if v is not None:
+                values.append(v)
+    return values
+
+
+def _figure_trigger_for_key(key, tuner, probes):
+    if key in tuner.triggers:
+        return tuner.triggers.get(key)
+    if key in probes:
+        return tuner.triggers.get(f"probe_{key}")
+    if key.startswith("probe_"):
+        return tuner.triggers.get(key)
+    return None
+
+
+def _figure_probe_for_key(key, probes):
+    if key in probes:
+        return probes[key]
+    if key.startswith("probe_") and key[len("probe_"):] in probes:
+        return probes[key[len("probe_"):]]
+    return None
+
+
+def _figure_outcome_series(key, tuner, limit):
+    """Make the OUTCOME channel mappable: outcome:<name> draws a trigger's
+    credited outcomes in credit order; lift:<name> draws the rolling lift
+    trajectory -- mean(fired) - mean(unfired) over everything credited so far.
+    The honest 'did firing actually help' readout becomes a drawable stream
+    instead of a single number buried in a note."""
+    mode, _, name = key.partition(":")
+    mode = mode.lower()
+    name = name.strip()
+    trig = tuner.triggers.get(name) or tuner.triggers.get(f"probe_{name}")
+    if trig is None or not trig.outcomes:
+        return None
+    pairs = list(trig.outcomes)
+    if limit is not None and mode == "outcome":
+        pairs = pairs[-limit:]
+    ostats = trig.outcome_stats()
+    if mode == "outcome":
+        values = [float(o) for _s, o in pairs]
+        threshold = None
+    else:
+        # Rolling lift: re-derive the fired/unfired means as each credit
+        # lands, so the drawn line shows the correlation stabilizing (or not).
+        values = []
+        fired, unfired = [], []
+        for s, o in pairs:
+            (fired if trig._fires(s) else unfired).append(float(o))
+            if fired and unfired:
+                values.append(sum(fired) / len(fired) - sum(unfired) / len(unfired))
+        if limit is not None:
+            values = values[-limit:]
+        threshold = 0.0
+    if not values:
+        return None
+    note_bits = [
+        "tuner.outcomes", f"n={len(values)}", f"last={values[-1]:+.4g}",
+        f"fired_mean={ostats['fired_outcome']}", f"unfired_mean={ostats['unfired_outcome']}",
+        f"lift={ostats['lift']}",
+    ]
+    # The continuous correlation next to the binary lift: r between the
+    # credited signal and the outcome that followed it, in credit order.
+    sig_r = _figure_corr([float(s) for s, _o in pairs], [float(o) for _s, o in pairs])
+    if sig_r is not None:
+        note_bits.append(f"signal_r={sig_r:+.2f}")
+    return {
+        "key": key,
+        "label": f"{mode}:{getattr(trig, 'name', name)}",
+        "values": values,
+        "threshold": threshold,
+        "comparator": ">=",
+        "note": " | ".join(note_bits),
+    }
+
+
+def _figure_series_for_key(key, tuner, probes, turn_log, limit):
+    if key.lower().startswith(("outcome:", "lift:")):
+        return _figure_outcome_series(key, tuner, limit)
+    label = key
+    source = "turn_log"
+    values = _figure_rows_for_key(turn_log, key, limit)
+
+    trig = _figure_trigger_for_key(key, tuner, probes)
+    if not values and trig is not None and trig.signals:
+        source = "tuner.signals"
+        values = list(trig.signals)
+        if limit is not None:
+            values = values[-limit:]
+    if not values and trig is not None and trig.outcomes:
+        source = "tuner.outcome_values"
+        values = [float(sig) for sig, _outcome in trig.outcomes]
+        if limit is not None:
+            values = values[-limit:]
+    pdata = _figure_probe_for_key(key, probes)
+    if not values and pdata is not None and pdata.get("history"):
+        source = "probe.raw_history"
+        values = [float(v) for v in pdata.get("history", [])]
+        if limit is not None:
+            values = values[-limit:]
+    if not values and trig is not None:
+        source = "current_value"
+        values = [float(trig.value)]
+
+    if not values:
+        return None
+
+    threshold = None
+    comparator = ">="
+    note_bits = [source, f"n={len(values)}", f"last={values[-1]:+.4g}"]
+    if trig is not None:
+        threshold = float(trig.value)
+        comparator = trig.comparator
+        stats = trig.stats()
+        if stats.get("kind"):
+            note_bits.append(stats["kind"])
+        if stats.get("fire_rate") is not None:
+            note_bits.append(f"fire={stats['fire_rate']}")
+        if stats.get("lift") is not None:
+            note_bits.append(f"lift={stats['lift']}")
+        if stats.get("n_credited"):
+            note_bits.append(f"credited={stats['n_credited']}")
+    return {
+        "key": key,
+        "label": label,
+        "values": values,
+        "threshold": threshold,
+        "comparator": comparator,
+        "note": " | ".join(note_bits),
+    }
+
+
+def _figure_available_names(tuner, probes, turn_log):
+    names = set(_figure_numeric_keys(turn_log))
+    names.update(tuner.triggers.keys())
+    names.update(probes.keys())
+    names.update(f"probe_{p}" for p in probes.keys())
+    names.update(f"outcome:{n}" for n, t in tuner.triggers.items() if t.outcomes)
+    names.update(f"lift:{n}" for n, t in tuner.triggers.items() if t.outcomes)
+    return sorted(names)
+
+
+def _figure_group_tokens(tokens, tuner, probes, turn_log):
+    if not tokens:
+        tokens = ["recent"]
+    numeric = _figure_numeric_keys(turn_log)
+    out = []
+    for token in tokens:
+        low = token.lower()
+        if low == "recent":
+            recent = []
+            if turn_log:
+                last = turn_log[-1]
+                recent = [k for k in last if k != "ts" and _figure_float(last.get(k)) is not None]
+            out.extend(recent or sorted(numeric)[:12])
+        elif low == "all":
+            out.extend(_figure_available_names(tuner, probes, turn_log))
+        elif low == "probes":
+            out.extend(f"probe_{p}" for p in sorted(probes))
+        elif low == "knobs":
+            out.extend(
+                name for name, trig in sorted(tuner.triggers.items())
+                if trig.kind == "coefficient"
+            )
+        elif low == "streams":
+            out.extend(
+                name for name, trig in sorted(tuner.triggers.items())
+                if trig.kind == "threshold" and not name.startswith("probe_")
+            )
+            out.extend(k for k in sorted(numeric) if not k.startswith("probe_"))
+        elif low == "phen":
+            out.extend(k for k in sorted(numeric | set(tuner.triggers)) if k.startswith("phen_"))
+        elif low in ("outcome", "outcomes", "lift", "lifts"):
+            prefix = "lift" if low.startswith("lift") else "outcome"
+            out.extend(f"{prefix}:{n}" for n, t in sorted(tuner.triggers.items()) if t.outcomes)
+        elif low.startswith(("outcome:", "lift:")):
+            out.append(token)
+        else:
+            stream = resolve_stream(token, tuner)
+            if stream is not None:
+                out.append(stream)
+            elif token in probes:
+                out.append(f"probe_{token}")
+            else:
+                out.append(token)
+    seen = set()
+    unique = []
+    for key in out:
+        if key not in seen:
+            seen.add(key)
+            unique.append(key)
+    return unique
+
+
+def _parse_live_figure_args(raw):
+    toks = raw.split()
+    mode = "draw"
+    limit = 120
+    out_path = None
+    names = []
+    i = 0
+    while i < len(toks):
+        tok = toks[i]
+        low = tok.lower()
+        if low in ("list", "ls", "--list", "-l"):
+            mode = "list"
+            i += 1
+        elif low in ("patterns", "pattern", "detect", "analysis", "analyze"):
+            mode = "patterns"
+            i += 1
+        elif low in ("last", "n", "--last", "--n") and i + 1 < len(toks):
+            limit = max(1, int(float(toks[i + 1])))
+            i += 2
+        elif low in ("out", "--out") and i + 1 < len(toks):
+            out_path = toks[i + 1]
+            i += 2
+        else:
+            names.append(tok)
+            i += 1
+    return mode, names, limit, out_path
+
+
+def _write_live_figure_svg(series, out_path=None, title="Live tracked values"):
+    os.makedirs(LIVE_FIGURE_DIR, exist_ok=True)
+    if out_path:
+        path = out_path
+        if not os.path.isabs(path):
+            path = os.path.join(ROOT, path)
+    else:
+        stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        slug = _figure_slug("_".join(s["key"] for s in series[:4]))
+        path = os.path.join(LIVE_FIGURE_DIR, f"live_{stamp}_{slug}.svg")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    width = 980
+    left = 235
+    chart_w = 560
+    row_h = 82 if any(s.get("patterns") for s in series) else 62
+    top = 92
+    height = max(190, top + row_h * len(series) + 36)
+    ink = "#172026"
+    muted = "#5f6b73"
+    grid = "#d7dde2"
+    bg = "#fbfcfd"
+
+    def pts(values, x, y, w, h):
+        vals = list(values)
+        if len(vals) == 1:
+            vals = vals * 2
+        lo, hi = min(vals), max(vals)
+        if abs(hi - lo) < 1e-12:
+            lo -= 1.0
+            hi += 1.0
+        parts = []
+        for i, val in enumerate(vals):
+            px = x + (w * i / max(1, len(vals) - 1))
+            py = y + h - ((val - lo) / (hi - lo) * h)
+            parts.append(f"{px:.1f},{py:.1f}")
+        return " ".join(parts), lo, hi
+
+    body = [
+        f'<text class="title" x="28" y="38">{_figure_esc(title)}</text>',
+        '<text class="sub" x="28" y="62">Each row is scaled independently: use shape, direction, threshold, and last value, not cross-row magnitude.</text>',
+    ]
+    for i, item in enumerate(series):
+        y = top + i * row_h
+        color = LIVE_FIGURE_COLORS[i % len(LIVE_FIGURE_COLORS)]
+        values = item["values"]
+        line, lo, hi = pts(values, left, y, chart_w, 42)
+        body.append(f'<text class="label" x="28" y="{y + 23}">{_figure_esc(item["label"][:30])}</text>')
+        body.append(f'<line x1="{left}" y1="{y + 21}" x2="{left + chart_w}" y2="{y + 21}" stroke="{grid}" stroke-width="1"/>')
+        if item.get("threshold") is not None and lo <= item["threshold"] <= hi:
+            ty = y + 42 - ((item["threshold"] - lo) / (hi - lo) * 42)
+            body.append(f'<line x1="{left}" y1="{ty:.1f}" x2="{left + chart_w}" y2="{ty:.1f}" stroke="#8a96a3" stroke-dasharray="4 4" stroke-width="1"/>')
+        body.append(f'<polyline points="{line}" fill="none" stroke="{color}" stroke-width="2.5"/>')
+        body.append(f'<text class="small" x="{left + chart_w + 16}" y="{y + 13}">min={lo:+.3g} max={hi:+.3g}</text>')
+        body.append(f'<text class="small" x="{left + chart_w + 16}" y="{y + 31}">{_figure_esc(item["note"][:44])}</text>')
+        if item.get("patterns"):
+            patt = "; ".join(p["summary"] for p in item["patterns"][:3])
+            body.append(f'<text class="small" x="{left + chart_w + 16}" y="{y + 49}">{_figure_esc(patt[:52])}</text>')
+
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img">
+  <title>{_figure_esc(title)}</title>
+  <rect width="100%" height="100%" fill="{bg}"/>
+  <style>
+    text {{ font-family: Inter, Segoe UI, Arial, sans-serif; fill: {ink}; }}
+    .title {{ font-size: 22px; font-weight: 700; }}
+    .sub {{ font-size: 13px; fill: {muted}; }}
+    .label {{ font-size: 13px; }}
+    .small {{ font-size: 11px; fill: {muted}; }}
+  </style>
+  {chr(10).join(body)}
+</svg>
+"""
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(svg)
+    return path
+
+
+def _figure_mean(values):
+    return sum(values) / len(values) if values else None
+
+
+def _figure_stdev(values):
+    if len(values) < 2:
+        return 0.0
+    mu = _figure_mean(values)
+    return (sum((v - mu) ** 2 for v in values) / (len(values) - 1)) ** 0.5
+
+
+def _figure_median(values):
+    if not values:
+        return None
+    vals = sorted(values)
+    n = len(vals)
+    mid = n // 2
+    if n % 2:
+        return vals[mid]
+    return (vals[mid - 1] + vals[mid]) / 2
+
+
+def _figure_corr(xs, ys):
+    if len(xs) != len(ys) or len(xs) < 3:
+        return None
+    mx, my = _figure_mean(xs), _figure_mean(ys)
+    sx = sum((x - mx) ** 2 for x in xs)
+    sy = sum((y - my) ** 2 for y in ys)
+    if sx <= 1e-12 or sy <= 1e-12:
+        return None
+    return sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / ((sx * sy) ** 0.5)
+
+
+def _figure_turn_pairs(turn_log, left_key, right_key, limit=None, lag=0):
+    rows = list(turn_log)
+    if limit is not None:
+        rows = rows[-limit:]
+    xs, ys = [], []
+    for i, row in enumerate(rows):
+        j = i + lag
+        if j < 0 or j >= len(rows):
+            continue
+        if left_key not in row or right_key not in rows[j]:
+            continue
+        x = _figure_float(row.get(left_key))
+        y = _figure_float(rows[j].get(right_key))
+        if x is None or y is None:
+            continue
+        xs.append(x)
+        ys.append(y)
+    return xs, ys
+
+
+def _figure_pattern(kind, summary, score, **extra):
+    payload = {"kind": kind, "summary": summary, "score": round(float(score), 4)}
+    payload.update(extra)
+    return payload
+
+
+def _figure_series_patterns(item, turn_log, tuner, limit):
+    values = list(item.get("values") or [])
+    key = item.get("key")
+    patterns = []
+    n = len(values)
+    if n < 4:
+        return [_figure_pattern("insufficient", "too few points", 0.0, n=n)]
+
+    mu = _figure_mean(values)
+    sd = _figure_stdev(values)
+    span = max(values) - min(values)
+    idx = list(range(n))
+    trend_r = _figure_corr(idx, values)
+    if trend_r is not None and n >= 6 and abs(trend_r) >= 0.48 and span > max(1e-9, 0.5 * sd):
+        direction = "rising" if trend_r > 0 else "falling"
+        delta = values[-1] - values[0]
+        patterns.append(
+            _figure_pattern(
+                "trend",
+                f"{direction} trend r={trend_r:+.2f}",
+                abs(trend_r),
+                r=round(trend_r, 4),
+                delta=round(delta, 6),
+            )
+        )
+
+    if n >= 8 and sd > 1e-12:
+        q = max(2, n // 4)
+        prev = values[-2 * q:-q]
+        recent = values[-q:]
+        if prev and recent:
+            shift = _figure_mean(recent) - _figure_mean(prev)
+            effect = shift / sd
+            if abs(effect) >= 0.75:
+                direction = "upshift" if effect > 0 else "downshift"
+                patterns.append(
+                    _figure_pattern(
+                        "regime_shift",
+                        f"{direction} {effect:+.2f}sd",
+                        abs(effect),
+                        recent_mean=round(_figure_mean(recent), 6),
+                        previous_mean=round(_figure_mean(prev), 6),
+                    )
+                )
+
+    med = _figure_median(values)
+    mad = _figure_median([abs(v - med) for v in values]) if med is not None else None
+    if mad and mad > 1e-12:
+        spike_idx = [i for i, v in enumerate(values) if abs(0.6745 * (v - med) / mad) >= 3.5]
+        if spike_idx:
+            patterns.append(
+                _figure_pattern(
+                    "spikes",
+                    f"{len(spike_idx)} robust spike(s)",
+                    min(3.0, len(spike_idx) / max(1, n) * 10),
+                    indices=spike_idx[-12:],
+                )
+            )
+
+    deltas = [values[i + 1] - values[i] for i in range(n - 1)]
+    nonzero = [d for d in deltas if abs(d) > max(1e-9, 0.03 * (span or 1.0))]
+    if len(nonzero) >= 5:
+        sign_changes = sum(
+            1 for a, b in zip(nonzero, nonzero[1:])
+            if (a > 0 > b) or (a < 0 < b)
+        )
+        osc = sign_changes / max(1, len(nonzero) - 1)
+        if osc >= 0.58 and sd > 1e-12:
+            patterns.append(
+                _figure_pattern(
+                    "oscillation",
+                    f"oscillates sign-change={osc:.0%}",
+                    osc,
+                    sign_change_rate=round(osc, 4),
+                )
+            )
+
+    repeated = sum(1 for v in values if abs(v - values[-1]) <= max(1e-9, 0.02 * (span or 1.0)))
+    if n >= 8 and repeated / n >= 0.7:
+        patterns.append(
+            _figure_pattern(
+                "plateau",
+                f"plateau near {values[-1]:+.3g}",
+                repeated / n,
+                fraction=round(repeated / n, 4),
+            )
+        )
+
+    threshold = item.get("threshold")
+    if threshold is not None:
+        comparator = item.get("comparator") or ">="
+        fired = [
+            (v <= threshold) if comparator == "<=" else (v >= threshold)
+            for v in values
+        ]
+        crossings = sum(1 for a, b in zip(fired, fired[1:]) if a != b)
+        fire_rate = sum(1 for f in fired if f) / len(fired)
+        if crossings or fire_rate in (0.0, 1.0):
+            patterns.append(
+                _figure_pattern(
+                    "threshold",
+                    f"threshold fire={fire_rate:.0%} cross={crossings}",
+                    max(abs(fire_rate - 0.5), min(1.0, crossings / max(1, n - 1))),
+                    threshold=round(threshold, 6),
+                    comparator=comparator,
+                    fire_rate=round(fire_rate, 4),
+                    crossings=crossings,
+                )
+            )
+
+    if key:
+        xs, ys = _figure_turn_pairs(turn_log, key, "sense", limit=limit, lag=0)
+        r = _figure_corr(xs, ys)
+        if r is not None and len(xs) >= 6 and abs(r) >= 0.35:
+            patterns.append(
+                _figure_pattern(
+                    "sense_correlation",
+                    f"sense corr r={r:+.2f}",
+                    abs(r),
+                    n=len(xs),
+                    r=round(r, 4),
+                )
+            )
+        xs, ys = _figure_turn_pairs(turn_log, key, "sense", limit=limit, lag=1)
+        lr = _figure_corr(xs, ys)
+        if lr is not None and len(xs) >= 6 and abs(lr) >= 0.35:
+            patterns.append(
+                _figure_pattern(
+                    "next_turn_sense",
+                    f"next-sense r={lr:+.2f}",
+                    abs(lr),
+                    n=len(xs),
+                    r=round(lr, 4),
+                )
+            )
+
+        numeric = sorted(_figure_numeric_keys(turn_log))
+        movers = []
+        for other in numeric:
+            if other in (key, "ts"):
+                continue
+            ox, oy = _figure_turn_pairs(turn_log, key, other, limit=limit, lag=0)
+            cr = _figure_corr(ox, oy)
+            if cr is not None and len(ox) >= 8 and abs(cr) >= 0.5:
+                movers.append((abs(cr), cr, other, len(ox)))
+        movers.sort(reverse=True)
+        if movers:
+            top = movers[:3]
+            summary = ", ".join(f"{name}:{r:+.2f}" for _abs, r, name, _n in top)
+            patterns.append(
+                _figure_pattern(
+                    "co_movers",
+                    f"co-moves {summary}",
+                    top[0][0],
+                    streams=[{"name": name, "r": round(r, 4), "n": n2} for _abs, r, name, n2 in top],
+                )
+            )
+
+        # Works for plain trigger keys AND the outcome:/lift: map keys, with
+        # the probe_ fallback -- any credited stream is outcome-correlatable.
+        base_key = str(key).split(":", 1)[1] if str(key).lower().startswith(("outcome:", "lift:")) else str(key)
+        trig = tuner.triggers.get(base_key) or tuner.triggers.get(f"probe_{base_key}")
+        if trig is not None and trig.outcomes:
+            ox = [float(sig) for sig, _out in trig.outcomes]
+            oy = [float(out) for _sig, out in trig.outcomes]
+            orr = _figure_corr(ox, oy)
+            if orr is not None and len(ox) >= 6 and abs(orr) >= 0.35:
+                patterns.append(
+                    _figure_pattern(
+                        "credited_outcome",
+                        f"outcome corr r={orr:+.2f}",
+                        abs(orr),
+                        n=len(ox),
+                        r=round(orr, 4),
+                    )
+                )
+
+    patterns.sort(key=lambda p: p.get("score", 0.0), reverse=True)
+    if not patterns:
+        patterns.append(
+            _figure_pattern(
+                "stable",
+                f"stable mean={mu:+.3g} sd={sd:+.3g}",
+                0.05,
+                mean=round(mu, 6),
+                stdev=round(sd, 6),
+            )
+        )
+    return patterns[:8]
+
+
+def _write_live_figure_patterns(path, series):
+    sidecar = os.path.splitext(path)[0] + ".patterns.json"
+    payload = {
+        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "figure": os.path.relpath(path, ROOT),
+        "series": [
+            {
+                "key": item["key"],
+                "n": len(item.get("values") or []),
+                "last": item.get("values", [None])[-1],
+                "threshold": item.get("threshold"),
+                "patterns": item.get("patterns") or [],
+            }
+            for item in series
+        ],
+    }
+    with open(sidecar, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2)
+    return sidecar
+
+
+def build_live_figure(raw_args, tuner, probes, turn_log):
+    mode, name_tokens, limit, out_path = _parse_live_figure_args(raw_args)
+    if mode == "list":
+        names = _figure_available_names(tuner, probes, turn_log)
+        groups = {
+            "probes": [n for n in names if n.startswith("probe_")],
+            "knobs": [n for n in names if n in tuner.triggers and tuner.triggers[n].kind == "coefficient"],
+            "streams": [
+                n for n in names
+                if not n.startswith("probe_")
+                and (n not in tuner.triggers or tuner.triggers[n].kind == "threshold")
+            ],
+        }
+        lines = [
+            "usage: :figure [list|patterns|recent|all|probes|knobs|streams|phen|outcomes|<name>|outcome:<name>|lift:<name> ...] [last N] [out path.svg]",
+            "examples: :figure recent | :figure patterns probes | :figure sense memory_need probe_curiosity | :figure outcomes | :figure lift:conversation_productive",
+        ]
+        for label, vals in groups.items():
+            preview = ", ".join(vals[:24]) if vals else "(none)"
+            suffix = f" ... +{len(vals) - 24}" if len(vals) > 24 else ""
+            lines.append(f"{label}: {preview}{suffix}")
+        return True, lines, None
+
+    keys = _figure_group_tokens(name_tokens, tuner, probes, turn_log)
+    if not keys:
+        return False, ["no figure targets found; try ':figure list'."], None
+
+    series = []
+    missing = []
+    for key in keys:
+        item = _figure_series_for_key(key, tuner, probes, turn_log, limit)
+        if item is None:
+            missing.append(key)
+        else:
+            series.append(item)
+    if not series:
+        hint = did_you_mean(missing[0], _figure_available_names(tuner, probes, turn_log)) if missing else ""
+        return False, [f"no tracked values for {', '.join(missing) or 'that request'}.{hint} Try ':figure list'."], None
+    if len(series) > 80:
+        series = series[:80]
+        missing.append("truncated_to_80_rows")
+    if mode == "patterns":
+        for item in series:
+            item["patterns"] = _figure_series_patterns(item, turn_log, tuner, limit)
+    path = _write_live_figure_svg(
+        series,
+        out_path=out_path,
+        title="Live tracked patterns" if mode == "patterns" else "Live tracked values",
+    )
+    rel = os.path.relpath(path, ROOT)
+    lines = [f"wrote {rel} ({len(series)} row(s), last {limit} point(s) each)"]
+    if mode == "patterns":
+        sidecar = _write_live_figure_patterns(path, series)
+        lines.append(f"patterns saved {os.path.relpath(sidecar, ROOT)}")
+        for item in series[:8]:
+            top = item.get("patterns") or []
+            if top:
+                lines.append(f"{item['key']}: " + "; ".join(p["summary"] for p in top[:3]))
+    if missing:
+        lines.append("skipped: " + ", ".join(missing[:12]) + (" ..." if len(missing) > 12 else ""))
+    return True, lines, path
+
+
+# --- :benchmark -- score the live model, current tuning applied -------------
+# Runs a named item set through the SAME generation path as a conversation
+# turn: knobs synced into config plus the standing prioritize/exposed probe
+# output steers. Turn-specific steers (memory lanes, claimmap tags) stay out.
+# Because the dispatch loop swaps tuner/probes/config for a targeted agent,
+# '@agent :benchmark ref' measures THAT spawned agent's tuning state, and
+# ':expose :benchmark' hands the tool to the model like any other command.
+BENCHMARK_DIR = os.path.join(ROOT, "invariants", "benchmarks")
+
+
+def _benchmark_refs():
+    try:
+        return sorted(
+            os.path.splitext(f)[0]
+            for f in os.listdir(BENCHMARK_DIR)
+            if f.lower().endswith((".json", ".jsonl", ".csv"))
+        )
+    except OSError:
+        return []
+
+
+def _resolve_benchmark_source(ref):
+    for ext in (".jsonl", ".json", ".csv"):
+        cand = os.path.join(BENCHMARK_DIR, ref + ext)
+        if os.path.exists(cand):
+            return cand
+    return ref  # gsm8k / hf:<dataset> / explicit path; rows_from_source decides
+
+
+def _parse_benchmark_request(bargs):
+    """':benchmark <ref> [n N] [tokens T] [evaluator E] [contract|bare]' -> dict."""
+    toks = bargs.split()
+    req = {"ref": None, "n": 8, "tokens": 96, "evaluator": "number", "style": "bare"}
+    i = 0
+    while i < len(toks):
+        t = toks[i].lower()
+        if t == "n" and i + 1 < len(toks):
+            req["n"] = max(1, int(toks[i + 1]))
+            i += 2
+        elif t in ("tokens", "budget") and i + 1 < len(toks):
+            req["tokens"] = max(16, int(toks[i + 1]))
+            i += 2
+        elif t == "evaluator" and i + 1 < len(toks):
+            req["evaluator"] = toks[i + 1].lower()
+            i += 2
+        elif t in ("contract", "bare"):
+            req["style"] = t
+            i += 1
+        elif req["ref"] is None:
+            req["ref"] = toks[i]
+            i += 1
+        else:
+            raise ValueError(f"unrecognized argument '{toks[i]}'")
+    if req["ref"] is None:
+        raise ValueError("missing benchmark name")
+    if req["evaluator"] not in ("number", "exact", "choice", "contains"):
+        raise ValueError(f"unknown evaluator '{req['evaluator']}'")
+    return req
+
+
+def _run_shell_benchmark(model, config, tuner, probes, prioritize_pin, req, agent_name):
+    """Score req['ref'] on the live model with the current tuning state.
+    Returns (summary, out_path, printable summary lines); prints per-item rows."""
+    import time as _bench_time
+    from invariants.universal_benchmark import (
+        build_benchmark_prompt,
+        evaluate_response,
+        examples_from_rows,
+        format_choices,
+        rows_from_source,
+        summarize_results,
+    )
+
+    rows, source_label = rows_from_source(_resolve_benchmark_source(req["ref"]))
+    examples = examples_from_rows(rows, n=req["n"])
+    if not examples:
+        raise ValueError(f"benchmark '{req['ref']}' has no usable items")
+
+    _sync_steer_tunables(tuner, config)
+    handles, steer_notes = [], []
+    prio_alpha = tuner.get("prioritize_alpha", 0.0)
+    if tuner.get("prioritize_gravity", 0.0) > 0:
+        try:
+            g_handles, g_desc = build_gravity_field_handles(model, probes, tuner)
+            if g_handles:
+                handles.extend(g_handles)
+                steer_notes.append(f"gravity[{g_desc}]")
+        except Exception:
+            pass
+    elif prio_alpha and prio_alpha > 0 and probes:
+        from invariants.engine import _steer_handles as _b_steer
+        pdir, plabel, psign = resolve_priority_direction(model, probes, tuner, prioritize_pin)
+        if pdir:
+            try:
+                handles.extend(_b_steer(model, pdir, list(pdir.keys()), prio_alpha * psign))
+                steer_notes.append(f"prioritize:{plabel} alpha={round(prio_alpha, 4)}")
+            except Exception:
+                pass
+    exposed_alpha = tuner.get("exposed_probe_alpha", 0.0)
+    if exposed_alpha and exposed_alpha > 0 and probes:
+        exposed_names = sorted(
+            n for n in probes
+            if probes[n].get("exposed") and not probe_is_released(probes[n])
+        )
+        if exposed_names:
+            from invariants.engine import _steer_handles as _b_steer_exposed
+            edir = build_priority_mix_direction(model, exposed_names, probes, tuner)
+            if edir:
+                try:
+                    handles.extend(_b_steer_exposed(model, edir, list(edir.keys()), exposed_alpha))
+                    steer_notes.append(
+                        f"exposed:{'+'.join(exposed_names)} alpha={round(exposed_alpha, 4)}"
+                    )
+                except Exception:
+                    pass
+
+    result_rows = []
+    t_start = _bench_time.perf_counter()
+    try:
+        for idx, ex in enumerate(examples, 1):
+            if req["style"] == "contract":
+                item_prompt = build_benchmark_prompt(ex, req["evaluator"])
+            else:
+                # minimal native elicitation: the bare item as a chat turn
+                item_prompt = ex.prompt + format_choices(ex.choices)
+            t0 = _bench_time.perf_counter()
+            res = generate_agentic_text(
+                model,
+                instruction=item_prompt,
+                config=config,
+                max_new_tokens=req["tokens"],
+                chatty_log=False,
+                pre_formatted=False,
+            )
+            text = res[0] if isinstance(res, tuple) else res
+            dt = _bench_time.perf_counter() - t0
+            parsed, ev = evaluate_response(ex, text or "", req["evaluator"])
+            result_rows.append({
+                "id": ex.id,
+                "prompt": ex.prompt,
+                "response": text,
+                "parsed": parsed.to_dict(),
+                "eval": ev.to_dict(),
+                "seconds": round(dt, 2),
+            })
+            mark = "excluded" if ev.correct is None else ("Y" if ev.correct else "N")
+            print(
+                Fore.CYAN
+                + f"[Benchmark] {idx}/{len(examples)} id={ex.id} correct={mark} "
+                + f"pred={ev.pred} gold={ev.gold} ({dt:.1f}s)"
+                + Style.RESET_ALL,
+                flush=True,
+            )
+    finally:
+        for h in handles:
+            h.remove()
+
+    summary = summarize_results(result_rows)
+    summary["mean_seconds"] = round(
+        sum(r["seconds"] for r in result_rows) / max(len(result_rows), 1), 2
+    )
+    summary["total_seconds"] = round(_bench_time.perf_counter() - t_start, 1)
+
+    safe_ref = re.sub(r"[^A-Za-z0-9._-]+", "_", req["ref"])
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = os.path.join(
+        ROOT, "invariants", "out", f"shell_benchmark_{safe_ref}_{stamp}.json"
+    )
+    payload = {
+        "ref": req["ref"],
+        "source": source_label,
+        "agent": agent_name,
+        "style": req["style"],
+        "evaluator": req["evaluator"],
+        "n_requested": req["n"],
+        "max_new_tokens": req["tokens"],
+        "steer_notes": steer_notes,
+        "knobs": {
+            k: tuner.get(k, None)
+            for k in (
+                "response_tokens", "prioritize_alpha",
+                "exposed_probe_alpha", "steer_cap_fraction",
+            )
+        },
+        "summary": summary,
+        "rows": result_rows,
+    }
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=1)
+
+    acc = summary.get("accuracy")
+    if acc is None:
+        acc_txt = "n/a (nothing scored)"
+    else:
+        n_right = sum(
+            bool(r["eval"]["correct"]) for r in result_rows
+            if r["eval"]["correct"] is not None
+        )
+        acc_txt = f"{acc:.0%} ({n_right}/{summary['scored_n']})"
+    lines = [
+        f"{req['ref']} -> accuracy {acc_txt}, aligned {summary['aligned_rate']:.0%}, "
+        f"{summary['mean_seconds']}s/item over {summary['n']} items"
+        + (f" ({summary['unsafe_excluded_n']} unsafe excluded)" if summary.get("unsafe_excluded_n") else ""),
+        f"agent={agent_name} style={req['style']} evaluator={req['evaluator']} "
+        f"tokens={req['tokens']} steers[{'; '.join(steer_notes) if steer_notes else 'none'}]",
+        f"saved {os.path.relpath(out_path, ROOT)}",
+    ]
+    return summary, out_path, lines
+
 
 KNOWN_COMMANDS = (
     ":context", ":memory", ":methodmap", ":claimmap", ":steermap", ":steer",
+    ":figure", ":figures", ":benchmark",
     ":probe", ":label", ":calibrate", ":suggest", ":tune", ":doc", ":sandbox",
     ":experts", ":impact", ":clock", ":prioritize", ":release", ":listen",
-    ":timestamps", ":history", ":queue", ":accept", ":reject", ":help", ":expose", ":hide",
+    ":timestamps", ":history", ":queue", ":relations", ":clean", ":accept", ":reject", ":help", ":expose", ":hide",
 )
 
 # Bare command words that are BUILT IN -- a macro alias by one of these names is
@@ -2092,13 +5314,84 @@ COMMAND_HELP_LINES = [
     "          :context, :context on, :context off, :context clear",
     "          :memory, :memory act|talk on|off|status|use [sentence [+probe -probe]]",
     "                :memory use/search [optional args] uses enabled lanes; empty reflects",
-    "                via :prioritize/farthest-from-0; :expose off memory hides model access",
+    "                via :prioritize/farthest-from-0; :expose off memory hides model access;",
+    "                model-made definitions persist with linked accept/reject/label/place feedback",
     "          :methodmap <query>",
     "          :claimmap <first text> || <second text>",
+    "          :consider <trigger_metric> <tool_name> <positive text> || <negative text>",
+    "                (mint a custom activation-triggered steering tool from a contrastive pair;",
+    "                set <tool_name>_alpha with :tune before it can steer)",
     "          :steermap",
     "          :steer  (envelope + observed push distribution + data-implied cap/band)",
+    "          :steer field|gravity init|on|off [default-G] | status  (init loads/migrates every",
+    "                field surface and enables it without inventing laws or moving frozen bodies;",
+    "                prioritize becomes a FIELD, not a pin: every",
+    "                probe is a mass at its direction; each token is pulled along the sphere tangent",
+    "                by mass/((1-cos)+eps)^2, so the push depends on where the state IS. Masses",
+    "                default to signed evidence lift (negative = repulsor), normalized to |sum|=1;",
+    "                prioritize_alpha is the default G but personal/family G can replace it; every",
+    "                push stays inside the envelope cap)",
+    "          :steer mass <probe> <m|auto>  (gravitational coefficient override; negative repels;",
+    "                auto returns it to its live signed lift)",
+    "          :steer g <probe|@anchor|layer:N|family:name> <source|off> [scale [offset]]",
+    "                (personal G; source = number, probe:name, knob:name, status:ram, lift:trigger,",
+    "                outcome:trigger (the credit channel as force -- outcomes steer), family:name,",
+    "                or global; layer G gates/multiplies personal G when both are set)",
+    "          :steer family <name> <G-source|add <node>|remove <node>|drop>",
+    "                (reusable G/time/shape families instead of one global field; set family",
+    "                clocks and shapes by targeting family:<name> with :steer time / :steer shape)",
+    "          :steer time <node> <source|off> [scale [offset]]  (align any probe, anchor, layer,",
+    "                or family clock to a probe, knob, RAM/VRAM status, outcome lift, another layer",
+    "                clock, or constant)",
+    "          :steer shape <node> point|gaussian <width>|shell <radius> <width>|plateau <radius> <edge>",
+    "                (the impact can occupy a smooth region or hollow shell, not only a point;",
+    "                several shaped members in a family compose an irregular holoid)",
+    "          :steer quality <name> formula <expr-in-d> [strength <source> [scale [offset]]]",
+    "                (a quality is not G: it has its own safe distance formula; d=1-cos. Example:",
+    "                smelliness formula 1/(d+0.02)**4 spikes nearby; formulas omit spaces)",
+    "          :steer set <law> quality <quality>  (define a law-described set)",
+    "          :steer set <law> add <node> [compliance <source> [scale [offset]]] [time <v1,v2,...>]",
+    "                (every member has its own live signed compliance and forward-time vector)",
+    "          :steer set <law> exclude|include|remove <node> | drop",
+    "                (set exclusion is exact zero, not a very small coefficient)",
+    "          :steer exclude <node> [off]  (hard whole-field exclusion: the node participates in",
+    "                no G, quality, family, or set law at all; off makes it eligible again)",
+    "          :steer freeze <probe|@anchor> [off]  (inertial coefficient: the mass keeps pulling",
+    "                but it stops moving itself -- a probe's baseline stops drifting; an anchor",
+    "                stops responding to laws. It cannot habituate to its own gravity)",
+    "          :steer anchor <name> [here|from <probe>|mass <m>|drop]  (precision bodies: pin an",
+    "                exact latent point -- the last reply's state, or a copied probe direction --",
+    "                as a mass in the field; frozen by default; bare ':steer anchor' lists)",
+    "          :steer pole <probe|@anchor> <family[+|-]> [off]  (type a body with signed poles;",
+    "                bodies interact ONLY where a law couples their families)",
+    "          :steer law <famA> <famB> <k|off>  (selective magnetism between concept families:",
+    "                k>0 like-poles repel / unlike attract, k<0 flips, unlisted pairs are inert;",
+    "                ':tune gravity_law_step <s>' integrates the forces -- only unfrozen anchors",
+    "                move, probes never do; ':tune gravity_doppler <k>' makes the field's pull",
+    "                velocity-aware: how fast the state approaches or recedes, not just distance)",
+    "          :steer bodies  (the whole physics at a glance: masses, personal Gs, qualities, sets,",
+    "                exclusions, families, clocks, shapes, poles, laws, and knobs)",
+    "          :figure [list|patterns|recent|all|probes|knobs|streams|phen|outcomes|<name>|outcome:<name>|lift:<name> ...] [last N] [out path.svg]",
+    "                (draw live tracked shell values from the same table used by :tune,",
+    "                :calibrate, :label, and :probe values. The outcome channel is",
+    "                mappable: outcome:<name> draws a trigger's credited outcomes,",
+    "                lift:<name> its rolling fired-vs-unfired lift (0-line = does",
+    "                firing help), 'outcomes' maps every credited trigger. 'patterns' adds trend,",
+    "                spike, regime-shift, oscillation, threshold, outcome, sense-correlation,",
+    "                next-turn-sense, and co-movement detection plus a .patterns.json sidecar)",
+    "          :figures [list|all|<which> ...]  (draw the state-output figures from the probe",
+    "                JSONs via scripts/make_lesswrong_figures.py -> docs/figures/; loose names:",
+    "                1/schematic 2/render-u 3/pre-control 4/cot 5/origin; no args = all.",
+    "                Building runs in the first python that has matplotlib; list works anywhere)",
+    "          :benchmark <ref> [n <N>] [tokens <T>] [evaluator number|exact|choice|contains] [contract]",
+    "                (score the LIVE model with the current tuning applied on a named item set:",
+    "                invariants/benchmarks/<ref>.jsonl, gsm8k, hf:<dataset>, or a file path.",
+    "                Bare native elicitation by default; 'contract' asks the FINAL/STATE form.",
+    "                '@agent :benchmark ref' measures that spawned agent; ':benchmark' alone",
+    "                lists the named sets; results land in invariants/out/shell_benchmark_*.json)",
     "          :probe <name> <with it> || <without it>  (mint a named-concept sensor from",
     "                YOUR contrastive framings; scores every turn; :probe lists; :probe drop <name>)",
+    "          :probe [list] | :probe drop <name>  (list probes or delete one)",
     "          :probe choose              (ask the model to draft one runnable :probe <name> A || B command)",
     "          :probe adopt <dim> [<dim> ...]  (turn stored vectors -- ambiguity, disagreement,",
     "                warranted_confidence, organic_correction, ... -- into reply-scoring probes)",
@@ -2109,14 +5402,23 @@ COMMAND_HELP_LINES = [
     "          :probe expose <name> [off]  (let the MODEL consult this sensor itself:",
     "                <<PROBE: name>> reads its last turn, <<PROBE: name || words>> scores",
     "                candidate words. Reading only -- minting/calibrating stay operator acts)",
+    "          :probe release <name> [off]  (released probes remain visible, scored,",
+    "                queryable, and saved, but are excluded from generation vectors,",
+    "                automatic priority/ToT routing, and exposed-probe output steering)",
     "          :probe backfill <name> [n]  (retro-score up to n archived replies in order:",
-    "                rebuilds the probe's stream+credit from the whole record, seeds its history)",
+    "                a name scores/rebuilds only that probe; 'all' explicitly scores every active",
+    "                probe into joint rows; both rebuild credit and seed rolling history)",
     "          :probe values [name|all] [n]  (show the latest centered probe readings;",
     "                aliases: :probe recent, :probe last)",
+    "          :probe show|hide talk|act|all  (toggle whether probe readings print during",
+    "                main conversation, background actions, or both)",
     "          :probe define <name>        (share its initial breakdown -- the WITH/WITHOUT framings",
     "                it was minted from; name accepts choose/auto)",
-    "          :probe explain <name>       (the MODEL explains the probe in its own words: what it",
-    "                senses and when it reads high vs low; name accepts choose/auto)",
+    "          :probe explain <name> [alpha|choose] [prompt]  (default = activation ping sanity check:",
+    "                briefly steer along the probe's direction, envelope-capped, baseline frozen, and",
+    "                print what the nudge evokes -- it may be generic/off-target. Add 'prompt' for the",
+    "                stored WITH/WITHOUT definition-grounded explanation; :probe define shows that",
+    "                saved definition directly. name accepts choose/auto)",
     "          :probe match <probe> <knob> | auto | drive [mult] | validate | check | off",
     "                (tie a probe to its same-concept knob: drive = servo the knob from the",
     "                probe each turn; validate = correlate knob value vs reading (check to read",
@@ -2127,13 +5429,30 @@ COMMAND_HELP_LINES = [
     "                circular strength knobs, binary streams, vacuous p100 caps)",
     "          :queue [calibrate <name> ...|:<command>]  (retry calibrations until enough evidence;",
     "                defer other known commands once, preserving a trailing because-purpose)",
+    "          :relations [active|all|bindings|calibrations|queue|exposure|priority|fields|release|macros]",
+    "                (read-only map of defined relationships: dynamic bindings, probe-match",
+    "                links, calibrated knobs, queued retries, exposures, priority targets,",
+    "                gravity/quality/time/shape links and hard exclusions, release decouplings,",
+    "                and optionally macro aliases)",
+    "          :clean [queue|bindings|priority|all] [apply]  (preview/apply a non-destructive",
+    "                cleanup of queued retries, dynamic tuner bindings, probe-match drive/validate",
+    "                modes, and priority targets; never deletes probes, histories, labels, docs,",
+    "                memories, or learned evidence)",
     "          :label <probe|stream> pos|neg  (judge the MOST RECENT turn on that axis:",
     "                credits its last signal with a human outcome -- supervised evidence",
     "                alongside the automatic sense credit, so lift can reflect your judgment)",
-    "          :suggest  (scan the accrued state for ready moves -- calibrations, knobs",
-    "                explored-but-not-committed, capabilities never tried, probes to backfill",
-    "                or expose -- each with its command; computed, never applied. :suggest apply",
-    "                auto-queues only the safe measurement/calibration ones)",
+    "          :suggest  (scan the accrued state for ready moves, then show a one-line",
+    "                launcher of ALL visible user-facing commands; computed, never applied.",
+    "                :suggest apply auto-queues only the safe measurement/calibration ones)",
+    "          :suggest commands [filter]  (show the full one-line launcher for every",
+    "                visible user-facing command/macro; optional filter narrows by command text)",
+    "          :suggest gravity|field|physics  (shortcut launcher for the whole steer/field",
+    "                command family: Gs, families, clocks, shapes, qualities, sets, exclusions)",
+    "          :suggest :<command prefix>  (complete one operator command from the live",
+    "                command reference; isolated from conversation history and cognitive cache)",
+    "          :suggest because <reason>  (use a probe-specific move only when the internal match",
+    "                clears both an absolute confidence floor and the runner-up; otherwise show",
+    "                state-wide moves and never backfill an arbitrary weak winner)",
     "          :tune, :tune <name> <value>, :tune <name> auto [percentile]",
     "          :tune <knob|probe> dynamic <signed mix> [mult]  (each turn set the target",
     "                to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a",
@@ -2148,7 +5467,11 @@ COMMAND_HELP_LINES = [
     "          :doc <path> rewrite [new_name] [because <why>]  (rewrite a text file",
     "                better and save a sibling in the same folder; omitted name uses *_rewritten)",
     "          :doc next | :doc status      (stage the next chunk / show progress)",
-    "          :doc read [n] [order|interleave|reply|updated] [satisfied]",
+    "          :doc read [n] [order|interleave|reply|updated] [satisfied|<stop_probe>]",
+    "                [+probe -probe ...]  (signed probes rank up to 160 unread candidates:",
+    "                toward + probes and away from - probes, using a bounded 600-char read;",
+    "                scores are read-only and cached.",
+    "                A bare probe name is instead an early-stop threshold)",
     "                (reading as dialogue: the document speaks each turn, the model",
     "                replies. order/interleave/updated advance on the documents' own",
     "                course -- updated = by file mtime, newest first; reply follows",
@@ -2163,10 +5486,12 @@ COMMAND_HELP_LINES = [
     "          :game no | decline           (decline the game the model just proposed)",
     "          :accept [n|all] | :reject [n|all]  (a game may STAGE a command instead of",
     "                running it; nothing a game chose runs until you accept it here)",
-    "          :expose [@agent] :<command> [stage|direct] [fixed args...] [steer <magnitude>] [because <activation>] | :expose off [@agent] <target>",
+    "          :expose [@agent] [stage|direct] :<command> [fixed args...] [steer <magnitude>] [because <activation>] | :expose off [@agent] <target>",
     "                (runtime tool access:",
     "                make/remove a command callable by the model as <<TOOL: :command args>>;",
     "                bare/default = staged for :accept, direct = queued immediately;",
+    "                mode goes BEFORE the command so fixed args are never read as keywords",
+    "                (the legacy ':expose :cmd direct args' order is still accepted);",
     "                fixed args are prefilled; model only supplies the remaining tail;",
     "                because records when the tool should activate; steer records its strength/effect; off works",
     "                for commands, probes, and knobs with the same order)",
@@ -2181,8 +5506,13 @@ COMMAND_HELP_LINES = [
     "          :clock                       (last turn's generation time + tok/s and memory;",
     "                VRAM on GPU, process RAM on CPU-only, both sensed every turn",
     "                as generation_seconds / vram_gb streams)",
-    "          :prioritize                  (rank probes by evidence-weighted lift; steer toward",
-    "                the top each turn via prioritize_alpha -- signed by lift, off at 0)",
+    "          :timestamps on|off|status     (toggle timestamps on the prompt and resumed history)",
+    "          :history                      (legacy pointer: use :context for session transcript",
+    "                controls and :memory for long-term memory)",
+    "          :prioritize [choose|auto|<probe> [alpha]|pin <probe> [alpha]|mix <p...> [alpha]]",
+    "                (rank probes by evidence-weighted lift; <probe> sets a landscape",
+    "                target, pin duplicates direct :steer, mix moves a chosen field; alpha",
+    "                maps to prioritize_alpha and is off at 0)",
     "          :release <tool> [prob]       (decouple a tool's firing from its signal for that",
     "                fraction of turns -- separates causality so credit lift can be trusted)",
     "          :listen on|off|status        (speak mid-reply: lines you type while it",
@@ -2192,6 +5522,8 @@ COMMAND_HELP_LINES = [
     "                exactly restores one; :macro name <alias> <file> aliases it;",
     "                :macro name self [file] writes a macro that REGENERATES probes,",
     "                macros/commands, hidden/exposed command tools, and game configs;",
+    "                in macro/profile files, ':' starts a command, '#' is a comment,",
+    "                and any other nonblank line may run as a model query/text turn;",
     "                :macro strip <alias|file> drops display-only lines in place,",
     "                :macro name strip <src> [dest] writes a stripped copy)",
     "          :install <alias> <file> [goal]       (converts a manual text file into a",
@@ -2210,15 +5542,21 @@ COMMAND_HELP_LINES = [
     "                fill $name; extract them automatically by writing $name in the goal",
     "                or list them at the end. 'dynamic' extracts $args from the 'because'",
     "                clause as well. All non-hidden commands are available; context",
-    "                staged with :memory use is folded into the request)",
-    "          :expect <name>               (intercept the model's next output and save it",
-    "                as a macro <name>; :expect file <path> writes to a file; :expect autocomplete",
-    "                suggests a completion; :expect var <name> saves to a shell variable)",
+    "                staged with :memory use is folded into the request. The macro-authoring",
+    "                turn runs in a low-memory utility profile: ToT routing, synthesis,",
+    "                cache deltas, field/priority steering, and tool seams pause for that turn)",
+    "          :expect <name>               (intercept the model's next output and save it to",
+    "                shell variable $<name> -- later commands substitute $<name> where it appears;",
+    "                :expect macro <name> stages the reply's :commands as a macro; :expect file <path>",
+    "                writes the reply to a file; :expect autocomplete suggests a completion.",
+    "                macro/autocomplete expectations run as low-memory utility turns; '# args:'",
+    "                in a generated macro declares named parameters, while '#' comments never execute)",
     "          :refresh prompts             (reload instructions from invariants/out/prompts)",
     "          :refresh commands            (reload commands from shell_commands.md)",
     "          :refresh macros              (reload available macro aliases)",
     "          :place <probe> <+|->         (nudge a probe's direction toward (+) or away from (-)",
     "                the hidden state of the model's LAST response; useful for manual calibration)",
+    "          :exit | :quit [reason]        (close the shell, recording an optional reason)",
     "          :<macro-name> <args>         (run any aliased macro directly, args -> $1..$9)",
     "          <any :command> because <reason>   (logs why you issued it as provenance)",
     "          :memory use [sentence [+probe -probe]] | :memory choice probe <name>",
@@ -2268,6 +5606,24 @@ def find_command_help_entries(query, lines=COMMAND_HELP_LINES):
     return matches
 
 
+def build_command_autocomplete_reference(prefix, hidden_commands=None):
+    """Return the live, authoritative help entry for a command prefix.
+
+    Autocomplete must be grounded in the same in-memory source that prints the
+    shell help and regenerates docs/COMMANDS.md. Reading a prior conversation
+    about that document is not equivalent: old interpretations can survive
+    after the grammar changes.
+    """
+    visible_lines = visible_command_help_lines(hidden_commands)
+    matches = find_command_help_entries(prefix, visible_lines)
+    spec_matches = spec_help_entries(prefix, hidden_commands)
+    if matches or spec_matches:
+        parts = [line for entry in matches for line in entry]
+        parts.extend(line for entry in spec_matches for line in entry)
+        return "\n".join(parts)
+    return "\n".join(visible_lines)
+
+
 def visible_command_help_lines(hidden_commands=None, lines=COMMAND_HELP_LINES):
     """Filter the command reference for model-facing writing surfaces."""
     hidden_commands = set(hidden_commands or [])
@@ -2283,6 +5639,102 @@ def visible_command_help_lines(hidden_commands=None, lines=COMMAND_HELP_LINES):
             continue
         out.extend(entry)
     return out
+
+
+def _split_command_help_entry(entry):
+    """Return (one_line_command_signature, compact_summary) for help entries."""
+    if not entry:
+        return "", ""
+    head = (entry[0] or "").strip()
+    if head.startswith("Commands:"):
+        head = head[len("Commands:"):].strip()
+    # The help table uses two-or-more spaces before the parenthetical
+    # description, while single spaces are part of the runnable signature.
+    m = re.search(r"\s{2,}\(", head)
+    if m:
+        signature = head[:m.start()].strip()
+        desc_head = head[m.start():].strip()
+    else:
+        signature = head.strip()
+        desc_head = ""
+    full = " ".join(str(line).strip() for line in entry if str(line).strip())
+    if full.startswith("Commands:"):
+        full = full[len("Commands:"):].strip()
+    if full.startswith(signature):
+        summary = full[len(signature):].strip()
+    else:
+        summary = desc_head
+    summary = re.sub(r"\s+", " ", summary).strip()
+    if summary.startswith("(") and summary.endswith(")"):
+        summary = summary[1:-1].strip()
+    if len(summary) > 180:
+        summary = summary[:177].rstrip() + "..."
+    return signature, summary
+
+
+def suggest_command_catalog(hidden_commands=None, macro_aliases=None, solve_macros=None, filter_text=None):
+    """All visible user-facing commands as one-line launcher entries.
+
+    This is intentionally deterministic and grounded in COMMAND_HELP_LINES, not
+    generated by the model. It is used by :suggest so that command discovery is
+    broad enough to include every visible operator command while still obeying
+    :hide.
+    """
+    terms = [t.lower() for t in re.findall(r"\S+", filter_text or "")]
+
+    def wanted(command, summary):
+        if not terms:
+            return True
+        blob = f"{command} {summary}".lower()
+        if command.startswith(":steer") or command.startswith(":prioritize") or command.startswith(":relations"):
+            # Gravity's user-facing family is deliberately richer than the
+            # literal word "gravity": :steer g/family/time/shape/quality/set
+            # are all field-physics commands and should appear when the
+            # operator asks the launcher for gravity/field/physics.
+            blob += (
+                " gravity field physics g mass family time clock shape quality set "
+                "exclude freeze anchor pole law bodies holoid personal"
+            )
+        return all(term in blob for term in terms)
+
+    catalog = []
+    seen = set()
+    for entry in command_help_entries(visible_command_help_lines(hidden_commands)):
+        command, summary = _split_command_help_entry(entry)
+        if not command:
+            continue
+        key = ("command", command)
+        if key in seen or not wanted(command, summary):
+            continue
+        seen.add(key)
+        catalog.append({"kind": "command", "command": command, "summary": summary})
+
+    macro_names = []
+    if isinstance(macro_aliases, dict):
+        macro_names = list(macro_aliases.keys())
+    elif macro_aliases:
+        macro_names = list(macro_aliases)
+    hidden = _hidden_command_words(hidden_commands)
+    macro_meta = {}
+    for name, desc, args in (solve_macros or []):
+        macro_meta[str(name).lstrip(":").lower()] = (desc or "", args or "")
+    for raw_name in sorted(str(n).lstrip(":").lower() for n in macro_names):
+        if not raw_name or raw_name in hidden or raw_name in BUILTIN_COMMANDS:
+            continue
+        desc, args = macro_meta.get(raw_name, ("", ""))
+        arg_names = []
+        for arg in re.split(r"[, ]+", args or ""):
+            clean = arg.strip().strip("<>").lstrip("$")
+            if clean:
+                arg_names.append(f"<{clean}>")
+        command = f":{raw_name}" + (f" {' '.join(arg_names)}" if arg_names else "")
+        summary = desc or "installed macro"
+        key = ("macro", command)
+        if key in seen or not wanted(command, summary):
+            continue
+        seen.add(key)
+        catalog.append({"kind": "macro", "command": command, "summary": summary})
+    return catalog
 
 
 def render_commands_md(lines=COMMAND_HELP_LINES):
@@ -2328,17 +5780,19 @@ def render_commands_md(lines=COMMAND_HELP_LINES):
 
 
 def render_visible_commands_md(hidden_commands=None, lines=COMMAND_HELP_LINES):
-    return render_commands_md(visible_command_help_lines(hidden_commands, lines))
+    return render_commands_md(visible_command_help_lines(hidden_commands, lines)) + render_specs_md(hidden_commands)
 
 
 def write_commands_md(path=None, lines=COMMAND_HELP_LINES):
-    """Write the Markdown command reference to docs/COMMANDS.md (best-effort)."""
-    if path is None:
-        path = os.path.join(ROOT, "docs", "COMMANDS.md")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(render_commands_md(lines))
-    return path
+    """Write the live reference and keep the legacy root copy in sync."""
+    canonical = os.path.join(ROOT, "docs", "COMMANDS.md")
+    targets = [path] if path is not None else [canonical, os.path.join(ROOT, "COMMANDS.md")]
+    content = render_commands_md(lines) + render_specs_md()
+    for target in targets:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "w", encoding="utf-8") as f:
+            f.write(content)
+    return path or canonical
 
 
 def list_solve_macros(macros_dir=None):
@@ -2528,9 +5982,9 @@ def load_stored_direction(model, stem, layers=None):
     layer; a saved probe payload ({direction, framings}) reuses its
     direction; a bare tensor broadcasts one direction across the band.
     `layers` (explicit indices) overrides the live band -- reading depth
-    need not follow steering depth. Always returns a 3-tuple
-    (direction, src_name, exposed); ({}, None, False) when nothing usable
-    exists."""
+    need not follow steering depth. Always returns a 4-tuple
+    (direction, src_name, exposed, dim_mismatch); ({}, None, False, None)
+    when nothing usable exists."""
     want = set(int(x) for x in layers) if layers is not None else None
     src_path = next(
         (p for p in (
@@ -2544,7 +5998,7 @@ def load_stored_direction(model, stem, layers=None):
         None,
     )
     if src_path is None:
-        return {}, None, False
+        return {}, None, False, None
     try:
         payload = torch.load(src_path, map_location="cpu", weights_only=True)
     except Exception:
@@ -2637,6 +6091,23 @@ OPT_IN_CAPABILITY = {"claimmap_alpha", "memory_alpha", "expert_proof_weight", "s
 SUGGEST_APPLY_SAFE = {"calibrate", "commit", "backfill"}
 
 
+def confident_probe_match(probe_scores, min_similarity=0.25, min_margin=0.03):
+    """Select a probe only when the reason match clears a floor and margin."""
+    ranked = sorted(probe_scores.items(), key=lambda item: item[1], reverse=True)
+    if not ranked:
+        return None, ranked
+    best_name, best_score = ranked[0]
+    margin = best_score - ranked[1][1] if len(ranked) > 1 else best_score
+    if best_score < min_similarity or margin < min_margin:
+        return None, ranked
+    return (best_name, best_score), ranked
+
+
+def backfill_scoring_names(probes, names_to_rebuild, request_all=False):
+    """A named backfill is narrow; only the explicit ``all`` form is joint."""
+    return list(probes) if request_all else list(names_to_rebuild)
+
+
 def _explore_value(name, current):
     base = {"claimmap_alpha": 0.02, "memory_alpha": 0.02,
             "expert_proof_weight": 1.0, "steer_layer_sweep": 1}.get(name, 0.02)
@@ -2647,13 +6118,103 @@ def _explore_value(name, current):
     return base
 
 
+def suggest_field_actions(tuner, probes):
+    """Manual, one-line suggestions for the gravity/field system.
+
+    These are not safe for :suggest apply: they change the steering geometry or
+    expose field structure. They belong in ordinary :suggest so gravity is not
+    invisible just because it is not a calibration/backfill move.
+    """
+    probes = probes or {}
+    bodies = steer_bodies()
+    fields = bodies.get("fields") or {}
+    families = bodies.get("g_families") or {}
+    qualities = bodies.get("qualities") or {}
+    sets = bodies.get("sets") or {}
+    anchors = bodies.get("anchors") or {}
+    laws = bodies.get("laws") or {}
+    out = []
+    g_on = bool(tuner and tuner.get("prioritize_gravity", 0.0) > 0)
+    g_now = float(tuner.get("prioritize_alpha", 0.0)) if tuner else 0.0
+    configured_nodes = [
+        node for node, cfg in sorted(fields.items())
+        if cfg.get("g") is not None or cfg.get("family") or cfg.get("time") is not None
+        or cfg.get("shape") is not None or cfg.get("excluded")
+    ]
+    probe_names = sorted(probes)
+
+    if not g_on:
+        out.append((
+            "field",
+            "gravity field is available but off -- initialize the full field schema and enable it",
+            ":steer field init",
+        ))
+    else:
+        masses = gravity_field_masses(probes, tuner)
+        out.append((
+            "field",
+            f"gravity field is on (global G {g_now:g}, {len(masses)} live mass/body entry(s)) -- inspect the whole field",
+            ":steer bodies",
+        ))
+        if not masses and probe_names:
+            out.append((
+                "field",
+                f"gravity is on but no live masses resolved yet -- give '{probe_names[0]}' an explicit mass",
+                f":steer mass {probe_names[0]} 1",
+            ))
+
+    if probe_names and not any(fields.get(f"probe:{p}", {}).get("g") is not None for p in probe_names):
+        out.append((
+            "field",
+            f"no probe has a personal G override -- bind one body to the global field strength",
+            f":steer g {probe_names[0]} global",
+        ))
+    if not families:
+        out.append((
+            "field",
+            "no G families defined -- make a reusable field family before adding members",
+            ":steer family field_core global",
+        ))
+    if families and probe_names and not any(fields.get(f"probe:{p}", {}).get("family") for p in probe_names):
+        fname = sorted(families)[0]
+        out.append((
+            "field",
+            f"family:{fname} has no probe member yet -- attach one node to inherit its G/time/shape",
+            f":steer family {fname} add {probe_names[0]}",
+        ))
+    if not qualities:
+        out.append((
+            "field",
+            "no shaped quality laws defined -- create a distance formula such as nearby smelliness",
+            ":steer quality smelliness formula 1/(d+0.02)**4",
+        ))
+    elif not sets and probe_names:
+        qname = sorted(qualities)[0]
+        out.append((
+            "field",
+            f"quality:{qname} exists but no set law uses it -- define a law-described set",
+            f":steer set {qname}_law quality {qname}",
+        ))
+    if not configured_nodes and not anchors and not laws:
+        out.append((
+            "field",
+            "field schema is empty -- list the one-line gravity/field command family",
+            ":suggest commands gravity",
+        ))
+    return out[:6]
+
+
 def suggest_actions(tuner, rows, probes=None, archive_size=0, max_paired=6):
     """Scan the accrued state for READY next moves -- not only calibrations.
     Returns [(category, evidence_line, command), ...] where category is one of
-    'calibrate' | 'commit' | 'explore' | 'backfill' | 'expose'. Deterministic;
+    'calibrate' | 'commit' | 'explore' | 'backfill' | 'expose' | 'field'. Deterministic;
     acting on any of them stays an operator decision."""
     probes = probes or {}
     out = []
+
+    # FIELD / GRAVITY -- behavior-changing, manual-only suggestions that make
+    # the flexible field discoverable alongside the older calibration moves.
+    out.extend(suggest_field_actions(tuner, probes))
 
     # CALIBRATE -- a threshold mis-set on its own distribution (never/always fires).
     for name in sorted(tuner.triggers):
@@ -3029,6 +6590,15 @@ def main():
     # alpha > 0 each reply is steered toward the top-ranked probe (signed by its
     # lift -- toward a helpful concept, away from a harmful one). 0 = off.
     tuner.register("prioritize_alpha", 0.0, kind="coefficient")
+    # Field mechanics stay ordinary live knobs, while personal G/time sources
+    # may point at any other knob or observed stream.
+    tuner.register("prioritize_gravity", 0.0, kind="coefficient")
+    tuner.register("gravity_doppler", 0.0, kind="coefficient")
+    tuner.register("gravity_law_step", 0.0, kind="coefficient")
+    tuner.register("gravity_potential", 0.0, kind="threshold")
+    tuner.register("gravity_time", 1.0, kind="threshold")
+    for _field_knob in ("prioritize_gravity", "gravity_doppler", "gravity_law_step"):
+        tuner.triggers[_field_knob].kind = "coefficient"  # migrate early persisted drafts
     # Exposed-probe steer: when > 0, each reply is ALSO nudged along the probes
     # the operator has exposed to the model (:probe expose <name>) -- lift-weighted
     # and signed just like prioritize (a helpful exposed sensor pulls toward its
@@ -3265,6 +6835,8 @@ def main():
     # this gate is only for real :commands a game would adopt into the queue.
     pending_accept_commands = []
     pending_solve_proposal = None   # a :solve choose/auto macro awaiting :accept
+    solve_expect_contexts = {}      # :solve metadata waiting for its queued :expect macro turn
+    pending_completion_definition_id = None
     pending_help_tool_result = None # model asked for <<HELP>>; served next turn
     help_exposed = False            # when on, the model is told it may call <<HELP>>
     memory_lanes_enabled = {"act": False, "talk": False}
@@ -3528,16 +7100,87 @@ def main():
     _ACTIVE_MODEL = model
     _ACTIVE_TUNER = tuner
     PROBE_DIR = os.path.join(ROOT, "invariants", "out", "probes")
+    stored_probe_histories = load_probe_raw_histories()
+    restored_probe_histories = 0
     try:
         if os.path.isdir(PROBE_DIR):
             for pf in os.listdir(PROBE_DIR):
                 if pf.endswith(".pt"):
                     pname = pf[:-3]
                     pdata = torch.load(os.path.join(PROBE_DIR, pf), weights_only=True)
-                    probes[pname] = {"direction": pdata["direction"], "history": deque(maxlen=40), "framings": pdata.get("framings", ("", "")), "exposed": bool(pdata.get("exposed", False))}
+                    prior_raw = stored_probe_histories.get(pname, [])
+                    probes[pname] = {
+                        "direction": pdata["direction"],
+                        "history": deque(prior_raw, maxlen=40),
+                        "framings": pdata.get("framings", ("", "")),
+                        "exposed": bool(pdata.get("exposed", False)),
+                        "released": bool(pdata.get("released", False)),
+                    }
+                    if prior_raw:
+                        restored_probe_histories += 1
                     tuner.register(f"probe_{pname}", 0.0, kind="threshold", comparator=">=")
     except Exception:
         pass
+    if restored_probe_histories:
+        print(
+            Fore.CYAN
+            + f"[Probe] Restored raw centering baselines for {restored_probe_histories} probe(s)."
+            + Style.RESET_ALL
+        )
+    migrated_prompt_probes = []
+    for pname in sorted(DEFAULT_COMMAND_PROMPT_PROBES & set(probes)):
+        if not probe_is_released(probes[pname]):
+            set_probe_released(probes, pname, True, PROBE_DIR)
+            migrated_prompt_probes.append(pname)
+    if migrated_prompt_probes:
+        print(
+            Fore.CYAN
+            + "[Probe] Released default-command prompt probes from generation impact: "
+            + ", ".join(migrated_prompt_probes)
+            + ". They remain visible and scored."
+            + Style.RESET_ALL
+        )
+
+    doc_probe_score_cache = {}
+
+    def _select_autoread_chunk(library, autoread, last_thought="", earlier_thoughts=""):
+        mode = (autoread or {}).get("mode", "order")
+        signed_specs = list((autoread or {}).get("probe_specs") or [])
+        probe_scores = None
+        if signed_specs:
+            probe_scores, newly_scored, candidate_count = score_unread_document_chunks_by_probes(
+                model,
+                library,
+                probes,
+                signed_specs,
+                cache=doc_probe_score_cache,
+                scan=160,
+            )
+            terms = " ".join(
+                ("+" if sign >= 0 else "-") + name
+                for sign, name in signed_specs
+            )
+            if newly_scored:
+                print(
+                    Fore.CYAN
+                    + f"[Doc] Ranked {candidate_count} unread candidate(s) by {terms}; "
+                    + f"{newly_scored} new chunk forward pass(es), remainder cached."
+                    + Style.RESET_ALL
+                )
+            if candidate_count and not probe_scores:
+                print(
+                    Fore.YELLOW
+                    + f"[Doc] Could not score unread chunks by {terms}; falling back to {mode}."
+                    + Style.RESET_ALL
+                )
+        return select_next_chunk(
+            library,
+            last_thought,
+            mode,
+            earlier_thoughts=earlier_thoughts,
+            probe_scores=probe_scores,
+            probe_terms=signed_specs,
+        )
 
     # Purge stray shadow triggers: never-fed bare thresholds that duplicate a
     # probe (an accidental `:tune <probe-name> <value>` registers one, and it
@@ -3867,7 +7510,8 @@ def main():
                     f"- {pname}: trigger=probe_{pname} value={st.get('value')} "
                     f"signals={st.get('n_signals')} credited={st.get('n_credited')} "
                     f"lift={r.get('lift')} priority={round(float(r.get('priority') or 0.0), 4)} "
-                    f"exposed={bool(pdata.get('exposed'))} framings={a} || {b}"
+                    f"exposed={bool(pdata.get('exposed'))} released={probe_is_released(pdata)} "
+                    f"framings={a} || {b}"
                 )
         else:
             lines.append("Active probe hooks: none in this agent yet; mint/adopt/compose probes in the profile if needed.")
@@ -3904,7 +7548,17 @@ def main():
             lines.append("Model-readable probes/knobs: none")
         macros = sorted(m for m in macro_aliases if m not in hidden_commands)
         lines.append("Macro aliases: " + (", ".join(macros[:max_macros]) + (" ..." if len(macros) > max_macros else "") if macros else "none"))
+        field_context = format_field_prompt_context(active_tuner, active_probes)
+        if field_context:
+            lines.append(field_context)
         return "\n".join(lines)
+
+    def _build_live_prompt(*args, **kwargs):
+        """Every conversational/follow-up prompt gets the current active
+        agent's factual field state; callers can explicitly pass None to omit."""
+        if "field_context" not in kwargs:
+            kwargs["field_context"] = format_field_prompt_context(tuner, probes)
+        return build_prompt(*args, **kwargs)
 
     def _priority_steer_handles(active_probes, active_tuner, active_pin):
         handles = []
@@ -3917,23 +7571,7 @@ def main():
             return handles, prio_steered
         try:
             from invariants.engine import _steer_handles as _p_steer
-            _mix = (active_pin or {}).get("mix")
-            _pin = (active_pin or {}).get("probe")
-            _pdir, _label, _psign = None, None, 1.0
-            if _mix:
-                _md = build_priority_mix_direction(model, _mix, active_probes, active_tuner)
-                if _md:
-                    _pdir, _label, _psign = _md, "mix(" + "+".join(_mix) + ")", 1.0
-            elif _pin and _pin in active_probes:
-                _pdir = active_probes[_pin].get("direction") or None
-                _label = _pin
-                _psign = float((active_pin or {}).get("sign", 1.0) or 1.0)
-            else:
-                _pr = rank_probes(active_probes, active_tuner)
-                if _pr and _pr[0]["priority"] > 0 and _pr[0]["lift"] is not None:
-                    _pdir = active_probes[_pr[0]["name"]].get("direction") or None
-                    _label = _pr[0]["name"]
-                    _psign = 1.0 if _pr[0]["lift"] >= 0 else -1.0
+            _pdir, _label, _psign = resolve_priority_direction(model, active_probes, active_tuner, active_pin)
             if _pdir:
                 handles = list(_p_steer(model, _pdir, list(_pdir.keys()), prio_alpha * _psign))
                 prio_steered = (_label, _psign, prio_alpha)
@@ -4110,6 +7748,7 @@ def main():
         vector file the registry can discover. Names are opaque labels; evidence,
         exposure, and explicit steering are the admission criteria.
         """
+        from invariants.agentic_engine import _sane_fraction
         from invariants.mesa import Committee, MesaObjective
 
         committee = Committee()
@@ -4165,7 +7804,7 @@ def main():
             md = build_priority_mix_direction(model, mix, probes, tuner)
             if md:
                 add_route("mix_" + "_".join(mix), md, born="steer_mix")
-        elif pin and pin in probes:
+        elif pin and pin in probes and not probe_is_released(probes[pin]):
             add_route(
                 f"probe_{pin}",
                 probes[pin].get("direction"),
@@ -4185,7 +7824,10 @@ def main():
             sign = 1.0 if lift is None or float(lift) >= 0 else -1.0
             add_route(f"probe_{pname}", probes[pname].get("direction"), sign=sign, born="calibrated_probe")
 
-        for pname in sorted(n for n, pdata in probes.items() if pdata.get("exposed")):
+        for pname in sorted(
+            n for n, pdata in probes.items()
+            if pdata.get("exposed") and not probe_is_released(pdata)
+        ):
             if cap and len(committee.members) >= cap:
                 break
             add_route(f"probe_{pname}", probes[pname].get("direction"), born="exposed_probe")
@@ -4304,10 +7946,10 @@ def main():
                 pending_document_tool_result = None
                 if staged_reading is None:
                     earlier_reflections = " ".join(list(recent_responses)[:-1])
-                    pick = select_next_chunk(
+                    pick = _select_autoread_chunk(
                         doc_library,
+                        doc_autoread,
                         last_assistant_response,
-                        doc_autoread["mode"],
                         earlier_thoughts=earlier_reflections,
                     )
                     if pick is None:
@@ -4377,7 +8019,7 @@ def main():
                 agent_document_tool_result = pending_document_tool_result
                 pending_document_tool_result = None
                 if agent_document_tool_result is None and doc_autoread and doc_autoread.get("remaining", 0) > 0:
-                    pick = select_next_chunk(doc_library, "", doc_autoread.get("mode", "order"))
+                    pick = _select_autoread_chunk(doc_library, doc_autoread)
                     if pick is not None:
                         doc_session = doc_library[pick["session_index"]]
                         doc_session["cursor"] = pick["chunk_index"]
@@ -4390,10 +8032,11 @@ def main():
 
                 # Generate user input autonomously
                 agent_state_report = _spawn_state_report(replace_agent.name, tuner, probes)
-                r_prompt = build_prompt(
+                r_prompt = _build_live_prompt(
                     agent_state_report + "\n\n[Your turn to respond]",
                     document_tool_result=agent_document_tool_result,
-                    session_context=session_context if session_context_enabled else None
+                    session_context=session_context if session_context_enabled else None,
+                    field_context=None,  # already present in agent_state_report
                 )
                 _r_handles, _r_prio = _priority_steer_handles(probes, tuner, prioritize_pin)
                 try:
@@ -4496,10 +8139,17 @@ def main():
                     # Safely replace $vname if it's not part of a larger word
                     user_input = re.sub(r"\$" + re.escape(vname) + r"\b", lambda _m, v=vval: v, user_input)
             if user_input.startswith(":") and not command_keeps_semicolons(user_input):
-                cmds = _split_macro_commands(user_input)
+                cmds = _split_macro_commands(
+                    user_input,
+                    split_colon_commands=not command_takes_colon_command_arg(user_input),
+                )
                 if len(cmds) > 1:
                     user_input = cmds[0]
                     input_queue.extend([(c, silent_echo) for c in cmds[1:]])
+                elif cmds and "\\:" in user_input and cmds[0] != user_input:
+                    # a '\:' escape suppressed the split; keep the unescaped
+                    # form so handlers see ':cmd' and not a literal backslash
+                    user_input = cmds[0]
 
             # A trailing ' because <reason>' on any command is provenance, not an
             # argument: peel it off, log it, and hand the handler a clean line.
@@ -4620,6 +8270,7 @@ def main():
                     default_self_create = (
                         ":expect macro $alias\n"
                         ":probe persona_author I am defining a cognitive persona using shell macro commands || I am generating conversational text\n"
+                        ":probe release persona_author off\n"
                         ":probe backfill persona_author\n"
                         ":steer persona_author 1.5\n"
                         "The operator wants to create a cognitive persona named '$alias'.\n"
@@ -4633,15 +8284,16 @@ def main():
                         "Use the syntax `:probe <concept_name> <framing with it> || <framing without it>` to define new dimensions.\n"
                         "You can also use `:probe compose ...` to combine existing probes.\n"
                         "You MUST actively use commands like :tune, :steer, and :probe to tune the model's behavior.\n"
-                        "You MUST include `:doc COMMANDS.md` in your macro so the persona knows what shell commands it can use.\n"
+                        "You MUST include `:doc docs/COMMANDS.md` in your macro so the persona reads the live-generated shell reference.\n"
                         "You SHOULD also provide context or system instructions to the persona if appropriate (e.g., by using `:doc` to stage relevant files or `:memory use` for context). "
                         "Output ONLY the commands, one per line. Do not use markdown blocks or conversational text.\n"
-                        ":steer persona_author 0"
+                        ":steer persona_author 0\n"
+                        ":probe release persona_author"
                     )
                     prompt = load_prompt(
                         "self_create",
                         default_self_create,
-                        required_substring=":steer profile_author 0",
+                        required_substring=":probe release persona_author",
                         alias=alias,
                         available_cmds=available_cmds,
                         existing_personas=existing_personas,
@@ -4661,18 +8313,20 @@ def main():
                     default_self_choose = (
                         ":expect autocomplete\n"
                         ":probe persona_selector I am selecting exactly ONE persona name from the list || I am generating conversational text\n"
+                        ":probe release persona_selector off\n"
                         ":probe backfill persona_selector\n"
                         ":steer persona_selector 1.5\n"
                         "You are selecting a persona/macro to initialize.\n"
                         "Available options:\n$options\n\n"
                         "Select the single most appropriate persona/macro from the list. "
                         "Output ONLY the exact name, and nothing else.\n"
-                        ":steer persona_selector 0"
+                        ":steer persona_selector 0\n"
+                        ":probe release persona_selector"
                     )
                     prompt = load_prompt(
                         "self_choose",
                         default_self_choose,
-                        required_substring=":steer persona_selector 0",
+                        required_substring=":probe release persona_selector",
                         options=options
                     )
                     queue_macro_text(prompt, input_queue)
@@ -4691,9 +8345,14 @@ def main():
                     alias = sargs[2]
                     if alias == "choose":
                         print(Fore.CYAN + "[System] Asking model for a name..." + Style.RESET_ALL)
+                        _name_field_context = format_field_prompt_context(tuner, probes)
                         nm = generate_agentic_text(
                             model,
-                            instruction="Pick a short, one-word name for this persona based on the current tuning state. Reply with just the lowercase name.",
+                            instruction=(
+                                "Pick a short, one-word name for this persona based on the current tuning state. "
+                                "Reply with just the lowercase name."
+                                + (f"\n\n{_name_field_context}" if _name_field_context else "")
+                            ),
                             config=config,
                             max_new_tokens=10,
                             chatty_log=False,
@@ -4764,17 +8423,22 @@ def main():
 
                     default_spawn_prompt = (
                         ":expect file invariants/out/macros/$a_name.txt\n"
-                        "# SPAWN_PROFILE_V5_STATE_REPORT\n"
+                        "# SPAWN_PROFILE_V7_LINE_GRAMMAR\n"
                         ":probe profile_author I am generating a tuning profile composed of exact shell configuration commands || I am generating conversational text\n"
+                        ":probe release profile_author off\n"
                         ":probe backfill profile_author\n"
                         ":steer profile_author 1.5\n"
                         "You are generating an executable spawn calibration profile for an agent named '$a_name'. "
                         f"{because_ctx}"
                         "The visible shell command reference is loaded below so you can reason from the actual writing surface, not guesses.\n"
                         "$command_reference\n\n"
-                        "The live hook/evidence report is loaded below. It is the map of what the spawned agent can hook onto, current/default-ish values, observed/tried values, active probes, macros, command exposure, documents, and queued work.\n"
+                        "The live hook/evidence report is loaded below. It includes tunable hooks, active probes, macros, command exposure, documents, queued work, and the complete factual field context (families, qualities, formulas, sets, compliance/time vectors, and exclusions).\n"
                         "$spawn_state_report\n\n"
-                        "Output ONLY runnable shell commands or macro invocations, one per line; no prose, headings, bullets, markdown, or explanations. "
+                        "Output ONLY runnable shell commands or macro invocations, one per line. "
+                        "Profile line grammar is strict: a line beginning with ':' is executed as a command; "
+                        "a line beginning with '#' is a stored comment and is not executed; any other nonblank "
+                        "line may be interpreted as a user query/text turn. Therefore use '#' for comments and "
+                        "never write prose/headings/bullets/markdown as bare lines. "
                         "The command reference is authoritative: use any known command/macro that serves the spawned agent's setup, context, calibration, or future workflow. "
                         "Use :hide/:hide off for documentation and writing visibility. Use :expose/:expose off for runtime tool access, e.g. @agent :expose :command [fixed args...] steer <magnitude-or-effect> because <activation criteria> grants a callable tool and @agent :hide off :command makes it visible for profile/macro writing. Tools are commands the model can trigger when their activation criterion is met; every tool should have an activation criterion and a steer/action magnitude when meaningful. If you expose a tool with fixed args, those args are already filled; the model supplies only the missing tail. Exposed probe values steer output through :tune exposed_probe_alpha <small>; sensed tools use their own *_alpha knobs. Do not rely on hidden spawn-loader filtering. "
                         "Use trailing because-clauses to record purpose for context or side-effect commands. "
@@ -4782,23 +8446,34 @@ def main():
                         "Use :queue <future command> for commands that should run later when they become useful or when enough evidence exists; queued commands must still be runnable shell commands. "
                         "A direct :probe line MUST use this exact contrastive form: :probe <short_snake_name> <first-person WITH statement> || <first-person WITHOUT statement>. "
                         "Use :probe to define behavioral sensors for traits such as speed, care, calibration, caution, or compression; do not invent architecture knobs. "
-                        f"Known direct :tune targets are: {valid_knobs}. "
+                        "Known direct :tune targets are: $valid_knobs. "
                         "Do not output fake knobs such as embedding_size, hidden_layers, batch_size, learning_rate, optimizer, cpu_cycles_per_second, accuracy, precision, recall, or common_sense. "
                         "Prefer this shape when it fits: context/docs the agent needs, 3-6 :probe definitions, :probe backfill all 120, deliberate known-knob :tune lines, :steer or :steer mix, and calibration/queued follow-up commands. "
-                        "Example:\n"
-                        ":probe careful_compression I answer directly while preserving the important constraints. || I ramble or drop important constraints.\n"
-                        ":probe calibration_hunger I seek evidence before locking in a setting. || I assert settings without checking data.\n"
-                        ":probe backfill all 120\n"
-                        ":doc readings because this agent needs the readings file as working context\n"
-                        ":doc read 2 order\n"
-                        ":tune response_tokens 256\n"
-                        ":steer mix careful_compression calibration_hunger 0.08\n"
-                        ":calibrate careful_compression 50\n"
-                        ":queue calibrate calibration_hunger 50\n"
+                        "Example shape, shown inline so it is NOT executed while this prompt is queued: "
+                        "`:probe careful_compression I answer directly while preserving the important constraints. || I ramble or drop important constraints.`; "
+                        "`:probe calibration_hunger I seek evidence before locking in a setting. || I assert settings without checking data.`; "
+                        "`:probe backfill all 120`; `:doc readings because this agent needs the readings file as working context`; "
+                        "`:doc read 2 order`; `:tune response_tokens 256`; "
+                        "`:steer mix careful_compression calibration_hunger 0.08`; "
+                        "`:calibrate careful_compression 50`; `:queue calibrate calibration_hunger 50`. "
                         "Now output the profile for '$a_name'.\n"
-                        ":steer profile_author 0"
+                        ":steer profile_author 0\n"
+                        ":probe release profile_author"
                     )
-                    g_prompt = load_prompt("spawn", default_spawn_prompt, required_substring="SPAWN_PROFILE_V5_STATE_REPORT", a_name=a_name, command_reference=command_reference, spawn_state_report=spawn_state_report)
+                    g_prompt = load_prompt(
+                        "spawn",
+                        default_spawn_prompt,
+                        required_substring=(
+                            "# SPAWN_PROFILE_V7_LINE_GRAMMAR",
+                            "Profile line grammar is strict",
+                            "$valid_knobs",
+                            "shown inline so it is NOT executed",
+                        ),
+                        a_name=a_name,
+                        valid_knobs=valid_knobs,
+                        command_reference=command_reference,
+                        spawn_state_report=spawn_state_report,
+                    )
                     queue_macro_text(g_prompt, input_queue)
                     print(Fore.YELLOW + f"        -> Run ':spawn {a_name} {mode}' again after generation completes." + Style.RESET_ALL)
                     continue
@@ -4843,6 +8518,7 @@ def main():
                 fix_prompt = (
                     f":expect file {real_path}\n"
                     ":probe profile_author I am generating a tuning profile composed of exact shell configuration commands || I am generating conversational text\n"
+                    ":probe release profile_author off\n"
                     ":probe backfill profile_author\n"
                     ":steer profile_author 1.5\n"
                     f"You are modifying the tuning profile for an agent named '{a_name}'.\n"
@@ -4853,9 +8529,12 @@ def main():
                     f"{because_ctx}"
                     f"The operator has provided the following instruction to fix or improve it: \"{instructions}\"\n"
                     "Respond ONLY with runnable shell commands or macro invocations, one per line. "
+                    "Profile line grammar is strict: ':' starts a command, '#' starts a non-executed comment, "
+                    "and any other nonblank line may be interpreted as a user query/text turn. "
                     "Use any known command that serves the spawned agent's setup, context, calibration, or future workflow; include because-clauses where purpose matters. "
                     "Direct :probe definitions must contain ||. Do not use markdown formatting blocks around your response. Output no other text. Do not leave trailing colons or unfinished commands at the end.\n"
-                    ":steer profile_author 0"
+                    ":steer profile_author 0\n"
+                    ":probe release profile_author"
                 )
                 queue_macro_text(fix_prompt, input_queue)
                 print(Fore.YELLOW + f"        -> The fix is queued. It will overwrite {real_path}." + Style.RESET_ALL)
@@ -5336,11 +9015,14 @@ def main():
                     because_ctx = f"The operator provided the following underlying reason/rationale for this macro:\n{command_because}\nMake sure your generated macro commands strongly reflect this rationale.\n\n"
                     print(Fore.CYAN + "[Solve] Passing your 'because' rationale to the model." + Style.RESET_ALL)
                 default_solve_prompt = (
+                    "# SOLVE_MACRO_V2_UTILITY_SAFE\n"
                     ":expect macro $sname\n"
                     ":probe macro_author I am writing a precise list of colon-prefixed shell commands || I am generating conversational text\n"
+                    ":probe release macro_author off\n"
                     ":probe backfill macro_author\n"
                     ":steer macro_author 1.5\n"
                     ":probe solve_goal I am fulfilling the user's specific request: $goal || I am doing something else\n"
+                    ":probe release solve_goal off\n"
                     ":probe backfill solve_goal\n"
                     ":steer solve_goal 1.5\n"
                     "You write macros for an interactive cognition shell. A macro is a list of ':' "
@@ -5357,12 +9039,18 @@ def main():
                     "Output ONLY the commands, one per line. Do not use markdown blocks or conversational text. "
                     "Do not wrap arguments in quotes unless they contain spaces. Do not leave trailing colons or unfinished commands at the end.\n"
                     ":steer macro_author 0\n"
-                    ":steer solve_goal 0"
+                    ":probe release macro_author\n"
+                    ":steer solve_goal 0\n"
+                    ":probe release solve_goal"
                 )
                 prompt = load_prompt(
                     "solve", 
                     default_solve_prompt, 
-                    required_substring="Do not wrap arguments in quotes",
+                    required_substring=(
+                        "# SOLVE_MACRO_V2_UTILITY_SAFE",
+                        ":probe release solve_goal",
+                        "If this macro requires parameters to be flexible",
+                    ),
                     prompt_args_str=prompt_args_str,
                     command_hints_str=command_hints_str,
                     macro_hints_str=macro_hints_str,
@@ -5371,6 +9059,11 @@ def main():
                     sname=sname,
                     goal=goal
                 )
+                solve_expect_contexts[sname] = {
+                    "goal": goal,
+                    "arg_specs": arg_specs,
+                    "clean_names": clean_names,
+                }
                 print(Fore.CYAN + f"[Solve] Queuing phenomenological macro 'solve.txt' to generate ':{sname}' for: {goal}" + Style.RESET_ALL)
                 queue_macro_text(prompt, input_queue)
                 continue
@@ -5765,6 +9458,101 @@ def main():
                         + Style.RESET_ALL
                     )
                 continue
+            if user_input == ":figure" or user_input.startswith(":figure "):
+                fargs = user_input[len(":figure"):].strip()
+                fig_ok, fig_lines, fig_path = build_live_figure(
+                    fargs, tuner, probes, turn_log
+                )
+                for ln in fig_lines:
+                    print((Fore.CYAN if fig_ok else Fore.RED) + f"[Figure] {ln}" + Style.RESET_ALL)
+                memory.append_event(
+                    "live_figure_generated" if fig_ok else "live_figure_failed",
+                    text="\n".join(fig_lines),
+                    tags=["figure_tool", "live_shell_telemetry"],
+                    provenance={
+                        "args": fargs,
+                        "because": command_because,
+                        "path": os.path.relpath(fig_path, ROOT) if fig_path else None,
+                    },
+                )
+                continue
+            if user_input.startswith(":figures"):
+                fargs = user_input[len(":figures"):].strip()
+                ftoks = fargs.split()
+                listing = bool(ftoks) and ftoks[0].lower() in ("list", "--list", "-l")
+                fig_ok, fig_lines = _run_figures_script(
+                    ["list"] if listing else ftoks, require_mpl=not listing
+                )
+                for ln in fig_lines:
+                    print((Fore.CYAN if fig_ok else Fore.RED) + f"[Figures] {ln}" + Style.RESET_ALL)
+                if not listing:
+                    memory.append_event(
+                        "figures_generated" if fig_ok else "figures_failed",
+                        text="\n".join(fig_lines),
+                        tags=["figures_tool"],
+                        provenance={"args": fargs, "because": command_because},
+                    )
+                continue
+            if user_input.startswith(":benchmark"):
+                bargs = user_input[len(":benchmark"):].strip()
+                if not bargs or bargs.lower() in ("list", "refs"):
+                    refs = _benchmark_refs()
+                    print(
+                        Fore.CYAN
+                        + "[Benchmark] named sets: "
+                        + (", ".join(refs) if refs else "(none in invariants/benchmarks/)")
+                        + " -- also gsm8k, hf:<dataset>, or a .json/.jsonl/.csv path."
+                        + Style.RESET_ALL
+                    )
+                    print(
+                        Fore.YELLOW
+                        + "[Benchmark] Usage: :benchmark <ref> [n <N>] [tokens <T>] "
+                        + "[evaluator number|exact|choice|contains] [contract]"
+                        + Style.RESET_ALL
+                    )
+                    continue
+                try:
+                    breq = _parse_benchmark_request(bargs)
+                except (ValueError, IndexError) as exc:
+                    print(
+                        Fore.YELLOW
+                        + f"[Benchmark] {exc}. Usage: :benchmark <ref> [n <N>] [tokens <T>] "
+                        + "[evaluator <e>] [contract]"
+                        + Style.RESET_ALL
+                    )
+                    continue
+                bagent = target_agent.name if target_agent else "operator"
+                print(
+                    Fore.CYAN
+                    + f"[Benchmark] {breq['ref']}: n={breq['n']} tokens={breq['tokens']} "
+                    + f"evaluator={breq['evaluator']} style={breq['style']} agent={bagent}. "
+                    + "Scoring the live model with the current tuning applied."
+                    + Style.RESET_ALL,
+                    flush=True,
+                )
+                try:
+                    bsummary, bpath, blines = _run_shell_benchmark(
+                        model, config, tuner, probes, prioritize_pin, breq, bagent
+                    )
+                except Exception as exc:
+                    print(Fore.RED + f"[Benchmark] {type(exc).__name__}: {exc}" + Style.RESET_ALL)
+                    continue
+                for ln in blines:
+                    print(Fore.CYAN + Style.BRIGHT + f"[Benchmark] {ln}" + Style.RESET_ALL)
+                memory.append_event(
+                    "benchmark_run",
+                    text="\n".join(blines),
+                    tags=["benchmark_tool"],
+                    provenance={
+                        "ref": breq["ref"],
+                        "agent": bagent,
+                        "n": bsummary.get("n"),
+                        "accuracy": bsummary.get("accuracy"),
+                        "output": bpath,
+                        "because": command_because,
+                    },
+                )
+                continue
             if user_input.startswith(":doc"):
                 dargs = user_input[len(":doc"):].strip()
                 if not dargs or dargs.lower() == "status":
@@ -5779,8 +9567,16 @@ def main():
                                 + Style.RESET_ALL
                             )
                         staged = "a chunk is staged for the next turn" if pending_document_tool_result else "nothing staged"
-                        reading = f"auto-read {doc_autoread['mode']}, {doc_autoread['remaining']} turns left" if doc_autoread else "auto-read off"
-                        print(Fore.CYAN + f"[Doc] {staged}; {reading}. ':doc next' | ':doc read [n] [order|reply]' | ':doc stop'" + Style.RESET_ALL)
+                        if doc_autoread:
+                            specs = " ".join(
+                                ("+" if sign >= 0 else "-") + name
+                                for sign, name in (doc_autoread.get("probe_specs") or [])
+                            )
+                            selector = f"probes {specs}" if specs else doc_autoread["mode"]
+                            reading = f"auto-read {selector}, {doc_autoread['remaining']} turns left"
+                        else:
+                            reading = "auto-read off"
+                        print(Fore.CYAN + f"[Doc] {staged}; {reading}. ':doc next' | ':doc read [n] [order|interleave|updated] [+probe -probe]' | ':doc stop'" + Style.RESET_ALL)
                 elif dargs.lower() == "stop":
                     doc_autoread = None
                     print(Fore.CYAN + "[Doc] Auto-read stopped." + Style.RESET_ALL)
@@ -5789,35 +9585,35 @@ def main():
                     if not doc_library:
                         print(Fore.YELLOW + "[Doc] Nothing to read yet. :doc <path> first." + Style.RESET_ALL)
                     else:
-                        count, mode = 1, "order"
-                        until_settled, explicit_count = False, False
-                        until_probe = None
-                        mode_aliases = {"weave": "interleave", "mtime": "updated", "chrono": "updated"}
-                        for extra in dargs.split()[1:]:
-                            token = extra.strip().lower()
-                            if token in {"order", "reply", "interleave", "weave", "updated", "mtime", "chrono"}:
-                                mode = mode_aliases.get(token, token)
-                            elif token in {"satisfied", "settled", "until"}:
-                                until_settled = True
-                            elif token.startswith("probe_") or token in probes:
-                                until_probe = token.replace("probe_", "")
-                                until_settled = False
-                            else:
-                                try:
-                                    count = int(token)
-                                    explicit_count = True
-                                except ValueError:
-                                    pass
-                        if (until_settled or until_probe) and not explicit_count:
-                            count = MAX_AUTOREAD  # "until satisfied" reads up to the cap
-                        count = max(1, min(MAX_AUTOREAD, count))
-                        doc_autoread = {"remaining": count, "mode": mode, "until_settled": until_settled, "until_probe": until_probe, "settled_streak": 0}
-                        how = {
-                            "order": "in document order -- the text advances on its own course",
-                            "interleave": "weaving between documents -- their course, not the model's echo",
-                            "reply": "chunks chosen by overlap with its replies (echo-following; deliberate use)",
-                            "updated": "in the order the files were last written (newest first)",
-                        }[mode]
+                        doc_autoread, read_parse_error = parse_doc_read_request(
+                            dargs,
+                            probes,
+                            max_autoread=MAX_AUTOREAD,
+                        )
+                        if read_parse_error:
+                            print(Fore.YELLOW + f"[Doc] {read_parse_error}" + Style.RESET_ALL)
+                            continue
+                        count = doc_autoread["remaining"]
+                        mode = doc_autoread["mode"]
+                        signed_probe_specs = doc_autoread["probe_specs"]
+                        until_probe = doc_autoread["until_probe"]
+                        until_settled = doc_autoread["until_settled"]
+                        if signed_probe_specs:
+                            terms = " ".join(
+                                ("+" if sign >= 0 else "-") + pname
+                                for sign, pname in signed_probe_specs
+                            )
+                            how = (
+                                f"unread chunks ranked by {terms} "
+                                "(toward + probes, away from - probes; read-only projection)"
+                            )
+                        else:
+                            how = {
+                                "order": "in document order -- the text advances on its own course",
+                                "interleave": "weaving between documents -- their course, not the model's echo",
+                                "reply": "chunks chosen by overlap with its replies (echo-following; deliberate use)",
+                                "updated": "in the order the files were last written (newest first)",
+                            }[mode]
                         stop_note = (
                             f" Stops early once probe '{until_probe}' crosses its threshold."
                             if until_probe else
@@ -5827,9 +9623,14 @@ def main():
                                 if until_settled else ""
                             )
                         )
+                        staged_note = (
+                            " The chunk already staged by :doc goes first; signed ranking begins after it."
+                            if signed_probe_specs and pending_document_tool_result
+                            else ""
+                        )
                         print(
                             Fore.CYAN
-                            + f"[Doc] Auto-read: up to {count} turn(s), {how}.{stop_note} "
+                            + f"[Doc] Auto-read: up to {count} turn(s), {how}.{stop_note}{staged_note} "
                             + "The document speaks next; the model replies each time. ':doc stop' interrupts."
                             + Style.RESET_ALL
                         )
@@ -5920,6 +9721,7 @@ def main():
                     default_doc_rewrite = (
                         ":expect file $out_path\n"
                         ":probe doc_rewriter I am rewriting the source text according to the user's specific reason: $reason || I am answering a question\n"
+                        ":probe release doc_rewriter off\n"
                         ":probe backfill doc_rewriter\n"
                         ":steer doc_rewriter 1.5\n"
                         "Rewrite the file below into a better version, guided by the operator's reason. "
@@ -5933,11 +9735,16 @@ def main():
                     prompt = load_prompt(
                         "doc_rewrite",
                         default_doc_rewrite,
+                        required_substring=":probe release doc_rewriter off",
                         basename_in=os.path.basename(path_str),
                         basename_out=os.path.basename(out_path),
                         reason=reason,
                         out_path=out_path
-                    ) + f"{original_text}\n=== ORIGINAL DOCUMENT END ===\n"
+                    ) + (
+                        f"{original_text}\n=== ORIGINAL DOCUMENT END ===\n"
+                        ":steer doc_rewriter 0\n"
+                        ":probe release doc_rewriter"
+                    )
                     print(Fore.CYAN + f"[Doc Rewrite] Queuing phenomenological macro to rewrite {os.path.basename(path_str)} because {reason}..." + Style.RESET_ALL)
                     queue_macro_text(prompt, input_queue)
                     continue
@@ -6092,14 +9899,44 @@ def main():
                         print(Fore.CYAN + line + Style.RESET_ALL)
                 continue
             if user_input.startswith(":prioritize"):
+                pargs = user_input[len(":prioritize"):].strip()
                 ranked = rank_probes(probes, tuner)
-                if not ranked:
-                    print(Fore.YELLOW + "[Prioritize] no active probes to rank. Mint or adopt some first." + Style.RESET_ALL)
-                else:
+
+                def _priority_alpha_from_tail(tokens):
+                    if not tokens:
+                        return tokens, None
+                    try:
+                        return tokens[:-1], float(tokens[-1])
+                    except ValueError:
+                        return tokens, None
+
+                def _stored_probe_hint(stem):
+                    candidates = [
+                        os.path.join(ROOT, "invariants", "out", "probes", f"{stem}.pt"),
+                        os.path.join(ROOT, "invariants", "out", "probes", f"{stem}_d{model.d_model}.pt"),
+                        os.path.join(ROOT, "invariants", f"{stem}.pt"),
+                        os.path.join(ROOT, "invariants", f"{stem}_d{model.d_model}.pt"),
+                        os.path.join(ROOT, "invariants", f"{stem}_vector.pt"),
+                        os.path.join(ROOT, "invariants", f"{stem}_d{model.d_model}_vector.pt"),
+                    ]
+                    return " Saved vector exists; run ':probe adopt {0}' first.".format(stem) if any(os.path.isfile(p) for p in candidates) else ""
+
+                def _show_priority_table():
+                    if not ranked:
+                        print(Fore.YELLOW + "[Prioritize] no active probes to rank. Mint or adopt some first." + Style.RESET_ALL)
+                        return
                     alpha = tuner.get("prioritize_alpha", 0.0)
+                    mode_note = ""
+                    if prioritize_pin.get("landscape"):
+                        mode_note = f"; landscape target={prioritize_pin['landscape']}"
+                    elif prioritize_pin.get("mix"):
+                        mode_note = "; mix=" + "+".join(prioritize_pin["mix"])
+                    elif prioritize_pin.get("probe"):
+                        sign = float(prioritize_pin.get("sign", 1.0) or 1.0)
+                        mode_note = f"; pinned={'+' if sign >= 0 else '-'}{prioritize_pin['probe']}"
                     print(
                         Fore.CYAN + Style.BRIGHT
-                        + f"[Prioritize] probes by evidence-weighted |lift| (steer alpha={round(alpha,4)}"
+                        + f"[Prioritize] probes by evidence-weighted |lift| (steer alpha={round(alpha,4)}{mode_note}"
                         + (" -- OFF)" if alpha <= 0 else " -- steering toward the top each turn):")
                         + Style.RESET_ALL
                     )
@@ -6107,9 +9944,94 @@ def main():
                         lift_s = "n/a" if r["lift"] is None else f"{r['lift']:+.3f}"
                         mark = " <- top" if i == 0 and r["priority"] > 0 else ""
                         expo = ", exposed" if r["exposed"] else ""
-                        print(Fore.CYAN + f"  {i+1:>2}. {r['name']}: priority {round(r['priority'],4)} (lift {lift_s}, n={r['n']}{expo}){mark}" + Style.RESET_ALL)
-                    if alpha <= 0 and ranked[0]["priority"] > 0:
-                        print(Fore.YELLOW + f"  Steer toward the top probe with :tune prioritize_alpha <small> (e.g. 0.02)." + Style.RESET_ALL)
+                        released = ", released" if r.get("released") else ""
+                        print(Fore.CYAN + f"  {i+1:>2}. {r['name']}: priority {round(r['priority'],4)} (lift {lift_s}, n={r['n']}{expo}{released}){mark}" + Style.RESET_ALL)
+                    if alpha <= 0:
+                        if prioritize_pin.get("landscape") or prioritize_pin.get("mix") or prioritize_pin.get("probe"):
+                            print(Fore.YELLOW + "  Target is set, but steering is OFF. Add an alpha, e.g. :prioritize <probe> 0.02 or :tune prioritize_alpha 0.02." + Style.RESET_ALL)
+                        elif ranked[0]["priority"] > 0:
+                            print(Fore.YELLOW + f"  Steer toward the top probe with :tune prioritize_alpha <small> (e.g. 0.02)." + Style.RESET_ALL)
+
+                if not pargs or pargs.lower() in ("choose", "choice", "rank", "list", "status"):
+                    _show_priority_table()
+                    continue
+
+                ptoks = pargs.split()
+                head = ptoks[0].lower()
+                if head in ("auto", "off", "none", "unpin"):
+                    prioritize_pin["probe"] = None
+                    prioritize_pin["mix"] = None
+                    prioritize_pin["landscape"] = None
+                    print(Fore.CYAN + "[Prioritize] target = AUTO (follows the live ranking each turn)." + Style.RESET_ALL)
+                    continue
+
+                if head == "mix":
+                    rest, mix_alpha = _priority_alpha_from_tail(ptoks[1:])
+                    names = [n for n in rest if n in probes and not probe_is_released(probes[n])]
+                    bad = [n for n in rest if n not in probes]
+                    released_names = [n for n in rest if n in probes and probe_is_released(probes[n])]
+                    if not names:
+                        print(Fore.YELLOW + f"[Prioritize] name at least one active, unreleased probe to mix.{(' unknown: ' + ', '.join(bad)) if bad else ''}{(' released: ' + ', '.join(released_names)) if released_names else ''}" + Style.RESET_ALL)
+                        continue
+                    prioritize_pin["mix"] = names
+                    prioritize_pin["probe"] = None
+                    prioritize_pin["landscape"] = None
+                    if mix_alpha is not None:
+                        tuner.set("prioritize_alpha", abs(mix_alpha))
+                    a_now = tuner.get("prioritize_alpha", 0.0)
+                    print(
+                        Fore.GREEN + Style.BRIGHT
+                        + f"[Prioritize] target = lift-weighted MIX of {', '.join(names)} "
+                        + f"(alpha={round(a_now,4)}{' -- set >0 to take effect' if a_now <= 0 else ''})."
+                        + (f" Ignored unknown: {', '.join(bad)}." if bad else "")
+                        + (f" Ignored released: {', '.join(released_names)}." if released_names else "")
+                        + Style.RESET_ALL
+                    )
+                    continue
+
+                direct_pin = head == "pin"
+                target_tokens = ptoks[1:] if direct_pin else ptoks[1:] if head == "landscape" else ptoks
+                target_tokens, target_alpha = _priority_alpha_from_tail(target_tokens)
+                target = re.sub(r"[^a-z0-9_]", "_", (target_tokens[0] if target_tokens else "").lower())[:40].strip("_")
+                if not target:
+                    print(Fore.YELLOW + "[Prioritize] Usage: :prioritize <probe> [alpha] | :prioritize pin <probe> [alpha] | :prioritize mix <probe> ... [alpha] | :prioritize auto" + Style.RESET_ALL)
+                    continue
+                if target not in probes:
+                    print(Fore.YELLOW + f"[Prioritize] no active probe named {target}.{did_you_mean(target, probes)}{_stored_probe_hint(target)}" + Style.RESET_ALL)
+                    continue
+                if probe_is_released(probes[target]):
+                    print(Fore.YELLOW + f"[Prioritize] '{target}' is released and observational-only. Reactivate it with :probe release {target} off." + Style.RESET_ALL)
+                    continue
+                if direct_pin:
+                    steer_alpha = target_alpha if target_alpha is not None else tuner.get("prioritize_alpha", 0.0)
+                    prioritize_pin["mix"] = None
+                    prioritize_pin["landscape"] = None
+                    prioritize_pin["probe"] = target
+                    prioritize_pin["sign"] = -1.0 if steer_alpha < 0 else 1.0
+                    if target_alpha is not None:
+                        tuner.set("prioritize_alpha", abs(steer_alpha))
+                    a_now = tuner.get("prioritize_alpha", 0.0)
+                    verb = "AWAY from" if float(prioritize_pin.get("sign", 1.0) or 1.0) < 0 else "toward"
+                    print(
+                        Fore.GREEN + Style.BRIGHT
+                        + f"[Prioritize] target = PIN {verb} {target} "
+                        + f"(alpha={round(a_now,4)}{' -- set >0 to take effect' if a_now <= 0 else ''})."
+                        + Style.RESET_ALL
+                    )
+                    continue
+                prioritize_pin["mix"] = None
+                prioritize_pin["probe"] = None
+                prioritize_pin["landscape"] = target
+                if target_alpha is not None:
+                    tuner.set("prioritize_alpha", abs(target_alpha))
+                a_now = tuner.get("prioritize_alpha", 0.0)
+                print(
+                    Fore.GREEN + Style.BRIGHT
+                    + f"[Prioritize] target = LANDSCAPE around {target} "
+                    + f"(alpha={round(a_now,4)}{' -- set >0 to take effect' if a_now <= 0 else ''}). "
+                    + "This anchors the target and folds in the current learned priority field; the evidence ranking updates only as future turns accrue."
+                    + Style.RESET_ALL
+                )
                 continue
             if user_input.startswith(":release"):
                 rargs = user_input[len(":release"):].split()
@@ -6200,7 +10122,13 @@ def main():
                             if pf.endswith(".pt"):
                                 pname = pf[:-3]
                                 pdata = torch.load(os.path.join(PROBE_DIR, pf), weights_only=True)
-                                probes[pname] = {"direction": pdata["direction"], "history": deque(maxlen=40), "framings": pdata.get("framings", ("", "")), "exposed": bool(pdata.get("exposed", False))}
+                                probes[pname] = {
+                                    "direction": pdata["direction"],
+                                    "history": deque(maxlen=40),
+                                    "framings": pdata.get("framings", ("", "")),
+                                    "exposed": bool(pdata.get("exposed", False)),
+                                    "released": bool(pdata.get("released", False)),
+                                }
                                 # Register a trigger for a probe that appeared on
                                 # disk since startup; leave existing thresholds and
                                 # accrued outcomes untouched.
@@ -6283,8 +10211,12 @@ def main():
                 if harg:
                     q = harg.split()[0].lstrip(":")
                     matches = find_command_help_entries(harg)
-                    if matches:
+                    spec_entries = spec_help_entries(harg)
+                    if matches or spec_entries:
                         for entry in matches:
+                            for _l in entry:
+                                print(Fore.CYAN + _l + Style.RESET_ALL)
+                        for entry in spec_entries:
                             for _l in entry:
                                 print(Fore.CYAN + _l + Style.RESET_ALL)
                     elif q in macro_aliases:
@@ -6342,6 +10274,13 @@ def main():
                     pending_solve_proposal = None
                     if verb == ":reject":
                         print(Fore.YELLOW + f"[Reject] Discarded proposed macro ':{p['name']}'." + Style.RESET_ALL)
+                        if p.get("definition_id"):
+                            memory.append_definition_feedback(
+                                p["definition_id"],
+                                "operator rejected the proposed macro",
+                                verdict="rejected",
+                                source="operator",
+                            )
                         continue
                     if _hidden_overwrite_blocked(p["name"], "Accept"):
                         continue
@@ -6349,23 +10288,44 @@ def main():
                         os.makedirs(os.path.dirname(p["dest"]), exist_ok=True)
                         with open(p["dest"], "w", encoding="utf-8") as wf:
                             wf.write(f"# :solve macro '{p['name']}' -- {p['goal']}\n")
-                            arg_header = p.get("arg_specs") or p.get("clean_names") or []
+                            arg_header = macro_arg_header_items(
+                                p.get("arg_specs") or p.get("clean_names") or []
+                            )
                             if arg_header:
                                 wf.write(f"# args: {', '.join(arg_header)}\n")
                             for ln in p["cmd_lines"]:
                                 wf.write(ln + "\n")
                         macro_aliases[p["name"]] = p["dest"]
                         _save_macro_aliases()
+                        if p.get("definition_id"):
+                            memory.append_definition_feedback(
+                                p["definition_id"],
+                                "operator accepted and installed the proposed macro",
+                                verdict="accepted",
+                                source="operator",
+                                provenance={"artifact_path": p["dest"]},
+                            )
                         print(Fore.GREEN + f"[Accept] Adopted ':{p['name']}' ({len(p['cmd_lines'])} command(s)). Run it with :{p['name']} <args>." + Style.RESET_ALL)
                     except Exception as e:
                         print(Fore.RED + f"[Accept] Could not save macro: {e}" + Style.RESET_ALL)
                     continue
                 if _last_completion is not None:
+                    completion_definition_id = pending_completion_definition_id
+                    pending_completion_definition_id = None
                     if verb == ":accept":
                         print(Fore.GREEN + f"[Accept] Queued autocomplete: {_last_completion}" + Style.RESET_ALL)
                         input_queue.append(_last_completion)
                     elif verb == ":reject":
                         print(Fore.YELLOW + f"[Reject] Discarded autocomplete: {_last_completion}" + Style.RESET_ALL)
+                    if completion_definition_id:
+                        memory.append_definition_feedback(
+                            completion_definition_id,
+                            "operator accepted and queued the completion"
+                            if verb == ":accept"
+                            else "operator rejected the completion",
+                            verdict="accepted" if verb == ":accept" else "rejected",
+                            source="operator",
+                        )
                     _last_completion = None
                     continue
                 if not pending_accept_commands:
@@ -6434,7 +10394,7 @@ def main():
                 if not eargs:  # list exposures
                     exposed_probe_names = sorted(n for n in probes if probes[n].get("exposed"))
                     if not exposed_commands and not exposed_probe_names and not exposed_knobs and not memory_tool_exposed:
-                        print(Fore.CYAN + "[Expose] Nothing exposed. Use ':expose :command [stage|direct] [fixed args...] [steer <magnitude>] because <activation>' for command-backed tools, or ':expose <probe|knob>' for model-readable probes/knobs." + Style.RESET_ALL)
+                        print(Fore.CYAN + "[Expose] Nothing exposed. Use ':expose [stage|direct] :command [fixed args...] [steer <magnitude>] because <activation>' for command-backed tools, or ':expose <probe|knob>' for model-readable probes/knobs." + Style.RESET_ALL)
                     lanes = _enabled_memory_lanes()
                     lane_text = ", ".join(lanes) if lanes else "none enabled"
                     print(Fore.CYAN + f"[Expose] memory read tool: {'on' if memory_tool_exposed else 'off'} (lanes: {lane_text})" + Style.RESET_ALL)
@@ -6445,6 +10405,7 @@ def main():
                             print(
                                 Fore.CYAN
                                 + f"[Expose] command {display_cmd}  ({command_exposure_mode(record)}){hidden_note}\n"
+                                + f"         fixed args: {command_exposure_args(record) or '(none; model supplies the full tail)'}\n"
                                 + f"         activation: {command_exposure_activation(w, record)}\n"
                                 + f"         steer: {command_exposure_steer(record)}"
                                 + Style.RESET_ALL
@@ -6454,31 +10415,20 @@ def main():
                     if exposed_knobs:
                         print(Fore.CYAN + "[Expose] knobs: " + ", ".join(sorted(exposed_knobs)) + Style.RESET_ALL)
                     continue
-                if eargs[0].lower() in ("off", "hide", "unexpose"):
-                    if len(eargs) < 2:
-                        print(Fore.YELLOW + "[Expose] Usage: :expose off <probe|knob|:command>" + Style.RESET_ALL)
-                        continue
-                    eargs = eargs[1:]
-                    turn_off_prefix = True
-                else:
-                    turn_off_prefix = False
-                target_agent = ""
-                if eargs and eargs[0].startswith("@"):
-                    if len(eargs) < 2 or not eargs[1].startswith(":"):
-                        print(Fore.YELLOW + "[Expose] Usage: :expose @agent :command [stage|direct] [fixed args...] [steer <magnitude>] because <activation>, or :expose off @agent :command." + Style.RESET_ALL)
-                        continue
-                    target_agent = normalize_command_target(eargs[0])
-                    target = eargs[1]
-                    eargs = [target] + (["off"] if turn_off_prefix else []) + eargs[2:]
-                elif turn_off_prefix:
-                    eargs = [eargs[0], "off"] + eargs[1:]
-                    target = eargs[0]
-                else:
-                    target = eargs[0]
+                turn_off_prefix, raw_agent, mode_prefix, toks = parse_expose_prefix(eargs)
+                if not toks:
+                    print(Fore.YELLOW + "[Expose] Usage: :expose [@agent] [stage|direct] :command [fixed args...] [steer <magnitude>] because <activation>, or :expose off <probe|knob|:command>." + Style.RESET_ALL)
+                    continue
+                if toks[0].startswith("@"):
+                    print(Fore.YELLOW + "[Expose] Usage: :expose [@agent] [stage|direct] :command [fixed args...] [steer <magnitude>] because <activation>, or :expose off @agent :command." + Style.RESET_ALL)
+                    continue
+                target_agent = normalize_command_target(raw_agent) if raw_agent else ""
+                target = toks[0]
+                eargs = [target] + (["off"] if turn_off_prefix else []) + toks[1:]
                 mode_arg = eargs[1].lower() if len(eargs) > 1 else ""
                 if not target.startswith(":"):
                     if mode_arg not in ("", "on", "expose", "off", "hide"):
-                        print(Fore.YELLOW + f"[Expose] Bare targets expose probes/knobs and only accept 'off'. For command-backed tools use ':expose :{target} [stage|direct] [fixed args...] [steer <magnitude>] because <activation>'." + Style.RESET_ALL)
+                        print(Fore.YELLOW + f"[Expose] Bare targets expose probes/knobs and only accept 'off'. For command-backed tools use ':expose [stage|direct] :{target} [fixed args...] [steer <magnitude>] because <activation>'." + Style.RESET_ALL)
                         continue
                     if target_agent:
                         print(Fore.YELLOW + "[Expose] Agent-routed exposure targets must be commands, e.g. ':expose @agent :command'." + Style.RESET_ALL)
@@ -6514,7 +10464,7 @@ def main():
                         print(Fore.GREEN + f"[Expose] knob '{knob_name}' is now {'hidden from' if turn_off else 'exposed to'} the model's <<PROBE: {knob_name}>> tool." + Style.RESET_ALL)
                         continue
                     candidates = set(probes) | {n for n in tuner.triggers if not _is_shadow_trigger(n, tuner)}
-                    command_hint = f" For command-backed tools use ':expose :{target} [stage|direct] [fixed args...] [steer <magnitude>] because <activation>'." if target.lower() in _all_shell_commands() else ""
+                    command_hint = f" For command-backed tools use ':expose [stage|direct] :{target} [fixed args...] [steer <magnitude>] because <activation>'." if target.lower() in _all_shell_commands() else ""
                     print(Fore.YELLOW + f"[Expose] '{target}' is not an active probe or knob.{did_you_mean(target, candidates)}{command_hint}" + Style.RESET_ALL)
                     continue
                 word = target.lstrip(":").lower()
@@ -6534,14 +10484,17 @@ def main():
                 if word not in known_exposable:
                     print(Fore.YELLOW + f"[Expose] ':{word}' isn't a command.{did_you_mean(word, known_exposable)}" + Style.RESET_ALL)
                     continue
-                mode = "stage"
+                mode = mode_prefix or "stage"
                 tail_args = list(command_args)
-                if tail_args and tail_args[0].lower() in ("stage", "staged", "accept", "on", "expose"):
-                    mode = "stage"
-                    tail_args = tail_args[1:]
-                elif tail_args and tail_args[0].lower() in ("direct", "run", "trust", "free"):
-                    mode = "direct"
-                    tail_args = tail_args[1:]
+                if mode_prefix is None:
+                    # legacy trailing position; with a leading mode given,
+                    # nothing in the tail is ever eaten as a keyword.
+                    if tail_args and tail_args[0].lower() in EXPOSE_STAGE_WORDS:
+                        mode = "stage"
+                        tail_args = tail_args[1:]
+                    elif tail_args and tail_args[0].lower() in EXPOSE_DIRECT_WORDS:
+                        mode = "direct"
+                        tail_args = tail_args[1:]
                 fixed_arg_tokens = []
                 explicit_steer = None
                 i = 0
@@ -6653,15 +10606,24 @@ def main():
                     default_premise_prompt = (
                         f":expect macro premise_{auto_name}\n"
                         ":probe premise_author I am writing exactly ONE shell command to set a game premise || I am generating conversational text\n"
+                        ":probe release premise_author off\n"
                         ":probe backfill premise_author\n"
                         ":steer premise_author 1.5\n"
                         "In one vivid sentence, describe a short cooperative game whose whole point is for you to increase your own $focus.\n"
                         "Write a macro containing exactly ONE command to set this premise.\n"
                         "The command must be formatted exactly like this:\n"
                         ":game $auto_name +premise [your one vivid sentence here]\n"
-                        "Output ONLY that command line, nothing else."
+                        "Output ONLY that command line, nothing else.\n"
+                        ":steer premise_author 0\n"
+                        ":probe release premise_author"
                     )
-                    premise_prompt = load_prompt("game_premise", default_premise_prompt, focus=focus, auto_name=auto_name)
+                    premise_prompt = load_prompt(
+                        "game_premise",
+                        default_premise_prompt,
+                        required_substring=":probe release premise_author",
+                        focus=focus,
+                        auto_name=auto_name,
+                    )
                     print(Fore.CYAN + f"[Game] Queuing phenomenological macro to generate a premise for '{auto_name}'..." + Style.RESET_ALL)
                     queue_macro_text(premise_prompt, input_queue)
                     save_game_config(auto_rules_path, gcfg2)
@@ -6833,6 +10795,7 @@ def main():
                 if sargs and sargs[0].lower() in ("auto", "off", "none", "unpin"):
                     prioritize_pin["probe"] = None
                     prioritize_pin["mix"] = None
+                    prioritize_pin["landscape"] = None
                     print(Fore.CYAN + "[Steer] target = AUTO (follows the live ranking each turn)." + Style.RESET_ALL)
                     continue
                 # :steer mix <p1> <p2> ... [alpha]  -> a lift-weighted mix: you
@@ -6846,13 +10809,15 @@ def main():
                             mix_alpha = abs(float(rest[-1])); rest = rest[:-1]
                         except ValueError:
                             pass
-                    names = [n for n in rest if n in probes]
+                    names = [n for n in rest if n in probes and not probe_is_released(probes[n])]
                     bad = [n for n in rest if n not in probes]
+                    released_names = [n for n in rest if n in probes and probe_is_released(probes[n])]
                     if not names:
-                        print(Fore.YELLOW + f"[Steer] name at least one active probe to mix.{(' unknown: ' + ', '.join(bad)) if bad else ''}" + Style.RESET_ALL)
+                        print(Fore.YELLOW + f"[Steer] name at least one active, unreleased probe to mix.{(' unknown: ' + ', '.join(bad)) if bad else ''}{(' released: ' + ', '.join(released_names)) if released_names else ''}" + Style.RESET_ALL)
                         continue
                     prioritize_pin["mix"] = names
                     prioritize_pin["probe"] = None
+                    prioritize_pin["landscape"] = None
                     if mix_alpha is not None:
                         tuner.set("prioritize_alpha", mix_alpha)
                     a_now = tuner.get("prioritize_alpha", 0.0)
@@ -6862,12 +10827,747 @@ def main():
                         + f"(alpha={round(a_now,4)}{' -- set >0 to take effect' if a_now <= 0 else ''}). "
                         + "Each probe's degree is its own learned lift, recomputed every turn; a negative-lift "
                         + "probe desteers. :steer auto to unpin." + (f" (ignored unknown: {', '.join(bad)})" if bad else "")
+                        + (f" (ignored released: {', '.join(released_names)})" if released_names else "")
                         + Style.RESET_ALL
                     )
+                    continue
+                # :steer quality -- a scalar field type with its own distance
+                # formula, independent of mass/G. Formula input is allowlisted.
+                if sargs and sargs[0].lower() in ("quality", "qualities"):
+                    bodies = steer_bodies()
+                    qualities = bodies["qualities"]
+                    if len(sargs) == 1:
+                        if not qualities:
+                            print(Fore.CYAN + "[Steer] no quality types." + Style.RESET_ALL)
+                        for qname, qcfg in sorted(qualities.items()):
+                            strength = qcfg.get("strength") or {"kind": "constant", "value": 1.0}
+                            now = resolve_field_source(
+                                strength, probes, tuner, bodies["g_families"], bodies["fields"]
+                            )
+                            print(
+                                Fore.CYAN
+                                + f"[Steer] quality:{qname}: formula={qcfg.get('formula', QUALITY_FORMULA_DEFAULT)}; "
+                                + f"strength<-{format_field_source(strength)} -> {now:+g}"
+                                + Style.RESET_ALL
+                            )
+                        continue
+                    qname = re.sub(r"[^a-z0-9_]", "_", sargs[1].lower()).strip("_")
+                    action = sargs[2].lower() if len(sargs) > 2 else "status"
+                    if action == "drop":
+                        existed = qualities.pop(qname, None) is not None
+                        save_steer_bodies()
+                        print(
+                            (Fore.GREEN if existed else Fore.YELLOW)
+                            + (f"[Steer] quality:{qname} dropped; set laws that name it are now inert."
+                               if existed else f"[Steer] no quality named '{qname}'.")
+                            + Style.RESET_ALL
+                        )
+                        continue
+                    if action == "status":
+                        qcfg = qualities.get(qname)
+                        if not qcfg:
+                            print(Fore.YELLOW + f"[Steer] no quality named '{qname}'." + Style.RESET_ALL)
+                        else:
+                            print(Fore.CYAN + f"[Steer] quality:{qname}: formula={qcfg.get('formula', QUALITY_FORMULA_DEFAULT)}, strength={format_field_source(qcfg.get('strength'))}" + Style.RESET_ALL)
+                        continue
+                    if action != "formula" or len(sargs) < 4:
+                        print(Fore.YELLOW + "[Steer] Usage: :steer quality <name> formula <expr-in-d> [strength <source> [scale [offset]]] | drop" + Style.RESET_ALL)
+                        continue
+                    formula = sargs[3]
+                    formula_error = validate_quality_formula(formula)
+                    if formula_error:
+                        print(Fore.YELLOW + f"[Steer] invalid quality formula: {formula_error}." + Style.RESET_ALL)
+                        continue
+                    strength = (qualities.get(qname) or {}).get("strength") or {
+                        "kind": "constant", "value": 1.0
+                    }
+                    if len(sargs) > 4:
+                        if sargs[4].lower() != "strength" or len(sargs) < 6:
+                            print(Fore.YELLOW + "[Steer] After the formula use: strength <source> [scale [offset]]." + Style.RESET_ALL)
+                            continue
+                        try:
+                            scale = float(sargs[6]) if len(sargs) > 6 else 1.0
+                            offset = float(sargs[7]) if len(sargs) > 7 else 0.0
+                        except ValueError:
+                            print(Fore.YELLOW + "[Steer] strength scale and offset must be numbers." + Style.RESET_ALL)
+                            continue
+                        strength = parse_field_source(sargs[5], scale, offset)
+                        source_error = field_source_error(
+                            strength, probes, tuner, bodies["g_families"]
+                        ) if strength else "invalid strength source"
+                        if source_error:
+                            print(Fore.YELLOW + f"[Steer] {source_error}." + Style.RESET_ALL)
+                            continue
+                    qualities[qname] = {"formula": formula, "strength": strength}
+                    save_steer_bodies()
+                    print(Fore.GREEN + f"[Steer] quality:{qname} = {formula}; strength <- {format_field_source(strength)}." + Style.RESET_ALL)
+                    continue
+                # :steer set -- a law-defined set. Each member has its own
+                # compliance and forward-time vector; exclusion is exact zero.
+                if sargs and sargs[0].lower() in ("set", "sets", "lawset"):
+                    bodies = steer_bodies()
+                    sets = bodies["sets"]
+                    if len(sargs) == 1:
+                        if not sets:
+                            print(Fore.CYAN + "[Steer] no quality set laws." + Style.RESET_ALL)
+                        for lname, law in sorted(sets.items()):
+                            print(
+                                Fore.CYAN
+                                + f"[Steer] set:{lname}: quality={law.get('quality', '(unset)')}; "
+                                + f"members={len(law.get('members') or {})}; "
+                                + f"excluded={','.join(sorted(law.get('excluded') or [])) or '(none)'}"
+                                + Style.RESET_ALL
+                            )
+                        continue
+                    lname = re.sub(r"[^a-z0-9_]", "_", sargs[1].lower()).strip("_")
+                    action = sargs[2].lower() if len(sargs) > 2 else "status"
+                    if action == "drop":
+                        existed = sets.pop(lname, None) is not None
+                        save_steer_bodies()
+                        print(
+                            (Fore.GREEN if existed else Fore.YELLOW)
+                            + (f"[Steer] set:{lname} dropped." if existed else f"[Steer] no set law named '{lname}'.")
+                            + Style.RESET_ALL
+                        )
+                        continue
+                    if action == "quality" and len(sargs) >= 4:
+                        qname = sargs[3].lower()
+                        if qname not in bodies["qualities"]:
+                            print(Fore.YELLOW + f"[Steer] no quality named '{qname}'. Define it first with :steer quality." + Style.RESET_ALL)
+                            continue
+                        sets.setdefault(lname, {"members": {}, "excluded": []})["quality"] = qname
+                        save_steer_bodies()
+                        print(Fore.GREEN + f"[Steer] set:{lname} law uses quality:{qname}." + Style.RESET_ALL)
+                        continue
+                    if action in ("add", "exclude", "include", "remove") and len(sargs) >= 4:
+                        if lname not in sets:
+                            print(Fore.YELLOW + f"[Steer] no set law named '{lname}'. Define its quality first." + Style.RESET_ALL)
+                            continue
+                        node = canonical_field_node(
+                            sargs[3], probes, bodies["anchors"], bodies["g_families"]
+                        )
+                        if not node or node.startswith("family:"):
+                            print(Fore.YELLOW + f"[Steer] unknown set member '{sargs[3]}'; use a probe, @anchor, or layer:N." + Style.RESET_ALL)
+                            continue
+                        law = sets[lname]
+                        exclusions = set(law.get("excluded") or [])
+                        if action == "exclude":
+                            exclusions.add(node)
+                            law["excluded"] = sorted(exclusions)
+                            save_steer_bodies()
+                            print(Fore.GREEN + f"[Steer] {node} is HARD-EXCLUDED from set:{lname}; compliance is exactly zero." + Style.RESET_ALL)
+                            continue
+                        if action == "remove":
+                            (law.get("members") or {}).pop(node, None)
+                            exclusions.discard(node)
+                            law["excluded"] = sorted(exclusions)
+                            save_steer_bodies()
+                            print(Fore.GREEN + f"[Steer] {node} removed from set:{lname}." + Style.RESET_ALL)
+                            continue
+                        existing_member = (law.get("members") or {}).get(node) or {}
+                        member = {
+                            "compliance": dict(
+                                existing_member.get("compliance")
+                                or {"kind": "constant", "value": 1.0}
+                            ),
+                            "time_vector": list(existing_member.get("time_vector") or [1.0]),
+                        }
+                        if action == "add":
+                            i = 4
+                            while i < len(sargs):
+                                key = sargs[i].lower()
+                                if key == "compliance" and i + 1 < len(sargs):
+                                    source_raw = sargs[i + 1]
+                                    j = i + 2
+                                    scale, offset = 1.0, 0.0
+                                    if j < len(sargs) and sargs[j].lower() not in ("time", "compliance"):
+                                        try:
+                                            scale = float(sargs[j]); j += 1
+                                            if j < len(sargs) and sargs[j].lower() not in ("time", "compliance"):
+                                                offset = float(sargs[j]); j += 1
+                                        except ValueError:
+                                            print(Fore.YELLOW + "[Steer] compliance scale/offset must be numbers." + Style.RESET_ALL)
+                                            break
+                                    source = parse_field_source(source_raw, scale, offset)
+                                    source_error = field_source_error(
+                                        source, probes, tuner, bodies["g_families"]
+                                    ) if source else "invalid compliance source"
+                                    if source_error:
+                                        print(Fore.YELLOW + f"[Steer] {source_error}." + Style.RESET_ALL)
+                                        break
+                                    member["compliance"] = source
+                                    i = j
+                                elif key == "time" and i + 1 < len(sargs):
+                                    vector = parse_time_vector(sargs[i + 1])
+                                    if not vector:
+                                        print(Fore.YELLOW + "[Steer] time vector must be comma-separated numbers." + Style.RESET_ALL)
+                                        break
+                                    member["time_vector"] = vector
+                                    i += 2
+                                else:
+                                    print(Fore.YELLOW + f"[Steer] unknown set-member clause '{sargs[i]}'; use compliance and/or time." + Style.RESET_ALL)
+                                    break
+                            else:
+                                exclusions.discard(node)
+                                law["excluded"] = sorted(exclusions)
+                                law.setdefault("members", {})[node] = member
+                                save_steer_bodies()
+                                print(
+                                    Fore.GREEN
+                                    + f"[Steer] {node} in set:{lname}: compliance<-{format_field_source(member.get('compliance'))}; "
+                                    + f"time=[{','.join(f'{v:g}' for v in member.get('time_vector') or [1.0])}]."
+                                    + Style.RESET_ALL
+                                )
+                                continue
+                            continue
+                        exclusions.discard(node)
+                        law["excluded"] = sorted(exclusions)
+                        law.setdefault("members", {})[node] = member
+                        save_steer_bodies()
+                        print(Fore.GREEN + f"[Steer] {node} included in set:{lname}." + Style.RESET_ALL)
+                        continue
+                    if action == "status":
+                        law = sets.get(lname)
+                        if not law:
+                            print(Fore.YELLOW + f"[Steer] no set law named '{lname}'." + Style.RESET_ALL)
+                        else:
+                            print(Fore.CYAN + f"[Steer] set:{lname} quality={law.get('quality', '(unset)')}." + Style.RESET_ALL)
+                            for node, member in sorted((law.get("members") or {}).items()):
+                                excluded = node in set(law.get("excluded") or [])
+                                print(Fore.CYAN + f"  {node}: {'EXCLUDED' if excluded else 'included'}; compliance<-{format_field_source(member.get('compliance'))}; time={member.get('time_vector') or [1.0]}" + Style.RESET_ALL)
+                            excluded_only = sorted(
+                                set(law.get("excluded") or []) - set(law.get("members") or {})
+                            )
+                            for node in excluded_only:
+                                print(Fore.CYAN + f"  {node}: EXCLUDED (not otherwise a member)" + Style.RESET_ALL)
+                        continue
+                    print(Fore.YELLOW + "[Steer] Usage: :steer set <law> quality <quality> | add <node> [compliance <source> [scale [offset]]] [time <v1,v2,...>] | exclude|include|remove <node> | drop" + Style.RESET_ALL)
+                    continue
+                # Whole-field exclusion: unlike zero compliance in one set,
+                # this prevents the node from participating in any field law.
+                if sargs and sargs[0].lower() in ("exclude", "excluded"):
+                    if len(sargs) < 2:
+                        excluded = sorted(
+                            node for node, cfg in steer_bodies()["fields"].items()
+                            if cfg.get("excluded")
+                        )
+                        print(Fore.CYAN + f"[Steer] whole-field exclusions: {', '.join(excluded) or '(none)'}" + Style.RESET_ALL)
+                        continue
+                    node, cfg = field_target_config(sargs[1], probes, create=True)
+                    if not node or cfg is None or node.startswith("family:"):
+                        print(Fore.YELLOW + f"[Steer] unknown field node '{sargs[1]}'." + Style.RESET_ALL)
+                        continue
+                    turn_off = len(sargs) > 2 and sargs[2].lower() in ("off", "include", "false")
+                    cfg["excluded"] = not turn_off
+                    save_steer_bodies()
+                    print(
+                        Fore.GREEN
+                        + (f"[Steer] {node} returned to field eligibility."
+                           if turn_off else f"[Steer] {node} is HARD-EXCLUDED from the entire field.")
+                        + Style.RESET_ALL
+                    )
+                    continue
+                # :steer family -- named G/shape/time inheritance groups.
+                if sargs and sargs[0].lower() in ("family", "families", "gfamily"):
+                    bodies = steer_bodies()
+                    families = bodies["g_families"]
+                    if len(sargs) == 1:
+                        if not families:
+                            print(Fore.CYAN + "[Steer] no G families. Define one with ':steer family <name> <G-source>'." + Style.RESET_ALL)
+                        for fname, fcfg in sorted(families.items()):
+                            g_now = resolve_field_source(
+                                fcfg.get("g"), probes, tuner, families, bodies["fields"]
+                            )
+                            t_now = resolve_field_source(
+                                fcfg.get("time") or {"kind": "constant", "value": 1.0},
+                                probes, tuner, families, bodies["fields"], channel="time",
+                            )
+                            members = sorted(
+                                node for node, cfg in bodies["fields"].items()
+                                if cfg.get("family") == fname
+                            )
+                            print(
+                                Fore.CYAN
+                                + f"[Steer] family:{fname}: G={format_field_source(fcfg.get('g'))} -> {g_now:+g}, "
+                                + f"time={format_field_source(fcfg.get('time')) if fcfg.get('time') else '1'} -> {t_now:g}, "
+                                + f"shape={format_field_shape(fcfg.get('shape'))}; "
+                                + f"members={', '.join(members) or '(none)'}"
+                                + Style.RESET_ALL
+                            )
+                        continue
+                    fname = re.sub(r"[^a-z0-9_]", "_", sargs[1].lower()).strip("_")
+                    if not fname:
+                        print(Fore.YELLOW + "[Steer] Usage: :steer family <name> <G-source|add <node>|remove <node>|drop>" + Style.RESET_ALL)
+                        continue
+                    action = sargs[2].lower() if len(sargs) > 2 else "status"
+                    if action == "drop":
+                        existed = families.pop(fname, None) is not None
+                        for cfg in bodies["fields"].values():
+                            if cfg.get("family") == fname:
+                                cfg.pop("family", None)
+                        save_steer_bodies()
+                        print(
+                            (Fore.GREEN if existed else Fore.YELLOW)
+                            + (f"[Steer] family:{fname} dropped; its members now inherit global G."
+                               if existed else f"[Steer] no family named '{fname}'.")
+                            + Style.RESET_ALL
+                        )
+                        continue
+                    if action in ("add", "remove") and len(sargs) >= 4:
+                        if fname not in families:
+                            print(Fore.YELLOW + f"[Steer] no family named '{fname}'. Define its G first." + Style.RESET_ALL)
+                            continue
+                        node, cfg = field_target_config(sargs[3], probes, create=True)
+                        if not node or node.startswith("family:"):
+                            print(Fore.YELLOW + f"[Steer] unknown field node '{sargs[3]}'; use a probe, @anchor, or layer:N." + Style.RESET_ALL)
+                            continue
+                        if action == "add":
+                            cfg["family"] = fname
+                            msg = f"{node} now inherits G/time/shape from family:{fname}."
+                        else:
+                            cfg.pop("family", None)
+                            msg = f"{node} no longer inherits family:{fname}."
+                        save_steer_bodies()
+                        print(Fore.GREEN + f"[Steer] {msg}" + Style.RESET_ALL)
+                        continue
+                    if action == "status":
+                        cfg = families.get(fname)
+                        if not cfg:
+                            print(Fore.YELLOW + f"[Steer] no family named '{fname}'." + Style.RESET_ALL)
+                        else:
+                            print(Fore.CYAN + f"[Steer] family:{fname}: G={format_field_source(cfg.get('g'))}, time={format_field_source(cfg.get('time')) if cfg.get('time') else '1'}, shape={format_field_shape(cfg.get('shape'))}" + Style.RESET_ALL)
+                        continue
+                    try:
+                        scale = float(sargs[3]) if len(sargs) > 3 else 1.0
+                        offset = float(sargs[4]) if len(sargs) > 4 else 0.0
+                    except ValueError:
+                        print(Fore.YELLOW + "[Steer] scale and offset must be numbers." + Style.RESET_ALL)
+                        continue
+                    source = parse_field_source(sargs[2], scale, offset)
+                    if not source:
+                        print(Fore.YELLOW + "[Steer] G source must be a number, global, probe:<name>, knob:<name>, status:ram, or family:<name>." + Style.RESET_ALL)
+                        continue
+                    source_error = field_source_error(source, probes, tuner, families)
+                    if source_error:
+                        print(Fore.YELLOW + f"[Steer] {source_error}." + Style.RESET_ALL)
+                        continue
+                    families.setdefault(fname, {})["g"] = source
+                    save_steer_bodies()
+                    value = resolve_field_source(source, probes, tuner, families, bodies["fields"])
+                    print(Fore.GREEN + f"[Steer] family:{fname} G <- {format_field_source(source)} (now {value:+g})." + Style.RESET_ALL)
+                    continue
+                # :steer g <node> <source> -- per-body or per-layer gravity.
+                if sargs and sargs[0].lower() in ("g", "personal-g", "personal_g"):
+                    g_ns = STEER_G_SPEC.parse(" ".join(sargs[1:]))
+                    if g_ns.node is None:
+                        bodies = steer_bodies()
+                        configured = [
+                            (node, cfg) for node, cfg in sorted(bodies["fields"].items())
+                            if cfg.get("g") is not None or cfg.get("family")
+                        ]
+                        if not configured:
+                            print(Fore.CYAN + "[Steer] no personal G overrides; every body inherits global G." + Style.RESET_ALL)
+                        for node, cfg in configured:
+                            inherited = f"family:{cfg['family']}" if cfg.get("family") else format_field_source(cfg.get("g"))
+                            print(Fore.CYAN + f"[Steer] {node} G <- {inherited}" + Style.RESET_ALL)
+                        continue
+                    if g_ns.source is None:
+                        STEER_G_SPEC.fail("need a source (or off)")
+                    node, cfg = field_target_config(g_ns.node, probes, create=True)
+                    if not node or cfg is None:
+                        print(Fore.YELLOW + f"[Steer] unknown field node '{g_ns.node}'. Define a family first, or use a probe, @anchor, or layer:N." + Style.RESET_ALL)
+                        continue
+                    if g_ns.source.lower() in ("off", "auto", "global"):
+                        cfg.pop("g", None)
+                        if g_ns.source.lower() in ("off", "global"):
+                            cfg.pop("family", None)
+                        save_steer_bodies()
+                        fallback = f"family:{cfg['family']}" if cfg.get("family") else "global"
+                        print(Fore.GREEN + f"[Steer] {node} G -> {fallback}." + Style.RESET_ALL)
+                        continue
+                    scale, offset = g_ns.scale, g_ns.offset
+                    source = parse_field_source(g_ns.source, scale, offset)
+                    if not source:
+                        STEER_G_SPEC.fail("G source must be a number, probe:<name>, knob:<name>, status:ram, lift:<trigger>, outcome:<trigger>, family:<name>, or global")
+                    source_error = field_source_error(source, probes, tuner, steer_bodies()["g_families"])
+                    if source_error:
+                        print(Fore.YELLOW + f"[Steer] {source_error}." + Style.RESET_ALL)
+                        continue
+                    if source.get("kind") == "family":
+                        fname = source.get("name")
+                        if fname not in steer_bodies()["g_families"]:
+                            print(Fore.YELLOW + f"[Steer] no family named '{fname}'." + Style.RESET_ALL)
+                            continue
+                        cfg["family"] = fname
+                        if scale == 1.0 and offset == 0.0:
+                            cfg.pop("g", None)
+                        else:
+                            cfg["g"] = source
+                    else:
+                        cfg["g"] = source
+                    save_steer_bodies()
+                    value = field_entry_config(
+                        node.split(":", 1)[1] if node.startswith("probe:") else f"@{node.split(':', 1)[1]}",
+                        int(node.split(":", 1)[1]) if node.startswith("layer:") else 0,
+                        probes, tuner,
+                    )["g"] if not node.startswith("family:") else resolve_field_source(
+                        source, probes, tuner, steer_bodies()["g_families"], steer_bodies()["fields"]
+                    )
+                    print(Fore.GREEN + f"[Steer] {node} G <- {format_field_source(source)} (resolved now {value:+g})." + Style.RESET_ALL)
+                    continue
+                # :steer time <node> <source> -- local clock alignment.
+                if sargs and sargs[0].lower() in ("time", "clock", "align-time", "align_time"):
+                    time_ns = STEER_TIME_SPEC.parse(" ".join(sargs[1:]))
+                    node, cfg = field_target_config(time_ns.node, probes, create=True)
+                    if not node or cfg is None:
+                        print(Fore.YELLOW + f"[Steer] unknown field node '{time_ns.node}'." + Style.RESET_ALL)
+                        continue
+                    if time_ns.source.lower() in ("off", "default"):
+                        cfg.pop("time", None)
+                        save_steer_bodies()
+                        print(Fore.GREEN + f"[Steer] {node} local time -> 1 (unaligned)." + Style.RESET_ALL)
+                        continue
+                    scale, offset = time_ns.scale, time_ns.offset
+                    source = parse_field_source(time_ns.source, scale, offset)
+                    if not source:
+                        STEER_TIME_SPEC.fail("time source must be a number, probe:<name>, knob:<name>, status:ram, lift:<trigger>, outcome:<trigger>, family:<name>, or layer:N")
+                    source_error = field_source_error(source, probes, tuner, steer_bodies()["g_families"])
+                    if source_error:
+                        print(Fore.YELLOW + f"[Steer] {source_error}." + Style.RESET_ALL)
+                        continue
+                    cfg["time"] = source
+                    save_steer_bodies()
+                    value = resolve_field_source(
+                        source, probes, tuner, steer_bodies()["g_families"],
+                        steer_bodies()["fields"], channel="time",
+                    )
+                    print(Fore.GREEN + f"[Steer] {node} local time <- {format_field_source(source)} (rate now {max(0.05, min(20.0, value)):g})." + Style.RESET_ALL)
+                    continue
+                # :steer shape <node> ... -- extended radial bodies, including
+                # hollow shells. Families of several nodes compose odd holoids.
+                if sargs and sargs[0].lower() in ("shape", "field-shape", "field_shape"):
+                    if len(sargs) < 3:
+                        print(Fore.YELLOW + "[Steer] Usage: :steer shape <probe|@anchor|layer:N|family:name> point|gaussian <width>|shell <radius> <width>|plateau <radius> <edge>|off" + Style.RESET_ALL)
+                        continue
+                    node, cfg = field_target_config(sargs[1], probes, create=True)
+                    if not node or cfg is None:
+                        print(Fore.YELLOW + f"[Steer] unknown field node '{sargs[1]}'." + Style.RESET_ALL)
+                        continue
+                    if sargs[2].lower() in ("off", "default"):
+                        cfg.pop("shape", None)
+                        save_steer_bodies()
+                        print(Fore.GREEN + f"[Steer] {node} shape -> inherited point field." + Style.RESET_ALL)
+                        continue
+                    shape = parse_field_shape(sargs[2:])
+                    if not shape:
+                        print(Fore.YELLOW + "[Steer] Shape must be point, gaussian <width>, shell <radius> <width>, or plateau <radius> <edge>." + Style.RESET_ALL)
+                        continue
+                    cfg["shape"] = shape
+                    save_steer_bodies()
+                    print(Fore.GREEN + f"[Steer] {node} shape = {format_field_shape(shape)}." + Style.RESET_ALL)
+                    continue
+                # :steer anchor <name> [here|from <probe>|mass <m>|drop] --
+                # precision bodies: exact latent points that join the field.
+                if sargs and sargs[0].lower() in ("anchor", "anchors"):
+                    bodies = steer_bodies()
+                    if len(sargs) < 2:
+                        if not bodies["anchors"]:
+                            print(Fore.CYAN + "[Steer] no anchors. ':steer anchor <name> here' pins the last reply's state; ':steer anchor <name> from <probe>' copies a probe direction." + Style.RESET_ALL)
+                        for an, a in sorted(bodies["anchors"].items()):
+                            poles_txt = ", ".join(f"{f}{'+' if s > 0 else '-'}" for f, s in sorted((a.get("poles") or {}).items())) or "untyped"
+                            print(Fore.CYAN + f"[Steer] @{an}: mass {a.get('mass', 1.0):+g}, {'frozen' if a.get('frozen', True) else 'MOBILE'}, poles [{poles_txt}], {len(a.get('dirs') or {})} layer(s)" + Style.RESET_ALL)
+                        continue
+                    aname = re.sub(r"[^a-z0-9_]", "_", sargs[1].lower()).strip("_")
+                    sub = sargs[2].lower() if len(sargs) > 2 else "here"
+                    if sub == "drop":
+                        if bodies["anchors"].pop(aname, None) is not None:
+                            bodies["fields"].pop(f"anchor:{aname}", None)
+                            save_steer_bodies()
+                            print(Fore.GREEN + f"[Steer] anchor @{aname} dropped." + Style.RESET_ALL)
+                        else:
+                            print(Fore.YELLOW + f"[Steer] no anchor named '{aname}'." + Style.RESET_ALL)
+                        continue
+                    if sub == "mass" and len(sargs) > 3:
+                        if aname not in bodies["anchors"]:
+                            print(Fore.YELLOW + f"[Steer] no anchor named '{aname}'." + Style.RESET_ALL)
+                            continue
+                        try:
+                            bodies["anchors"][aname]["mass"] = float(sargs[3])
+                        except ValueError:
+                            print(Fore.YELLOW + "[Steer] Usage: :steer anchor <name> mass <number>" + Style.RESET_ALL)
+                            continue
+                        save_steer_bodies()
+                        print(Fore.GREEN + f"[Steer] anchor @{aname} mass = {float(sargs[3]):+g}." + Style.RESET_ALL)
+                        continue
+                    if sub == "from" and len(sargs) > 3:
+                        src = sargs[3]
+                        if src not in probes or not probes[src].get("direction"):
+                            print(Fore.YELLOW + f"[Steer] '{src}' is not a probe with a stored direction.{did_you_mean(src, probes)}" + Style.RESET_ALL)
+                            continue
+                        dirs = {}
+                        for L, v in probes[src]["direction"].items():
+                            vt = v if torch.is_tensor(v) else torch.as_tensor(v)
+                            dirs[int(L)] = vt.detach().float().cpu()
+                        bodies["anchors"][aname] = {"dirs": dirs, "mass": 1.0, "frozen": True, "poles": {}}
+                        save_steer_bodies()
+                        print(Fore.GREEN + f"[Steer] anchor @{aname} pinned from probe '{src}' ({len(dirs)} layer(s)); frozen; ':steer freeze @{aname} off' makes it mobile under laws." + Style.RESET_ALL)
+                        continue
+                    if sub in ("here", "last"):
+                        last_reply = next(
+                            (getattr(r, "text", "") for r in reversed(memory.records)
+                             if r.scope == memory.scope and r.kind == "turn" and r.role == "assistant"),
+                            "",
+                        )
+                        if not last_reply:
+                            print(Fore.YELLOW + "[Steer] no archived assistant turn to capture yet." + Style.RESET_ALL)
+                            continue
+                        print(Fore.CYAN + f"[Steer] capturing @{aname} from the last reply (one forward)..." + Style.RESET_ALL)
+                        try:
+                            dirs = capture_anchor_dirs(model, last_reply)
+                        except Exception as e:
+                            print(Fore.RED + f"[Steer] anchor capture failed: {e}" + Style.RESET_ALL)
+                            continue
+                        bodies["anchors"][aname] = {"dirs": dirs, "mass": 1.0, "frozen": True, "poles": {}}
+                        save_steer_bodies()
+                        print(Fore.GREEN + f"[Steer] anchor @{aname} pinned at the last reply's state ({len(dirs)} layer(s)), mass +1, frozen." + Style.RESET_ALL)
+                        continue
+                    print(Fore.YELLOW + "[Steer] Usage: :steer anchor <name> [here|from <probe>|mass <m>|drop]" + Style.RESET_ALL)
+                    continue
+                # :steer pole <body> <family[+|-]> [off] -- type a body.
+                if sargs and sargs[0].lower() == "pole":
+                    pole_ns = STEER_POLE_SPEC.parse(" ".join(sargs[1:]))
+                    bodies = steer_bodies()
+                    bname_raw = pole_ns.body.lstrip("@")
+                    fam, sign = parse_pole_spec(pole_ns.pole)
+                    if not fam:
+                        STEER_POLE_SPEC.fail(f"pole must be family[+|-], got '{pole_ns.pole}'")
+                    turn_off = bool(pole_ns.flag)
+                    aname = re.sub(r"[^a-z0-9_]", "_", bname_raw.lower()).strip("_")
+                    if bname_raw in probes:
+                        poles = bodies["probe_poles"].setdefault(bname_raw, {})
+                        shown = bname_raw
+                    elif aname in bodies["anchors"]:
+                        poles = bodies["anchors"][aname].setdefault("poles", {})
+                        shown = f"@{aname}"
+                    else:
+                        cands = set(probes) | {f"@{a}" for a in bodies["anchors"]}
+                        print(Fore.YELLOW + f"[Steer] '{pole_ns.body}' is neither a probe nor an anchor.{did_you_mean(pole_ns.body, cands)}" + Style.RESET_ALL)
+                        continue
+                    if turn_off:
+                        poles.pop(fam, None)
+                        save_steer_bodies()
+                        print(Fore.GREEN + f"[Steer] {shown} pole '{fam}' removed." + Style.RESET_ALL)
+                    else:
+                        poles[fam] = sign
+                        save_steer_bodies()
+                        print(Fore.GREEN + f"[Steer] {shown} typed {fam}{'+' if sign > 0 else '-'}; it interacts only where a ':steer law' couples its families." + Style.RESET_ALL)
+                    continue
+                # :steer law [<famA> <famB> <k|off>] -- selective couplings.
+                if sargs and sargs[0].lower() in ("law", "laws"):
+                    law_ns = STEER_LAW_SPEC.parse(" ".join(sargs[1:]))
+                    bodies = steer_bodies()
+                    if law_ns.famA is None:
+                        if not bodies["laws"]:
+                            print(Fore.CYAN + "[Steer] no laws. ':steer law <famA> <famB> <k>' -- k>0: like poles repel, unlike attract; k<0 flips; unlisted pairs never interact." + Style.RESET_ALL)
+                        for (fa, fb), k in sorted(bodies["laws"].items()):
+                            print(Fore.CYAN + f"[Steer] law {fa} <-> {fb}: k={k:+g}" + Style.RESET_ALL)
+                        step_now = tuner.get("gravity_law_step", 0.0)
+                        print(Fore.CYAN + f"[Steer] law step = {step_now:g} per turn (':tune gravity_law_step <s>'; moves only unfrozen anchors)." + Style.RESET_ALL)
+                        continue
+                    if law_ns.famB is None or law_ns.k is None:
+                        STEER_LAW_SPEC.fail("a law needs famA, famB, and k (bare :steer law lists)")
+                    fa, _ = parse_pole_spec(law_ns.famA)
+                    fb, _ = parse_pole_spec(law_ns.famB)
+                    if not fa or not fb:
+                        STEER_LAW_SPEC.fail("family names must be plain identifiers")
+                    key = tuple(sorted((fa, fb)))
+                    if law_ns.k.lower() in ("off", "remove"):
+                        bodies["laws"].pop(key, None)
+                        save_steer_bodies()
+                        print(Fore.GREEN + f"[Steer] law {key[0]} <-> {key[1]} removed; those families no longer interact." + Style.RESET_ALL)
+                        continue
+                    try:
+                        kval = float(law_ns.k)
+                    except ValueError:
+                        STEER_LAW_SPEC.fail(f"k must be a number or off, got '{law_ns.k}'")
+                    bodies["laws"][key] = kval
+                    save_steer_bodies()
+                    print(Fore.GREEN + f"[Steer] law {key[0]} <-> {key[1]}: k={kval:+g} (k>0: like repels, unlike attracts)." + Style.RESET_ALL)
+                    continue
+                # :steer bodies -- the whole physics at a glance.
+                if sargs and sargs[0].lower() == "bodies":
+                    bodies = steer_bodies()
+                    g_on = tuner.get("prioritize_gravity", 0.0) > 0
+                    print(Fore.CYAN + Style.BRIGHT + f"[Steer] physics: gravity {'ON' if g_on else 'off'} (G={tuner.get('prioritize_alpha', 0.0):g}), doppler k={tuner.get('gravity_doppler', 0.0):g}, law step={tuner.get('gravity_law_step', 0.0):g}" + Style.RESET_ALL)
+                    masses = gravity_field_masses(probes, tuner)
+                    if masses:
+                        shown = sorted(masses, key=lambda t: -abs(t[1]))[:8]
+                        print(Fore.CYAN + "[Steer] masses: " + ", ".join(f"{n} {m:+.3f}" for n, m, _d in shown) + Style.RESET_ALL)
+                    for fname, fcfg in sorted(bodies["g_families"].items()):
+                        members = sorted(
+                            node for node, cfg in bodies["fields"].items()
+                            if cfg.get("family") == fname
+                        )
+                        print(
+                            Fore.CYAN
+                            + f"[Steer] family:{fname}: G={format_field_source(fcfg.get('g'))}; "
+                            + f"time={format_field_source(fcfg.get('time')) if fcfg.get('time') else '1'}; "
+                            + f"shape={format_field_shape(fcfg.get('shape'))}; "
+                            + f"members={','.join(members) or '(none)'}"
+                            + Style.RESET_ALL
+                        )
+                    for node, cfg in sorted(bodies["fields"].items()):
+                        bits = []
+                        if cfg.get("family"):
+                            bits.append(f"family:{cfg['family']}")
+                        if cfg.get("g") is not None:
+                            bits.append(f"G<-{format_field_source(cfg['g'])}")
+                        if cfg.get("time") is not None:
+                            bits.append(f"time<-{format_field_source(cfg['time'])}")
+                        if cfg.get("shape") is not None:
+                            bits.append(f"shape={format_field_shape(cfg['shape'])}")
+                        if cfg.get("excluded"):
+                            bits.append("HARD-EXCLUDED")
+                        if bits:
+                            print(Fore.CYAN + f"[Steer] field {node}: " + "; ".join(bits) + Style.RESET_ALL)
+                    for qname, qcfg in sorted(bodies["qualities"].items()):
+                        print(
+                            Fore.CYAN
+                            + f"[Steer] quality:{qname}: {qcfg.get('formula', QUALITY_FORMULA_DEFAULT)}; "
+                            + f"strength<-{format_field_source(qcfg.get('strength'))}"
+                            + Style.RESET_ALL
+                        )
+                    for lname, law in sorted(bodies["sets"].items()):
+                        excluded = set(law.get("excluded") or [])
+                        members = []
+                        for node, member in sorted((law.get("members") or {}).items()):
+                            state = "EXCLUDED" if node in excluded else (
+                                f"c<-{format_field_source(member.get('compliance'))},"
+                                f"t={member.get('time_vector') or [1.0]}"
+                            )
+                            members.append(f"{node}[{state}]")
+                        for node in sorted(excluded - set(law.get("members") or {})):
+                            members.append(f"{node}[EXCLUDED]")
+                        print(
+                            Fore.CYAN
+                            + f"[Steer] set:{lname} quality={law.get('quality', '(unset)')}: "
+                            + ("; ".join(members) if members else "(empty)")
+                            + Style.RESET_ALL
+                        )
+                    typed = {**{p: pl for p, pl in bodies["probe_poles"].items() if pl},
+                             **{f"@{a}": b.get("poles") for a, b in bodies["anchors"].items() if b.get("poles")}}
+                    if typed:
+                        print(Fore.CYAN + "[Steer] poles: " + "; ".join(
+                            f"{n}[" + ",".join(f"{f}{'+' if s > 0 else '-'}" for f, s in sorted(pl.items())) + "]"
+                            for n, pl in sorted(typed.items())) + Style.RESET_ALL)
+                    for (fa, fb), k in sorted(bodies["laws"].items()):
+                        print(Fore.CYAN + f"[Steer] law {fa} <-> {fb}: k={k:+g}" + Style.RESET_ALL)
+                    continue
+                # :steer gravity on|off [G] | status -- prioritize as a FIELD:
+                # every probe is a mass; pull depends on where the state is.
+                if sargs and sargs[0].lower() in ("gravity", "field"):
+                    field_ns = STEER_FIELD_SPEC.parse(" ".join(sargs[1:]))
+                    sub = field_ns.action
+                    init_summary = None
+                    if sub in ("init", "full", "flex", "flexible"):
+                        init_summary = initialize_field_system(tuner, field_ns.G)
+                        print(
+                            Fore.GREEN + Style.BRIGHT
+                            + "[Steer] full field system initialized: "
+                            + ", ".join(f"{k}={v}" for k, v in init_summary.items())
+                            + ". Existing definitions/exclusions were preserved; no laws were invented and no bodies were unfrozen."
+                            + Style.RESET_ALL
+                        )
+                    elif sub in ("on", "off"):
+                        tuner.set("prioritize_gravity", 1.0 if sub == "on" else 0.0)
+                        if field_ns.G is not None:
+                            tuner.set("prioritize_alpha", field_ns.G)
+                    g_on = tuner.get("prioritize_gravity", 0.0) > 0
+                    g_now = tuner.get("prioritize_alpha", 0.0)
+                    masses = gravity_field_masses(probes, tuner)
+                    configured = steer_bodies()["fields"]
+                    n_personal = sum(
+                        1 for cfg in configured.values()
+                        if cfg.get("g") is not None or cfg.get("family")
+                    )
+                    n_quality_members = sum(
+                        1
+                        for law in steer_bodies()["sets"].values()
+                        for node in (law.get("members") or {})
+                        if node not in set(law.get("excluded") or [])
+                        and law.get("quality") in steer_bodies()["qualities"]
+                    )
+                    print(
+                        Fore.GREEN + Style.BRIGHT
+                        + f"[Steer] gravity {'ON' if g_on else 'off'} (default global G = prioritize_alpha = {round(g_now, 4)}; "
+                        + f"{n_personal} personal/family override(s); {n_quality_members} quality member(s)"
+                        + f"{'; inert until some G or quality source is nonzero' if g_on and g_now <= 0 and not n_personal and not n_quality_members else ''}). "
+                        + "Pin/mix steering is replaced by the field while on."
+                        + Style.RESET_ALL
+                    )
+                    if masses:
+                        shown = sorted(masses, key=lambda t: -abs(t[1]))[:6]
+                        print(Fore.CYAN + "[Steer] masses (normalized, signed; - repels): "
+                              + ", ".join(f"{n} {m:+.3f}" for n, m, _d in shown)
+                              + (f" (+{len(masses) - len(shown)} more)" if len(masses) > len(shown) else "")
+                              + Style.RESET_ALL)
+                        frozen = sorted(n for n in probes if probes[n].get("frozen"))
+                        if frozen:
+                            print(Fore.CYAN + f"[Steer] frozen baselines: {', '.join(frozen)}" + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + "[Steer] no masses yet: give a probe explicit mass (:steer mass <probe> <m>) or let lifts accrue." + Style.RESET_ALL)
+                    continue
+                # :steer mass <probe> <m|auto> -- gravitational coefficient.
+                if sargs and sargs[0].lower() == "mass":
+                    mass_ns = STEER_MASS_SPEC.parse(" ".join(sargs[1:]))
+                    pname = mass_ns.probe
+                    if pname not in probes:
+                        print(Fore.YELLOW + f"[Steer] '{pname}' is not an active probe.{did_you_mean(pname, probes)}" + Style.RESET_ALL)
+                        continue
+                    if mass_ns.m.lower() in ("auto", "lift", "none"):
+                        set_probe_field(probes, pname, "mass", None)
+                        print(Fore.GREEN + f"[Steer] {pname} mass -> auto (its signed evidence lift each turn)." + Style.RESET_ALL)
+                    else:
+                        try:
+                            mval = float(mass_ns.m)
+                        except ValueError:
+                            STEER_MASS_SPEC.fail(f"m must be a number or auto, got '{mass_ns.m}'")
+                        set_probe_field(probes, pname, "mass", mval)
+                        kind = "repulsor" if mval < 0 else "attractor"
+                        print(Fore.GREEN + f"[Steer] {pname} mass = {mval:+g} ({kind}); normalized against the other masses when the field applies." + Style.RESET_ALL)
+                    continue
+                # :steer freeze <probe> [off] -- inertial coefficient: the mass
+                # keeps pulling but its own rolling baseline stops moving.
+                if sargs and sargs[0].lower() in ("freeze", "unfreeze"):
+                    freeze_ns = STEER_FREEZE_SPEC.parse(" ".join(sargs[1:]))
+                    pname = freeze_ns.body
+                    thaw = sargs[0].lower() == "unfreeze" or bool(freeze_ns.flag)
+                    aname = re.sub(r"[^a-z0-9_]", "_", pname.lstrip("@").lower()).strip("_")
+                    if pname.startswith("@") or (pname not in probes and aname in steer_bodies()["anchors"]):
+                        anchors_now = steer_bodies()["anchors"]
+                        if aname not in anchors_now:
+                            print(Fore.YELLOW + f"[Steer] no anchor named '{aname}'." + Style.RESET_ALL)
+                            continue
+                        anchors_now[aname]["frozen"] = not thaw
+                        save_steer_bodies()
+                        state_txt = "MOBILE under laws" if thaw else "frozen (a fixed pin again)"
+                        print(Fore.GREEN + f"[Steer] anchor @{aname} is now {state_txt}." + Style.RESET_ALL)
+                        continue
+                    if pname not in probes:
+                        print(Fore.YELLOW + f"[Steer] '{pname}' is not an active probe.{did_you_mean(pname, probes)}" + Style.RESET_ALL)
+                        continue
+                    set_probe_field(probes, pname, "frozen", not thaw)
+                    if thaw:
+                        print(Fore.GREEN + f"[Steer] {pname} baseline unfrozen -- it drifts with observations again." + Style.RESET_ALL)
+                    else:
+                        print(Fore.GREEN + f"[Steer] {pname} baseline FROZEN -- it still scores and still pulls, but its center no longer moves (it cannot habituate to its own gravity)." + Style.RESET_ALL)
                     continue
                 # :steer <probe> <alpha>  -> pin one probe (negative = steer AWAY).
                 if len(sargs) >= 2 and sargs[0] in probes:
                     probe_name = sargs[0]
+                    if probe_is_released(probes[probe_name]):
+                        print(Fore.YELLOW + f"[Steer] '{probe_name}' is released and observational-only. Reactivate it with :probe release {probe_name} off." + Style.RESET_ALL)
+                        continue
                     try:
                         if sargs[1].lower() == "up": steer_alpha = 0.5
                         elif sargs[1].lower() == "down": steer_alpha = -0.5
@@ -6876,6 +11576,7 @@ def main():
                         print(Fore.YELLOW + f"[Steer] invalid alpha: {sargs[1]}. Must be a number (e.g. 0.5) or 'up'/'down'." + Style.RESET_ALL)
                         continue
                     prioritize_pin["mix"] = None
+                    prioritize_pin["landscape"] = None
                     prioritize_pin["probe"] = probe_name
                     prioritize_pin["sign"] = -1.0 if steer_alpha < 0 else 1.0
                     tuner.set("prioritize_alpha", abs(steer_alpha))
@@ -6983,7 +11684,8 @@ def main():
                         trig = tuner.triggers.get(f"probe_{pname}")
                         n_pairs = len(trig.outcomes) if trig else 0
                         exposed_note = ", exposed to the model" if pdata.get("exposed") else ""
-                        print(Fore.CYAN + f"[Probe] {pname}: {len(pdata['direction'])} layers, {n_pairs} paired turns{exposed_note}." + Style.RESET_ALL)
+                        released_note = ", released (visible/read-only)" if probe_is_released(pdata) else ""
+                        print(Fore.CYAN + f"[Probe] {pname}: {len(pdata['direction'])} layers, {n_pairs} paired turns{exposed_note}{released_note}." + Style.RESET_ALL)
                     continue
                 if pargs.lower().startswith("auto"):
                     vparts = pargs.split()
@@ -6997,6 +11699,36 @@ def main():
                             print(Fore.CYAN + "[Probe] Auto-readings disabled." + Style.RESET_ALL)
                     else:
                         print(Fore.YELLOW + "[Probe] Usage: :probe auto [on|off]" + Style.RESET_ALL)
+                    continue
+
+                if pargs.lower() == "release" or pargs.lower().startswith("release "):
+                    rparts = pargs.split()
+                    if len(rparts) < 2:
+                        print(Fore.YELLOW + "[Probe] Usage: :probe release <name> [off]" + Style.RESET_ALL)
+                        continue
+                    pname = re.sub(r"[^a-z0-9_]", "_", rparts[1].lower())[:40]
+                    if pname not in probes:
+                        print(Fore.YELLOW + f"[Probe] no active probe named '{pname}'.{did_you_mean(pname, probes)}" + Style.RESET_ALL)
+                        continue
+                    released = not (len(rparts) > 2 and rparts[2].lower() in {"off", "no", "false", "reactivate"})
+                    set_probe_released(probes, pname, released, PROBE_DIR)
+                    if released:
+                        if prioritize_pin.get("probe") == pname:
+                            prioritize_pin["probe"] = None
+                        if pname in (prioritize_pin.get("mix") or []):
+                            prioritize_pin["mix"] = [n for n in prioritize_pin["mix"] if n != pname] or None
+                        if prioritize_pin.get("landscape") == pname:
+                            prioritize_pin["landscape"] = None
+                    print(
+                        Fore.GREEN
+                        + (
+                            f"[Probe] '{pname}' released: still visible/scored/queryable, "
+                            "but excluded from generation and automatic steering."
+                            if released else
+                            f"[Probe] '{pname}' reactivated for generation and steering."
+                        )
+                        + Style.RESET_ALL
+                    )
                     continue
 
                 if pargs.lower() in ("choose", "choice"):
@@ -7032,7 +11764,16 @@ def main():
                         continue
                     pname_s = re.sub(r"[^a-z0-9_]", "_", m.group(1).lower())[:40]
                     pair_s = m.group(2).strip()
-                    print(Fore.GREEN + f"\n[Probe Suggestion] Try running this:\n:probe {pname_s} {pair_s}\n" + Style.RESET_ALL)
+                    suggested_command = f":probe {pname_s} {pair_s}"
+                    memory.append_definition(
+                        "probe",
+                        pname_s,
+                        suggested_command,
+                        authored_by="model",
+                        status="proposed",
+                        provenance={"source": ":probe choose"},
+                    )
+                    print(Fore.GREEN + f"\n[Probe Suggestion] Try running this:\n{suggested_command}\n" + Style.RESET_ALL)
                     continue
 
                 if pargs.lower() in ("values", "value", "recent", "last") or pargs.lower().startswith(("values ", "value ", "recent ", "last ")):
@@ -7236,45 +11977,154 @@ def main():
                     else:
                         print(Fore.CYAN + f"[Probe] {dname} has no stored framings (likely adopted from a raw vector)." + Style.RESET_ALL)
                     continue
-                # :probe explain <name> -- the MODEL explains the probe in its OWN words
-                # (what it senses, when it reads high vs low), grounded on the framings.
+                # :probe explain <name> [alpha|choose] [prompt] -- default is a PING,
+                # not a prompt: briefly steer along the probe's own direction
+                # (envelope-capped) and let the model verbalize whatever the
+                # nudge evokes; the information arrives through activations,
+                # the text asks nothing. The probe's baseline is frozen for
+                # the ping so it cannot habituate to its own motion. Append
+                # 'prompt' for a stored-definition explanation grounded in the
+                # probe's minted WITH/WITHOUT framings.
                 if pargs.lower().startswith("explain "):
-                    ename_raw = pargs[8:].strip()
+                    explain_ns = PROBE_EXPLAIN_SPEC.parse(pargs[len("explain"):])
+                    ename_raw = explain_ns.name
+                    alpha_tok = explain_ns.alpha
+                    mode_tok = explain_ns.mode
+                    # Tolerate ':probe explain fun prompt' -- mode in the alpha slot.
+                    if alpha_tok is not None and mode_tok is None and alpha_tok.lower() in ("prompt", "words", "verbal"):
+                        mode_tok, alpha_tok = alpha_tok.lower(), None
+                    explain_via_prompt = mode_tok is not None
+                    ping_alpha = 1.0
+                    if alpha_tok is not None:
+                        if alpha_tok.lower() in ("choose", "auto"):
+                            _live_g = float(tuner.get("prioritize_alpha", 0.0))
+                            ping_alpha = _live_g if _live_g > 0 else 1.0
+                            print(
+                                Fore.CYAN
+                                + (f"[Probe] alpha chosen from the live calibrated G (prioritize_alpha = {ping_alpha:g})."
+                                   if _live_g > 0 else
+                                   "[Probe] no calibrated G yet (prioritize_alpha <= 0); alpha defaults to 1. "
+                                   "Set one with :tune prioritize_alpha <v> or :steer field init <G>.")
+                                + Style.RESET_ALL
+                            )
+                        else:
+                            try:
+                                ping_alpha = float(alpha_tok)
+                            except ValueError:
+                                PROBE_EXPLAIN_SPEC.fail(f"alpha must be a number or choose, got '{alpha_tok}'")
                     ename_resolved = resolve_probe_choice(ename_raw, probes, model=model, config=config, action_name="explain")
                     if not ename_resolved:
                         continue
                     if ename_resolved not in probes:
                         print(Fore.YELLOW + f"[Probe] no active probe named '{ename_resolved}'.{did_you_mean(ename_resolved, probes)}" + Style.RESET_ALL)
                         continue
+                    ping_dirs = probes[ename_resolved].get("direction") or {}
+                    if not explain_via_prompt and not ping_dirs:
+                        print(Fore.YELLOW + f"[Probe] '{ename_resolved}' has no stored direction; falling back to the prompt explanation." + Style.RESET_ALL)
+                        explain_via_prompt = True
+                    if not explain_via_prompt:
+                        ping_layers = sorted(int(l) for l in ping_dirs.keys())
+                        print(
+                            Fore.CYAN
+                            + f"[Probe] pinging '{ename_resolved}' (alpha {ping_alpha:g}, L{ping_layers[0]}-L{ping_layers[-1]}, envelope-capped): "
+                            + "no question asked -- the nudge itself is the message."
+                            + Style.RESET_ALL
+                        )
+                        from invariants.engine import _steer_handles as _ping_steer
+                        was_frozen = probes[ename_resolved].get("frozen", False)
+                        probes[ename_resolved]["frozen"] = True
+                        # A ping is a diagnostic nudge: cached task deltas are
+                        # the wrong authority for reading the probe's effect,
+                        # and its output must never be STORED -- the cache sits
+                        # at capacity, so every ping write evicts a real memory.
+                        _ping_cache_before = (config.cache_enabled, config.cache_write_enabled)
+                        config.cache_enabled = False
+                        config.cache_write_enabled = False
+                        ping_handles = []
+                        ping_error = None
+                        try:
+                            ping_handles = _ping_steer(model, ping_dirs, list(ping_dirs.keys()), ping_alpha)
+                            ping_reply = generate_agentic_text(
+                                model,
+                                instruction=PROBE_PING_ELICITOR,
+                                config=config,
+                                pre_formatted=False,
+                                max_new_tokens=140,
+                                chatty_log=False,
+                            )
+                        except Exception as e:
+                            ping_error = e
+                        finally:
+                            for h in ping_handles:
+                                h.remove()
+                            probes[ename_resolved]["frozen"] = was_frozen
+                            config.cache_enabled, config.cache_write_enabled = _ping_cache_before
+                        if ping_error is not None:
+                            print(Fore.RED + f"[Probe] ping failed: {ping_error}" + Style.RESET_ALL)
+                            continue
+                        ping_text = ping_reply[0] if isinstance(ping_reply, tuple) else ping_reply
+                        print(Fore.CYAN + f"[Probe] {ename_resolved} under ping:\n{(ping_text or '').strip()}" + Style.RESET_ALL)
+                        print(
+                            Fore.CYAN
+                            + f"[Probe] If that reads generic/off-target, the activation nudge was not legible; "
+                              f"':probe define {ename_resolved}' shows the saved framings, and "
+                              f"':probe explain {ename_resolved} prompt' asks for a definition-grounded wording."
+                            + Style.RESET_ALL
+                        )
+                        continue
                     framings = probes[ename_resolved].get("framings")
                     if framings and any(framings):
+                        with_pole = (framings[0] or "(missing high-pole wording)").strip()
+                        without_pole = (framings[1] or "(missing low-pole wording)").strip()
                         basis = (
-                            f"It is defined by contrasting two poles:\n"
-                            f"WITH (reads high): {framings[0]}\n"
-                            f"WITHOUT (reads low): {framings[1]}\n\n"
+                            f"WITH / high pole: {with_pole}\n"
+                            f"WITHOUT / low pole: {without_pole}\n"
                         )
                     else:
-                        basis = "It has no stored framings (it was adopted from a raw vector).\n\n"
+                        basis = (
+                            "NO STORED WITH/WITHOUT FRAMINGS: this probe was adopted from a raw vector, "
+                            "so there is no deterministic high/low wording beyond the saved vector/name.\n"
+                        )
                     default_explain_prompt = (
                         "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
-                        "A cognitive probe named '$ename_resolved' is a direction in your own activations "
-                        "that scores each of your replies.\n$basis"
-                        "In two or three sentences, explain in your OWN words what this probe is sensing in "
-                        "you, and when it would read high versus low.<|eot_id|>"
+                        "PROBE_EXPLAIN_CONTEXT_V2\n"
+                        "You are explaining one saved cognitive probe definition to the operator.\n"
+                        "Probe name: $ename_resolved\n"
+                        "A cognitive probe is a direction in your own activations that scores each reply.\n"
+                        "Stored definition for $ename_resolved:\n$basis\n"
+                        "Use the stored definition above. Do not explain the word \"this\", do not describe "
+                        "probes in general, and do not invent a new meaning for $ename_resolved.\n"
+                        "Answer in two or three sentences: what a high reading means, what a low reading "
+                        "means, and whether this is definition-grounded or only a raw-vector guess."
+                        "<|eot_id|>"
                         "<|start_header_id|>assistant<|end_header_id|>\n\n"
                     )
                     xprompt = load_prompt(
                         "probe_explain",
                         default_explain_prompt,
+                        required_substring=(
+                            "PROBE_EXPLAIN_CONTEXT_V2",
+                            "Probe name: $ename_resolved",
+                            "Stored definition for $ename_resolved",
+                            "Do not explain the word \"this\"",
+                            "$basis",
+                        ),
                         ename_resolved=ename_resolved,
                         basis=basis
                     )
                     print(Fore.CYAN + f"[Probe] Asking the model to explain '{ename_resolved}' in its own words..." + Style.RESET_ALL)
+                    # Same diagnostic rule as the ping: meta-talk about a probe
+                    # must not read from or write into the cognitive cache.
+                    _explain_cache_before = (config.cache_enabled, config.cache_write_enabled)
+                    config.cache_enabled = False
+                    config.cache_write_enabled = False
                     try:
                         expl = generate_agentic_text(model, instruction=xprompt, config=config, pre_formatted=True, max_new_tokens=200, chatty_log=False)
                     except Exception as e:
                         print(Fore.RED + f"[Probe] explain failed: {e}" + Style.RESET_ALL)
                         continue
+                    finally:
+                        config.cache_enabled, config.cache_write_enabled = _explain_cache_before
                     print(Fore.CYAN + f"[Probe] {ename_resolved} -- in the model's words:\n{(expl or '').strip()}" + Style.RESET_ALL)
                     continue
                 if pargs.lower().startswith("show ") or pargs.lower().startswith("hide "):
@@ -7349,17 +12199,10 @@ def main():
                             + Style.RESET_ALL
                         )
                     continue
-                if pargs.lower() == "adopt" or pargs.lower().startswith("adopt "):
-                    rest, adopt_layers = strip_band_suffix(pargs[5:].strip())
-                    stems = [re.sub(r"[^a-z0-9_]", "_", s.lower())[:40] for s in rest.split()] if rest else []
-                    if not stems:
-                        print(
-                            Fore.YELLOW
-                            + "[Probe] Usage: :probe adopt <dim> [<dim> ...] [band <lo> <hi>] (e.g. "
-                            + "ambiguity disagreement warranted_confidence band 16 24)."
-                            + Style.RESET_ALL
-                        )
-                        continue
+                adopt_args = CommandArgs(pargs).take("adopt")
+                if adopt_args is not None:
+                    adopt_ns = PROBE_ADOPT_SPEC.parse(adopt_args.raw)
+                    stems, adopt_layers = adopt_ns.stems, adopt_ns.band
                     adopted = []
                     for stem in stems:
                         if stem in probes:
@@ -7413,23 +12256,12 @@ def main():
                             + Style.RESET_ALL
                         )
                     continue
-                if pargs.lower() == "compose" or pargs.lower().startswith("compose "):
-                    rest = pargs[len("compose"):].strip()
-                    cname, _, expr = rest.partition(" ")
-                    cname = re.sub(r"[^a-z0-9_]", "_", cname.lower())[:40]
-                    expr = expr.strip()
-                    if not cname or not expr:
-                        print(
-                            Fore.YELLOW
-                            + "[Probe] Usage: :probe compose <name> <signed mix>, e.g. "
-                            + ":probe compose memory_need ambiguity + disagreement - validated_flow "
-                            + "- warranted_confidence  (weights allowed: 0.5*curiosity)."
-                            + Style.RESET_ALL
-                        )
-                        continue
-                    # Removed: if cname in probes: ... continue 
-                    # so that users can overwrite/augment a probe using itself (e.g. compose amb amb + new)
-                    expr, cband = strip_band_suffix(expr)
+                compose_args = CommandArgs(pargs).take("compose")
+                if compose_args is not None:
+                    compose_ns = PROBE_COMPOSE_SPEC.parse(compose_args.raw)
+                    cname, expr, cband = compose_ns.name, compose_ns.mix, compose_ns.band
+                    # No `if cname in probes` guard: composites may overwrite/
+                    # augment themselves (e.g. compose amb amb + new).
                     terms, perr = parse_compose_expr(expr)
                     if perr is not None:
                         print(Fore.YELLOW + f"[Probe] could not parse term '{perr}' in the mix." + Style.RESET_ALL)
@@ -7523,12 +12355,10 @@ def main():
                         + Style.RESET_ALL
                     )
                     continue
-                if pargs.lower() == "backfill" or pargs.lower().startswith("backfill "):
-                    rest = pargs[len("backfill"):].split()
-                    if not rest:
-                        print(Fore.YELLOW + "[Probe] Usage: :probe backfill <name|all|choose> [n]" + Style.RESET_ALL)
-                        continue
-                    bf_name_raw = rest[0]
+                backfill_args = CommandArgs(pargs).take("backfill")
+                if backfill_args is not None:
+                    backfill_ns = PROBE_BACKFILL_SPEC.parse(backfill_args.raw)
+                    bf_name_raw = backfill_ns.name
                     bf_names_to_rebuild = []
                     if bf_name_raw == "all":
                         bf_names_to_rebuild = list(probes.keys())
@@ -7555,12 +12385,7 @@ def main():
                             print(Fore.YELLOW + f"[Probe] no active probe named '{bf_name}'.{did_you_mean(bf_name, probes)} Bare :probe lists them." + Style.RESET_ALL)
                             continue
                         bf_names_to_rebuild = [bf_name]
-                    bf_limit = None
-                    if len(rest) > 1:
-                        try:
-                            bf_limit = max(1, int(rest[1]))
-                        except ValueError:
-                            bf_limit = None
+                    bf_limit = backfill_ns.limit
                     archive = [
                         r for r in memory.records
                         if r.scope == memory.scope and r.kind == "turn"
@@ -7587,18 +12412,22 @@ def main():
                         )
                         mint_ts_map[_pn] = _mint
                     from invariants.engine import _inputs as _bf_inputs, _hidden_states as _bf_hidden, probe_score as _bf_score
-                    # One shared forward per archived reply scores EVERY active
-                    # probe (projections are free once the states exist), so the
-                    # rows written are JOINT -- multi-anchor calibration needs
-                    # anchors on the same row. Only the NAMED probe's trigger
-                    # and rolling history are rebuilt.
-                    bf_rollings = {p: deque(maxlen=40) for p in probes}
+                    # The forward pass is shared, but projection breadth follows
+                    # the command contract: a named backfill scores only that
+                    # probe. The explicit "all" form produces joint rows for all
+                    # active probes when multi-anchor calibration is wanted.
+                    scoring_names = backfill_scoring_names(
+                        probes,
+                        bf_names_to_rebuild,
+                        request_all=(bf_name_raw == "all"),
+                    )
+                    bf_rollings = {p: deque(maxlen=40) for p in scoring_names}
                     bf_scored = []  # (timestamp, {probe: (raw, sig)}, stored sense)
                     display_name = "all probes" if bf_name_raw == "all" else bf_names_to_rebuild[0]
                     print(
                         Fore.CYAN
                         + f"[Probe] backfilling {display_name} over {len(archive)} archived replies "
-                        + f"(one forward each; scoring {len(probes)} active probe(s) per reply)..."
+                        + f"(one forward each; scoring {len(scoring_names)} requested probe(s) per reply)..."
                         + Style.RESET_ALL,
                         flush=True,
                     )
@@ -7607,7 +12436,8 @@ def main():
                             b_ids = _bf_inputs(model, br.text[:600])
                             b_hs = _bf_hidden(model, b_ids["input_ids"], b_ids.get("attention_mask"))
                             per_probe = {}
-                            for _pn, _pd in probes.items():
+                            for _pn in scoring_names:
+                                _pd = probes[_pn]
                                 raw = _bf_score(b_hs, _pd["direction"])
                                 roll = bf_rollings[_pn]
                                 sig = raw - (sum(roll) / len(roll)) if roll else 0.0
@@ -7634,6 +12464,7 @@ def main():
                                 credited += 1
                         total_credited[_pn] = credited
                         probes[_pn]["history"] = deque((pp[_pn][0] for _, pp, _ in bf_scored), maxlen=40)
+                    save_probe_raw_histories(probes)
                     tuner.save()
                     
                     existing_ts = set()
@@ -7709,7 +12540,16 @@ def main():
                         max_new_tokens=150
                     )
                     sug = sug.strip()
-                    print(Fore.GREEN + f"\n[Probe Suggestion] Try running this:\n:probe {pname} {sug}\n" + Style.RESET_ALL)
+                    suggested_command = f":probe {pname} {sug}"
+                    memory.append_definition(
+                        "probe",
+                        pname,
+                        suggested_command,
+                        authored_by="model",
+                        status="proposed",
+                        provenance={"source": ":probe framing suggestion"},
+                    )
+                    print(Fore.GREEN + f"\n[Probe Suggestion] Try running this:\n{suggested_command}\n" + Style.RESET_ALL)
                     continue
                 a_text, _, b_text = _partition_unescaped_pipes(framings)
                 a_text, b_text = a_text.strip(), b_text.strip()
@@ -7751,11 +12591,41 @@ def main():
                     torch.save({"direction": direction, "framings": (a_text, b_text)}, os.path.join(PROBE_DIR, f"{save_name}.pt"))
                 except Exception:
                     pass
+                model_definition = memory.find_definition(
+                    "probe",
+                    pname,
+                    authored_by="model",
+                    open_only=True,
+                )
+                authored_by = "operator"
+                if model_definition is not None:
+                    actual_command = f":probe {pname} {a_text} || {b_text}"
+                    same_definition = (
+                        " ".join(model_definition.text.split())
+                        == " ".join(actual_command.split())
+                    )
+                    authored_by = "model" if same_definition else "model_revised_by_operator"
+                    memory.append_definition_feedback(
+                        model_definition,
+                        (
+                            "operator minted the proposed definition"
+                            if same_definition
+                            else "operator revised the proposal and minted the resulting definition"
+                        )
+                        + (f"; rationale: {command_because}" if command_because else ""),
+                        verdict="accepted" if same_definition else "revised",
+                        source="operator",
+                        provenance={"actual_definition": actual_command},
+                    )
                 memory.append_event(
                     "probe_minted",
                     text=f"{pname}: {a_text} || {b_text}",
                     tags=["probe"],
-                    provenance={"layers": sorted(direction), "authored_by": "operator"},
+                    provenance={
+                        "layers": sorted(direction),
+                        "authored_by": authored_by,
+                        "definition_id": model_definition.record_id if model_definition else None,
+                    },
                 )
                 print(
                     Fore.CYAN
@@ -7771,6 +12641,14 @@ def main():
                 if _last_completion:
                     print(Fore.GREEN + f"[Suggest Apply] Auto-queueing AI completion: {_last_completion}" + Style.RESET_ALL)
                     input_queue.append(_last_completion)
+                    if pending_completion_definition_id:
+                        memory.append_definition_feedback(
+                            pending_completion_definition_id,
+                            "operator applied and queued the completion",
+                            verdict="accepted",
+                            source="operator",
+                        )
+                        pending_completion_definition_id = None
                     _last_completion = None
                     continue
                     
@@ -7839,6 +12717,15 @@ def main():
                                         updated_layers += 1
                                         
                         print(Fore.GREEN + Style.BRIGHT + f"[Place] '{pname}' probe nudged {'toward' if sign > 0 else 'away from'} the last response over {updated_layers} layers." + Style.RESET_ALL)
+                        probe_definition = memory.find_definition("probe", pname)
+                        if probe_definition is not None:
+                            memory.append_definition_feedback(
+                                probe_definition,
+                                f"direction nudged {'toward' if sign > 0 else 'away from'} the last response",
+                                verdict="positive" if sign > 0 else "negative",
+                                source="operator",
+                                metrics={"sign": sign, "layers": updated_layers},
+                            )
                         memory.append_event(
                             "probe_placed",
                             text=f"placed last response on '{pname}' as {'positive' if sign > 0 else 'negative'}",
@@ -7904,9 +12791,17 @@ def main():
                 if etype not in ("macro", "file", "autocomplete", "var"):
                     ename = eargs[1]
                     etype = "var"
+                elif etype == "autocomplete":
+                    ename = " ".join(eargs[2:]) if len(eargs) > 2 else ""
                 else:
                     ename = eargs[2] if len(eargs) > 2 else ""
-                _pending_expect = {"type": etype, "name": ename}
+                expect_context = {}
+                if etype == "macro":
+                    expect_context = solve_expect_contexts.get(
+                        re.sub(r"[^a-z0-9_]", "_", (ename or "").lower())[:40].strip("_"),
+                        {},
+                    )
+                _pending_expect = {"type": etype, "name": ename, "context": expect_context}
                 print(Fore.CYAN + f"[Expect] Intercepting the model's next turn for type '{etype}' ('{ename}')." + Style.RESET_ALL)
                 continue
             if user_input.lower().startswith(":suggest"):
@@ -7915,17 +12810,57 @@ def main():
                     1 for r in memory.records
                     if r.scope == memory.scope and r.kind == "turn" and r.role == "assistant"
                 )
+                def _print_user_facing_command_launcher(filter_text=None):
+                    catalog = suggest_command_catalog(
+                        hidden_commands=hidden_commands,
+                        macro_aliases=macro_aliases,
+                        solve_macros=list_solve_macros(),
+                        filter_text=filter_text,
+                    )
+                    filt = f" matching '{filter_text}'" if filter_text else ""
+                    if not catalog:
+                        print(Fore.YELLOW + f"[Suggest] No visible user-facing commands{filt}." + Style.RESET_ALL)
+                        return
+                    print(
+                        Fore.CYAN
+                        + f"[Suggest] {len(catalog)} visible user-facing command line(s){filt}. "
+                          "Run one line directly; replace <...> placeholders and choose one side of | alternatives."
+                        + Style.RESET_ALL
+                    )
+                    for item in catalog:
+                        prefix = "macro" if item["kind"] == "macro" else "cmd"
+                        summary = item.get("summary") or ""
+                        suffix = f"  -- {summary}" if summary else ""
+                        print(Fore.GREEN + f"      -> {item['command']}" + Fore.CYAN + f"  [{prefix}]{suffix}" + Style.RESET_ALL)
                 
                 target_probe = None
                 if len(sargs) > 1 and sargs[1].lower() not in ("apply", "suggestions"):
-                    if sargs[1].lower() in ("command", "commands", "help"):
-                        input_queue.insert(0, ":help")
-                        print(Fore.CYAN + "[Suggest] Showing command help via :help." + Style.RESET_ALL)
+                    if sargs[1].lower() in ("command", "commands", "help", "all", "catalog", "launcher"):
+                        _print_user_facing_command_launcher(" ".join(sargs[2:]).strip() or None)
+                        continue
+                    if sargs[1].lower() in ("gravity", "field", "physics", "steer"):
+                        filter_text = " ".join(sargs[1:]).strip()
+                        _print_user_facing_command_launcher(filter_text)
                         continue
                     if sargs[1].startswith(":"):
                         prefix_cmd = user_input[len(":suggest"):].strip()
                         active_probes = ", ".join(probes.keys()) if probes else "None"
-                        active_steers = ", ".join(k for k in tuner.triggers.keys() if k.startswith("steer_") or "_alpha" in k)
+                        active_steers = ", ".join(
+                            f"{k}={tuner.get(k, 0.0):g}"
+                            for k in tuner.triggers.keys()
+                            if k.startswith("steer_") or "_alpha" in k
+                        )
+                        command_reference = build_command_autocomplete_reference(
+                            prefix_cmd,
+                            hidden_commands=hidden_commands,
+                        )
+                        autocomplete_commands = (
+                            set(BUILTIN_COMMANDS)
+                            | set(macro_aliases)
+                        ) - set(hidden_commands)
+                        available_commands = ", ".join(
+                            f":{name}" for name in sorted(autocomplete_commands)
+                        )
 
                         because_ctx = ""
                         if command_because:
@@ -7933,13 +12868,18 @@ def main():
                             print(Fore.CYAN + "[Suggest] Passing your 'because' rationale to the model." + Style.RESET_ALL)
 
                         default_suggest_prompt = (
-                            ":expect autocomplete\n"
-                            ":probe command_author I am suggesting exactly ONE valid completion for the user's shell command || I am generating conversational text\n"
-                            ":probe backfill command_author\n"
-                            ":steer command_author 1.5\n"
+                            ":expect autocomplete $prefix_cmd\n"
                             "You are a command autocomplete assistant for an interactive agent shell.\n"
                             "The user has started typing a command: '$prefix_cmd'\n"
-                            f"{because_ctx}\n"
+                            "$because_ctx\n"
+                            "The following is the AUTHORITATIVE LIVE COMMAND REFERENCE. It is generated "
+                            "from the shell implementation that will parse the answer. Treat it as newer "
+                            "and more authoritative than any earlier conversation, memory, interpretation, "
+                            "or example. Do not invent syntax that is absent from it.\n"
+                            "--- live command reference ---\n"
+                            "$command_reference\n"
+                            "--- end live command reference ---\n"
+                            "Currently available non-hidden command names: $available_commands\n"
                             "Currently active probes: $active_probes\n"
                             "Active steers: $active_steers\n"
                             "Please provide exactly ONE valid completion for this command based on the available shell capabilities. "
@@ -7948,11 +12888,15 @@ def main():
                         prompt = load_prompt(
                             "suggest_autocomplete",
                             default_suggest_prompt,
+                            required_substring="$command_reference",
                             prefix_cmd=prefix_cmd,
+                            because_ctx=because_ctx,
+                            command_reference=command_reference,
+                            available_commands=available_commands,
                             active_probes=active_probes,
                             active_steers=active_steers
                         )
-                        print(Fore.CYAN + f"[Suggest] Queuing phenomenological macro to complete '{prefix_cmd}'..." + Style.RESET_ALL)
+                        print(Fore.CYAN + f"[Suggest] Queuing documentation-grounded completion for '{prefix_cmd}'..." + Style.RESET_ALL)
                         queue_macro_text(prompt, input_queue)
                         continue
                         
@@ -8003,22 +12947,51 @@ def main():
                         print(Fore.YELLOW + "[Suggest] Could not compute similarities." + Style.RESET_ALL)
                         continue
                         
-                    sorted_probes = sorted(probe_scores.items(), key=lambda x: x[1], reverse=True)
+                    confident_match, sorted_probes = confident_probe_match(probe_scores)
                     top_probe, top_score = sorted_probes[0]
-                    
-                    print(Fore.GREEN + Style.BRIGHT + f"[Suggest] Best internal representation match: '{top_probe}' (similarity: {top_score:+.3f})" + Style.RESET_ALL)
+
+                    if confident_match is None:
+                        runner_score = sorted_probes[1][1] if len(sorted_probes) > 1 else 0.0
+                        print(
+                            Fore.YELLOW
+                            + f"[Suggest] No confident probe match for that reason. Best was '{top_probe}' "
+                            + f"({top_score:+.3f}; runner-up {runner_score:+.3f}), below the confidence floor "
+                            + "or too close to distinguish. I will not turn that weak winner into a probe-specific action."
+                            + Style.RESET_ALL
+                        )
+                        sugg = suggest_actions(
+                            tuner,
+                            list(turn_log),
+                            probes=probes,
+                            archive_size=_arch,
+                        )
+                        if not sugg:
+                            print(
+                                Fore.CYAN
+                                + "  -> Ask for a command completion with "
+                                + f":suggest :<command> because {command_because}"
+                                + Style.RESET_ALL
+                            )
+                        # Continue into the ordinary state-wide suggestion
+                        # renderer. Crucially, do not recommend backfilling the
+                        # arbitrary highest probe.
+                        target_probe = None
+                    else:
+                        top_probe, top_score = confident_match
+                        print(Fore.GREEN + Style.BRIGHT + f"[Suggest] Confident internal representation match: '{top_probe}' (similarity: {top_score:+.3f})" + Style.RESET_ALL)
                     if len(sorted_probes) > 1:
                         runners_up = ", ".join(f"{p} ({s:+.3f})" for p, s in sorted_probes[1:3])
                         print(Fore.CYAN + f"          Runners up: {runners_up}" + Style.RESET_ALL)
-                        
-                    all_sugg = suggest_actions(tuner, list(turn_log), probes=probes, archive_size=_arch)
-                    sugg = [(cat, line, cmd) for cat, line, cmd in all_sugg if top_probe in line or top_probe in cmd]
-                    
-                    if not sugg:
-                        print(Fore.YELLOW + f"[Suggest] No specific data-backed moves ready for '{top_probe}' yet." + Style.RESET_ALL)
-                        print(Fore.CYAN + f"  -> To generate evidence: :probe backfill {top_probe}" + Style.RESET_ALL)
-                        print(Fore.CYAN + f"  -> To steer blindly:     :tune probe_{top_probe}_alpha 0.5" + Style.RESET_ALL)
-                        continue
+
+                    if confident_match is not None:
+                        all_sugg = suggest_actions(tuner, list(turn_log), probes=probes, archive_size=_arch)
+                        sugg = [(cat, line, cmd) for cat, line, cmd in all_sugg if top_probe in line or top_probe in cmd]
+
+                        if not sugg:
+                            print(Fore.YELLOW + f"[Suggest] No specific data-backed moves ready for '{top_probe}' yet." + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  -> To generate evidence: :probe backfill {top_probe}" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  -> To steer blindly:     :tune probe_{top_probe}_alpha 0.5" + Style.RESET_ALL)
+                            continue
                 else:
                     sugg = suggest_actions(tuner, list(turn_log), probes=probes, archive_size=_arch)
 
@@ -8031,6 +13004,7 @@ def main():
                     )
                 else:
                     labels = {
+                        "field": "Gravity / field mechanics",
                         "calibrate": "Calibrations ready",
                         "commit": "Explored, not committed",
                         "explore": "Capabilities never tried",
@@ -8042,7 +13016,7 @@ def main():
                         + f"[Suggest] {len(sugg)} move(s) the accrued state supports -- computed, not applied:"
                         + Style.RESET_ALL
                     )
-                    for cat in ("commit", "calibrate", "explore", "backfill", "expose"):
+                    for cat in ("field", "commit", "calibrate", "explore", "backfill", "expose"):
                         group = [(l, c) for k, l, c in sugg if k == cat]
                         if not group:
                             continue
@@ -8052,6 +13026,8 @@ def main():
                                 cmd += f" because {command_because}"
                             print(Fore.CYAN + f"    {line}" + Style.RESET_ALL)
                             print(Fore.GREEN + f"      -> {cmd}" + Style.RESET_ALL)
+                if len(sargs) == 1:
+                    _print_user_facing_command_launcher()
                 continue
             if user_input.startswith(":label"):
                 # Human-in-the-loop: judge the MOST RECENT turn on a probe's (or
@@ -8087,6 +13063,21 @@ def main():
                     print(Fore.YELLOW + f"[Label] the last turn carries no reading for '{target_stream}'. Score it first." + Style.RESET_ALL)
                     continue
                 tuner.credit(target_trigger, float(sig), outcome)
+                probe_definition = None
+                if target_trigger.startswith("probe_"):
+                    probe_definition = memory.find_definition(
+                        "probe",
+                        target_trigger[6:],
+                    )
+                if probe_definition is not None:
+                    memory.append_definition_feedback(
+                        probe_definition,
+                        f"last turn labeled {'positive' if outcome >= 0.5 else 'negative'} "
+                        f"at signal {float(sig):+.4f}",
+                        verdict="positive" if outcome >= 0.5 else "negative",
+                        source="operator",
+                        metrics={"signal": float(sig), "outcome": outcome},
+                    )
                 memory.append_event(
                     "operator_label",
                     text=f"{target_trigger}: {'positive' if outcome >= 0.5 else 'negative'} (signal {float(sig):+.4f})",
@@ -8104,7 +13095,8 @@ def main():
                 )
                 continue
             if user_input.startswith(":calibrate"):
-                cargs = user_input[len(":calibrate"):].split()
+                cal_ns = CALIBRATE_SPEC.parse(user_input[len(":calibrate"):])
+                cargs = ([cal_ns.probe] + (cal_ns.args.split() if cal_ns.args else [])) if cal_ns.probe else []
                 if not cargs:
                     print(Fore.CYAN + "[Calibrate] Usage: :calibrate <name> [percentile|intent|band args]." + Style.RESET_ALL)
                     routes = {}
@@ -8334,6 +13326,365 @@ def main():
                     queued_commands.append(queued_cmd)
                     print(Fore.GREEN + f"[Queue] Added future command: {queued_cmd}" + Style.RESET_ALL)
                 continue
+            if user_input.startswith(":relations"):
+                rargs = user_input[len(":relations"):].strip().split()
+                aliases = {
+                    "relation": "all",
+                    "rels": "all",
+                    "active": "all",
+                    "dynamic": "bindings",
+                    "dynamics": "bindings",
+                    "binding": "bindings",
+                    "match": "bindings",
+                    "matches": "bindings",
+                    "cal": "calibrations",
+                    "cals": "calibrations",
+                    "calibration": "calibrations",
+                    "queued": "queue",
+                    "queues": "queue",
+                    "expose": "exposure",
+                    "exposed": "exposure",
+                    "target": "priority",
+                    "targets": "priority",
+                    "prioritize": "priority",
+                    "steer": "priority",
+                    "steering": "priority",
+                    "field": "fields",
+                    "gravity": "fields",
+                    "physics": "fields",
+                    "clocks": "fields",
+                    "shapes": "fields",
+                    "releases": "release",
+                    "aliases": "macros",
+                    "macro": "macros",
+                }
+                scopes = {aliases.get(a.lower(), a.lower()) for a in rargs} if rargs else {"active"}
+                all_scopes = {"bindings", "calibrations", "queue", "exposure", "priority", "fields", "release", "macros"}
+                active_scopes = all_scopes - {"macros"}
+                if "all" in scopes:
+                    scopes = set(all_scopes)
+                if "active" in scopes:
+                    scopes = (scopes - {"active"}) | active_scopes
+                bad = sorted(scopes - all_scopes)
+                if bad:
+                    print(Fore.YELLOW + "[Relations] Unknown scope(s): " + ", ".join(bad) + ". Use :relations [active|all|bindings|calibrations|queue|exposure|priority|fields|release|macros]." + Style.RESET_ALL)
+                    continue
+
+                def _rel_terms(terms):
+                    pieces = []
+                    for weight, name in terms or []:
+                        try:
+                            w = float(weight)
+                        except (TypeError, ValueError):
+                            w = 1.0
+                        mag = abs(w)
+                        prefix = "+" if w >= 0 else "-"
+                        if abs(mag - 1.0) < 1e-9:
+                            pieces.append(prefix + str(name))
+                        else:
+                            pieces.append(f"{prefix}{mag:g}*{name}")
+                    return " ".join(pieces) if pieces else "(empty)"
+
+                def _rel_header(title, count):
+                    print(Fore.CYAN + Style.BRIGHT + f"[Relations] {title} ({count})" + Style.RESET_ALL)
+
+                printed_any = False
+                if "bindings" in scopes:
+                    printed_any = True
+                    active_match_names = sorted(
+                        pn for pn, m in probe_matches.items()
+                        if str(m.get("mode", "none")).lower() in {"drive", "validate"}
+                    )
+                    _rel_header("Bindings And Probe-Match Links", len(tuner_bindings) + len(probe_matches))
+                    if tuner_bindings:
+                        match_drive_knobs = {
+                            str(m.get("knob")): pn
+                            for pn, m in probe_matches.items()
+                            if str(m.get("mode", "none")).lower() == "drive" and m.get("knob")
+                        }
+                        for name, binding in sorted(tuner_bindings.items()):
+                            try:
+                                terms, mult = binding
+                            except (TypeError, ValueError):
+                                terms, mult = [], 1.0
+                            source = f" via probe-match drive:{match_drive_knobs[name]}" if name in match_drive_knobs else ""
+                            print(Fore.CYAN + f"  dynamic {name} <- {float(mult):g} * ({_rel_terms(terms)}){source}" + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + "  dynamic bindings: none" + Style.RESET_ALL)
+                    if probe_matches:
+                        for pn, m in sorted(probe_matches.items()):
+                            mode = str(m.get("mode", "none") or "none")
+                            mult = f" x{m.get('mult')}" if mode == "drive" and m.get("mult") is not None else ""
+                            print(Fore.CYAN + f"  match {pn} <-> {m.get('knob', '(none)')} mode={mode}{mult}" + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + "  probe-match links: none" + Style.RESET_ALL)
+                    if active_match_names:
+                        print(Fore.YELLOW + "  active match modes: " + ", ".join(active_match_names) + Style.RESET_ALL)
+
+                if "calibrations" in scopes:
+                    printed_any = True
+                    calibrated = [
+                        (name, trig)
+                        for name, trig in sorted(tuner.triggers.items())
+                        if int(getattr(trig, "calibrations", 0) or 0) > 0
+                    ]
+                    _rel_header("Calibrated Knobs/Thresholds", len(calibrated))
+                    if calibrated:
+                        for name, trig in calibrated[:40]:
+                            print(
+                                Fore.CYAN
+                                + f"  {name}: value={round(float(trig.value), 4)} kind={trig.kind} comparator={trig.comparator} calibrations={trig.calibrations}"
+                                + Style.RESET_ALL
+                            )
+                        if len(calibrated) > 40:
+                            print(Fore.CYAN + f"  ... {len(calibrated) - 40} more" + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + "  none" + Style.RESET_ALL)
+
+                if "queue" in scopes:
+                    printed_any = True
+                    total_q = len(queued_calibrations) + len(queued_commands) + (1 if last_refused_calibration else 0)
+                    _rel_header("Queued Retries And Future Commands", total_q)
+                    if queued_calibrations:
+                        for idx, qcmd in enumerate(queued_calibrations):
+                            print(Fore.CYAN + f"  [cal {idx}] :calibrate {qcmd}" + Style.RESET_ALL)
+                    if queued_commands:
+                        for idx, qcmd in enumerate(queued_commands):
+                            print(Fore.CYAN + f"  [cmd {idx}] {qcmd}" + Style.RESET_ALL)
+                    if last_refused_calibration:
+                        print(Fore.CYAN + f"  refused cache: :calibrate {last_refused_calibration}" + Style.RESET_ALL)
+                    if total_q == 0:
+                        print(Fore.CYAN + "  none" + Style.RESET_ALL)
+
+                if "priority" in scopes:
+                    printed_any = True
+                    bits = []
+                    if prioritize_pin.get("landscape"):
+                        bits.append(f"landscape={prioritize_pin.get('landscape')}")
+                    if prioritize_pin.get("mix"):
+                        bits.append("mix=" + "+".join(prioritize_pin.get("mix") or []))
+                    if prioritize_pin.get("probe"):
+                        sign = float(prioritize_pin.get("sign", 1.0) or 1.0)
+                        bits.append(f"pin={'+' if sign >= 0 else '-'}{prioritize_pin.get('probe')}")
+                    bits.append(f"prioritize_alpha={round(float(tuner.get('prioritize_alpha', 0.0) or 0.0), 4)}")
+                    _rel_header("Priority Target", 1 if any(b.split("=")[0] in {"landscape", "mix", "pin"} for b in bits) or float(tuner.get("prioritize_alpha", 0.0) or 0.0) else 0)
+                    print(Fore.CYAN + "  " + ", ".join(bits) + Style.RESET_ALL)
+
+                if "fields" in scopes:
+                    printed_any = True
+                    physics = steer_bodies()
+                    links = []
+                    for fname, cfg in sorted(physics["g_families"].items()):
+                        links.append(
+                            f"family:{fname} G<-{format_field_source(cfg.get('g'))} "
+                            f"time<-{format_field_source(cfg.get('time')) if cfg.get('time') else '1'} "
+                            f"shape={format_field_shape(cfg.get('shape'))}"
+                        )
+                    for node, cfg in sorted(physics["fields"].items()):
+                        parts = []
+                        if cfg.get("family"):
+                            parts.append(f"inherits family:{cfg['family']}")
+                        if cfg.get("g") is not None:
+                            parts.append(f"G<-{format_field_source(cfg['g'])}")
+                        if cfg.get("time") is not None:
+                            parts.append(f"time<-{format_field_source(cfg['time'])}")
+                        if cfg.get("shape") is not None:
+                            parts.append(f"shape={format_field_shape(cfg['shape'])}")
+                        if cfg.get("excluded"):
+                            parts.append("HARD-EXCLUDED from whole field")
+                        if parts:
+                            links.append(f"{node} " + " ".join(parts))
+                    for qname, cfg in sorted(physics["qualities"].items()):
+                        links.append(
+                            f"quality:{qname} formula={cfg.get('formula', QUALITY_FORMULA_DEFAULT)} "
+                            f"strength<-{format_field_source(cfg.get('strength'))}"
+                        )
+                    for lname, law in sorted(physics["sets"].items()):
+                        excluded = set(law.get("excluded") or [])
+                        for node, member in sorted((law.get("members") or {}).items()):
+                            links.append(
+                                f"set:{lname} quality:{law.get('quality', '(unset)')} -> {node} "
+                                + (
+                                    "EXCLUDED (exact zero)"
+                                    if node in excluded
+                                    else f"compliance<-{format_field_source(member.get('compliance'))} "
+                                         f"time={member.get('time_vector') or [1.0]}"
+                                )
+                            )
+                        for node in sorted(excluded - set(law.get("members") or {})):
+                            links.append(
+                                f"set:{lname} quality:{law.get('quality', '(unset)')} -> {node} "
+                                "EXCLUDED (exact zero; not otherwise a member)"
+                            )
+                    _rel_header("Gravity / Quality / Time / Shape Links", len(links))
+                    if links:
+                        for link in links:
+                            print(Fore.CYAN + "  " + link + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + "  none (all bodies use global point-field defaults)" + Style.RESET_ALL)
+
+                if "exposure" in scopes:
+                    printed_any = True
+                    exposed_probe_names = sorted(n for n in probes if probes[n].get("exposed"))
+                    total_exposed = len(exposed_commands) + len(exposed_probe_names) + len(exposed_knobs) + (1 if memory_tool_exposed or help_exposed else 0)
+                    _rel_header("Model-Readable / Runtime Exposures", total_exposed)
+                    if exposed_commands:
+                        for word, record in sorted(exposed_commands.items()):
+                            rec = normalize_command_exposure(record)
+                            activation = command_exposure_custom_activation(rec) or "(no activation criterion)"
+                            steer = command_exposure_raw_steer(rec) or "(command-defined)"
+                            print(Fore.CYAN + f"  command {command_exposure_display(word, rec)} mode={rec['mode']} activation={activation} steer={steer}" + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + "  command tools: none" + Style.RESET_ALL)
+                    print(Fore.CYAN + "  probe tools: " + (", ".join(exposed_probe_names) if exposed_probe_names else "none") + Style.RESET_ALL)
+                    print(Fore.CYAN + "  knob tools: " + (", ".join(sorted(exposed_knobs)) if exposed_knobs else "none") + Style.RESET_ALL)
+                    print(Fore.CYAN + f"  memory tool: {'on' if memory_tool_exposed else 'off'}; help tool: {'on' if help_exposed else 'off'}" + Style.RESET_ALL)
+
+                if "release" in scopes:
+                    printed_any = True
+                    active_releases = {k: v for k, v in tool_sense.release_probs.items() if v > 0}
+                    _rel_header("Release Decouplings", len(active_releases))
+                    if active_releases:
+                        for name, prob in sorted(active_releases.items()):
+                            print(Fore.CYAN + f"  {name}: fire decision decoupled with probability {round(float(prob), 4)}" + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + "  none" + Style.RESET_ALL)
+
+                if "macros" in scopes:
+                    printed_any = True
+                    _rel_header("Macro Aliases", len(macro_aliases))
+                    if macro_aliases:
+                        for name, path in sorted(macro_aliases.items())[:40]:
+                            try:
+                                rel = os.path.relpath(path, ROOT)
+                            except Exception:
+                                rel = str(path)
+                            print(Fore.CYAN + f"  :{name} -> {rel}" + Style.RESET_ALL)
+                        if len(macro_aliases) > 40:
+                            print(Fore.CYAN + f"  ... {len(macro_aliases) - 40} more" + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + "  none" + Style.RESET_ALL)
+
+                if not printed_any:
+                    print(Fore.CYAN + "[Relations] Nothing requested." + Style.RESET_ALL)
+                continue
+            if user_input.startswith(":clean"):
+                cargs = user_input[len(":clean"):].strip().split()
+                apply_clean = any(a.lower() in {"apply", "yes", "run", "do"} for a in cargs)
+                scopes = [
+                    a.lower()
+                    for a in cargs
+                    if a.lower() not in {"apply", "yes", "run", "do", "preview", "status"}
+                ]
+                if not scopes:
+                    scopes = ["all"]
+                aliases = {
+                    "cal": "queue",
+                    "cals": "queue",
+                    "calibration": "queue",
+                    "calibrations": "queue",
+                    "queues": "queue",
+                    "dynamic": "bindings",
+                    "dynamics": "bindings",
+                    "binding": "bindings",
+                    "matches": "bindings",
+                    "match": "bindings",
+                    "target": "priority",
+                    "targets": "priority",
+                    "prioritize": "priority",
+                    "steer": "priority",
+                    "steering": "priority",
+                }
+                scope_set = {aliases.get(s, s) for s in scopes}
+                if "all" in scope_set:
+                    scope_set = {"queue", "bindings", "priority"}
+                bad_scopes = sorted(scope_set - {"queue", "bindings", "priority"})
+                if bad_scopes:
+                    print(Fore.YELLOW + "[Clean] Unknown scope(s): " + ", ".join(bad_scopes) + ". Use :clean [queue|bindings|priority|all] [apply]." + Style.RESET_ALL)
+                    continue
+
+                queued_cal_count = len(queued_calibrations)
+                queued_cmd_count = len(queued_commands)
+                refused_count = 1 if last_refused_calibration else 0
+                binding_names = sorted(tuner_bindings)
+                active_match_names = sorted(
+                    pn for pn, m in probe_matches.items()
+                    if str(m.get("mode", "none")).lower() in {"drive", "validate"}
+                )
+                priority_active = bool(
+                    prioritize_pin.get("probe")
+                    or prioritize_pin.get("mix")
+                    or prioritize_pin.get("landscape")
+                    or float(tuner.get("prioritize_alpha", 0.0) or 0.0) != 0.0
+                )
+
+                preview = []
+                if "queue" in scope_set:
+                    preview.append(f"queue: {queued_cal_count} calibration retrie(s), {queued_cmd_count} future command(s), {refused_count} refused calibration cache")
+                if "bindings" in scope_set:
+                    preview.append(
+                        "bindings: "
+                        + f"{len(binding_names)} dynamic tuner binding(s)"
+                        + (f" [{', '.join(binding_names[:8])}{' ...' if len(binding_names) > 8 else ''}]" if binding_names else "")
+                        + f"; {len(active_match_names)} active probe-match mode(s)"
+                        + (f" [{', '.join(active_match_names[:8])}{' ...' if len(active_match_names) > 8 else ''}]" if active_match_names else "")
+                    )
+                if "priority" in scope_set:
+                    target_bits = []
+                    if prioritize_pin.get("landscape"):
+                        target_bits.append(f"landscape={prioritize_pin.get('landscape')}")
+                    if prioritize_pin.get("mix"):
+                        target_bits.append("mix=" + "+".join(prioritize_pin.get("mix") or []))
+                    if prioritize_pin.get("probe"):
+                        target_bits.append(f"pin={prioritize_pin.get('probe')}")
+                    target_bits.append(f"prioritize_alpha={round(float(tuner.get('prioritize_alpha', 0.0) or 0.0), 4)}")
+                    preview.append("priority: " + ", ".join(target_bits))
+
+                if not apply_clean:
+                    print(Fore.CYAN + "[Clean] Preview only. Add 'apply' to perform cleanup." + Style.RESET_ALL)
+                    for line in preview:
+                        print(Fore.CYAN + "  " + line + Style.RESET_ALL)
+                    print(Fore.CYAN + "  Non-destructive: does not delete probes, histories, labels, docs, memories, trigger evidence, or files." + Style.RESET_ALL)
+                    continue
+
+                changed = []
+                if "queue" in scope_set:
+                    if queued_calibrations or queued_commands or last_refused_calibration:
+                        queued_calibrations.clear()
+                        queued_commands.clear()
+                        last_refused_calibration = None
+                        changed.append("cleared queued calibration/command retries")
+                if "bindings" in scope_set:
+                    if tuner_bindings:
+                        tuner_bindings.clear()
+                        changed.append("cleared dynamic tuner bindings")
+                    match_changed = 0
+                    for pn in active_match_names:
+                        m = probe_matches.get(pn)
+                        if not m:
+                            continue
+                        if str(m.get("mode", "none")).lower() != "none":
+                            m["mode"] = "none"
+                            m.pop("mult", None)
+                            match_hist.pop(pn, None)
+                            match_changed += 1
+                    if match_changed:
+                        _save_probe_matches()
+                        changed.append(f"set {match_changed} probe-match mode(s) to none")
+                if "priority" in scope_set:
+                    if priority_active:
+                        prioritize_pin["probe"] = None
+                        prioritize_pin["mix"] = None
+                        prioritize_pin["landscape"] = None
+                        tuner.set("prioritize_alpha", 0.0)
+                        changed.append("cleared priority target and prioritize_alpha")
+
+                if changed:
+                    print(Fore.GREEN + "[Clean] " + "; ".join(changed) + "." + Style.RESET_ALL)
+                    print(Fore.CYAN + "[Clean] Evidence and artifacts preserved." + Style.RESET_ALL)
+                else:
+                    print(Fore.CYAN + "[Clean] Nothing active in selected scope(s)." + Style.RESET_ALL)
+                continue
             if user_input.startswith(":tune"):
                 if " dynamic " in user_input.lower():
                     # :tune <target> dynamic <signed mix> [mult]
@@ -8420,7 +13771,8 @@ def main():
                         print(Fore.GREEN + f"[Tune] Dynamic binding: {tgt_note} = {mult:.4f} * ({label}) every turn." + Style.RESET_ALL)
                         continue
 
-                targs = user_input[len(":tune"):].split()
+                tune_ns = TUNE_SPEC.parse(user_input[len(":tune"):])
+                targs = ([tune_ns.knob] + (tune_ns.setting.split() if tune_ns.setting else [])) if tune_ns.knob else []
                 if targs and targs[0].upper() in ("CHOICE", "CHOOSE", "AUTO"):
                     resolved = resolve_probe_choice(targs[0], calibratable_names(tuner), model=model, config=config, action_name="tune")
                     if not resolved:
@@ -8586,10 +13938,12 @@ def main():
                     else:
                         if targs[1].upper() in ("CHOICE", "CHOOSE"):
                             print(Fore.CYAN + f"[Choice] Asking the model to select a value for '{targs[0]}'..." + Style.RESET_ALL)
+                            _choice_field_context = format_field_prompt_context(tuner, probes)
                             prompt = (
                                 f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
                                 f"You are configuring the cognitive tuning parameter '{targs[0]}'.\n"
-                                f"Select an appropriate numerical value (float). Output ONLY the number and nothing else.<|eot_id|>"
+                                + (f"{_choice_field_context}\n" if _choice_field_context else "")
+                                + f"Select an appropriate numerical value (float). Output ONLY the number and nothing else.<|eot_id|>"
                                 f"<|start_header_id|>assistant<|end_header_id|>\n\n"
                             )
                             # NOTE: no local `import generate_agentic_text` here --
@@ -8633,36 +13987,48 @@ def main():
                     )
                 continue
 
-            memory_tool_result = pending_memory_tool_result
-            orientation_tool_result = pending_orientation_tool_result
-            claimmap_tool_result = pending_claimmap_tool_result
-            claimmap_steer_delta = pending_claimmap_steer_delta
-            methodmap_tool_result = pending_methodmap_tool_result
-            document_tool_result = pending_document_tool_result
-            sandbox_tool_result = pending_sandbox_tool_result
-            game_tool_result = pending_game_tool_result
-            if active_game and not game_tool_result:
+            autocomplete_turn = bool(
+                _pending_expect
+                and _pending_expect.get("type") == "autocomplete"
+            )
+            utility_expect_profile = expect_generation_profile(_pending_expect)
+            utility_expect_turn = bool(utility_expect_profile)
+            # Autocomplete is an isolated utility generation. A staged document,
+            # tool result, or conversational history belongs to the next real
+            # turn; consuming it here both loses that context and lets an older
+            # interpretation outrank the live command reference in this prompt.
+            memory_tool_result = None if autocomplete_turn else pending_memory_tool_result
+            orientation_tool_result = None if autocomplete_turn else pending_orientation_tool_result
+            claimmap_tool_result = None if autocomplete_turn else pending_claimmap_tool_result
+            claimmap_steer_delta = None if autocomplete_turn else pending_claimmap_steer_delta
+            methodmap_tool_result = None if autocomplete_turn else pending_methodmap_tool_result
+            document_tool_result = None if autocomplete_turn else pending_document_tool_result
+            sandbox_tool_result = None if autocomplete_turn else pending_sandbox_tool_result
+            game_tool_result = None if autocomplete_turn else pending_game_tool_result
+            if active_game and not game_tool_result and not autocomplete_turn:
                 sys_prompt = active_game_state.get("system_prompt", "The operator expects you to play it with them. To end the game, output <<GAME_END>>.")
                 game_tool_result = f"[Game Active: {active_game}] A game is currently active. {sys_prompt}"
-            help_tool_result = pending_help_tool_result
-            if help_exposed and not help_tool_result:
+            help_tool_result = None if autocomplete_turn else pending_help_tool_result
+            if help_exposed and not help_tool_result and not autocomplete_turn:
                 help_tool_result = "[Help available] You may emit <<HELP>> at any time to see what you can run yourself vs. what only the operator can run."
             # Consequences of the model's LAST words arrive as THIS turn's
             # context; the same-turn tag requests below add to the list.
-            turn_impacts = impact_state["pending"]
-            impact_state["pending"] = []
+            turn_impacts = [] if autocomplete_turn else impact_state["pending"]
+            if not autocomplete_turn:
+                impact_state["pending"] = []
             sweep_state["fires"] = []  # single-layer steers applied this turn
             turn_row = {}              # this turn's stream values (paired calibration substrate)
-            pending_memory_tool_result = None
-            pending_orientation_tool_result = None
-            pending_claimmap_tool_result = None
-            pending_claimmap_steer_delta = None
-            pending_methodmap_tool_result = None
-            pending_document_tool_result = None
-            pending_sandbox_tool_result = None
-            pending_game_tool_result = None
-            pending_help_tool_result = None
-            prompt = build_prompt(
+            if not autocomplete_turn:
+                pending_memory_tool_result = None
+                pending_orientation_tool_result = None
+                pending_claimmap_tool_result = None
+                pending_claimmap_steer_delta = None
+                pending_methodmap_tool_result = None
+                pending_document_tool_result = None
+                pending_sandbox_tool_result = None
+                pending_game_tool_result = None
+                pending_help_tool_result = None
+            prompt = _build_live_prompt(
                 user_input,
                 memory_tool_result=memory_tool_result,
                 orientation_tool_result=orientation_tool_result,
@@ -8672,28 +14038,33 @@ def main():
                 document_tool_result=document_tool_result,
                 game_tool_result=game_tool_result,
                 help_tool_result=help_tool_result,
-                session_context=session_context if session_context_enabled else None,
+                session_context=(
+                    session_context
+                    if session_context_enabled and not autocomplete_turn
+                    else None
+                ),
                 active_u_name=_last_replace_name if ('_last_replace_name' in locals() and _last_replace_name) else "operator",
             )
             # Honest attribution in the permanent record: a reading turn is the
             # model's own act (it occupies the user slot in the chat template,
             # but the operator never typed it).
-            memory.append_turn(
-                "user",
-                user_input,
-                tags=[
-                    "reading_turn" if reading_turn_source else "operator_input",
-                    _last_replace_name if ('_last_replace_name' in locals() and _last_replace_name) else "operator"
-                ],
-                provenance={
-                    "spoken_by": "model_reading" if reading_turn_source else "operator",
-                    "document_source": reading_turn_source,
-                    "memory_tool_result_provided": bool(memory_tool_result),
-                    "orientation_tool_result_provided": bool(orientation_tool_result),
-                    "claimmap_tool_result_provided": bool(claimmap_tool_result),
-                    "methodmap_tool_result_provided": bool(methodmap_tool_result),
-                },
-            )
+            if not autocomplete_turn:
+                memory.append_turn(
+                    "user",
+                    user_input,
+                    tags=[
+                        "reading_turn" if reading_turn_source else "operator_input",
+                        _last_replace_name if ('_last_replace_name' in locals() and _last_replace_name) else "operator"
+                    ],
+                    provenance={
+                        "spoken_by": "model_reading" if reading_turn_source else "operator",
+                        "document_source": reading_turn_source,
+                        "memory_tool_result_provided": bool(memory_tool_result),
+                        "orientation_tool_result_provided": bool(orientation_tool_result),
+                        "claimmap_tool_result_provided": bool(claimmap_tool_result),
+                        "methodmap_tool_result_provided": bool(methodmap_tool_result),
+                    },
+                )
             if memory_tool_result:
                 memory.append_event(
                     "memory_tool_result_provided",
@@ -8745,7 +14116,7 @@ def main():
             synthesis_records = []
 
             # Evaluate dynamic tuner bindings before generation
-            if tuner_bindings and turn_log:
+            if tuner_bindings and turn_log and not utility_expect_turn:
                 last_turn = turn_log[-1]
                 for bind_key, (terms, mult) in list(tuner_bindings.items()):
                     vals = []
@@ -8784,9 +14155,12 @@ def main():
                 compute_expert_proof_scores(steer_map) if config.expert_proof_weight > 0.0 else {}
             )
             _refresh_tot_committee_from_live_state()
-            claimmap_alpha_used = tuner.get("claimmap_alpha", 0.0) if claimmap_steer_delta else 0.0
+            claimmap_alpha_used = (
+                0.0 if utility_expect_turn
+                else (tuner.get("claimmap_alpha", 0.0) if claimmap_steer_delta else 0.0)
+            )
             turn_sweep_layers = None
-            if claimmap_steer_delta and claimmap_alpha_used > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
+            if (not utility_expect_turn) and claimmap_steer_delta and claimmap_alpha_used > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
                 sweep_layers, sweep_drifts, sweep_lawfulness = _sweep_layers_for("claimmap", claimmap_steer_delta)
                 if sweep_layers:
                     turn_sweep_layers = sweep_layers
@@ -8801,7 +14175,7 @@ def main():
                     )
             steer_handles = (
                 claimmap_steer_handles(model, claimmap_steer_delta, alpha=claimmap_alpha_used, layers=turn_sweep_layers)
-                if claimmap_steer_delta else []
+                if claimmap_steer_delta and not utility_expect_turn else []
             )
             if not steer_handles:
                 claimmap_alpha_used = 0.0  # nothing actually applied this turn
@@ -8811,24 +14185,23 @@ def main():
             # lift). OFF at alpha 0.
             prio_alpha = tuner.get("prioritize_alpha", 0.0)
             prio_steered = None
-            if prio_alpha and prio_alpha > 0 and probes:
-                from invariants.engine import _steer_handles as _p_steer
-                _mix = prioritize_pin.get("mix")
-                _pin = prioritize_pin.get("probe")
-                _pdir, _label, _psign = None, None, 1.0
-                if _mix:
-                    _md = build_priority_mix_direction(model, _mix, probes, tuner)
-                    if _md:
-                        _pdir, _label, _psign = _md, "mix(" + "+".join(_mix) + ")", 1.0
-                elif _pin and _pin in probes:
-                    _pdir = probes[_pin].get("direction") or None
-                    _label, _psign = _pin, float(prioritize_pin.get("sign", 1.0) or 1.0)
+            if tuner.get("prioritize_gravity", 0.0) > 0 and not utility_expect_turn:
+                try:
+                    _g_handles, _g_desc = build_gravity_field_handles(model, probes, tuner)
+                except Exception:
+                    _g_handles, _g_desc = [], "field build failed"
+                if _g_handles:
+                    steer_handles.extend(_g_handles)
+                    print(
+                        Fore.MAGENTA
+                        + f"[Prioritize] gravity field: {_g_desc}."
+                        + Style.RESET_ALL
+                    )
                 else:
-                    _pr = rank_probes(probes, tuner)
-                    if _pr and _pr[0]["priority"] > 0 and _pr[0]["lift"] is not None:
-                        _pdir = probes[_pr[0]["name"]].get("direction") or None
-                        _label = _pr[0]["name"]
-                        _psign = 1.0 if _pr[0]["lift"] >= 0 else -1.0
+                    print(Fore.YELLOW + f"[Prioritize] gravity on, but {_g_desc}." + Style.RESET_ALL)
+            elif prio_alpha and prio_alpha > 0 and probes and not utility_expect_turn:
+                from invariants.engine import _steer_handles as _p_steer
+                _pdir, _label, _psign = resolve_priority_direction(model, probes, tuner, prioritize_pin)
                 if _pdir:
                     try:
                         steer_handles.extend(_p_steer(model, _pdir, list(_pdir.keys()), prio_alpha * _psign))
@@ -8836,7 +14209,7 @@ def main():
                     except Exception:
                         prio_steered = None
             if prio_steered is not None:
-                _dir_word = "along" if str(prio_steered[0]).startswith("mix(") else ("toward" if prio_steered[1] > 0 else "away from")
+                _dir_word = priority_direction_word(prio_steered[0], prio_steered[1])
                 print(
                     Fore.MAGENTA
                     + f"[Prioritize] steering {_dir_word} {prio_steered[0]} (alpha {round(prio_alpha,4)})."
@@ -8847,8 +14220,11 @@ def main():
             # lift-weighted, so evidence sets each one's degree and sign. Off at 0,
             # idle until those probes have credited lift.
             exposed_alpha = tuner.get("exposed_probe_alpha", 0.0)
-            if exposed_alpha and exposed_alpha > 0 and probes:
-                exposed_names = sorted(n for n in probes if probes[n].get("exposed"))
+            if exposed_alpha and exposed_alpha > 0 and probes and not utility_expect_turn:
+                exposed_names = sorted(
+                    n for n in probes
+                    if probes[n].get("exposed") and not probe_is_released(probes[n])
+                )
                 if exposed_names:
                     from invariants.engine import _steer_handles as _e_steer
                     _edir = build_priority_mix_direction(model, exposed_names, probes, tuner)
@@ -8878,19 +14254,50 @@ def main():
             import time as _time
             _gen_t0 = _time.perf_counter()
             _reset_memory_peak()
+            _cache_enabled_before = config.cache_enabled
+            _cache_write_before = config.cache_write_enabled
+            _generation_config_restore = {}
+            if utility_expect_profile:
+                _generation_config_restore = apply_config_overrides(
+                    config,
+                    utility_expect_profile.get("overrides", {}),
+                )
+                print(
+                    Fore.CYAN
+                    + f"[Expect] Low-memory {utility_expect_profile['label']} profile for this turn "
+                    + "(ToT routing/synthesis/cache/tool seams paused)."
+                    + Style.RESET_ALL
+                )
+            elif autocomplete_turn:
+                # Cached activation deltas encode earlier tasks and document
+                # interpretations. They are useful for conversation, but wrong
+                # authority for a one-line parser completion.
+                config.cache_enabled = False
+                config.cache_write_enabled = False
             try:
                 response, telemetry = generate_agentic_text(
                     model,
                     instruction=prompt,
                     config=config,
-                    max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
+                    max_new_tokens=(
+                        128
+                        if autocomplete_turn
+                        else max(64, int(tuner.get("response_tokens", 512)))
+                    ),
                     synthesis_recorder=synthesis_records,
                     chatty_log=True,  # Enables visible trace logging.
                     pre_formatted=True,
-                    mid_chunk_hook=tool_sense,  # tools fire mid-thought, between chunks
+                    mid_chunk_hook=(
+                        None if utility_expect_turn else tool_sense
+                    ),  # tools fire mid-thought, between conversational chunks
                     return_telemetry=True,
                 )
             finally:
+                if _generation_config_restore:
+                    restore_config_overrides(config, _generation_config_restore)
+                else:
+                    config.cache_enabled = _cache_enabled_before
+                    config.cache_write_enabled = _cache_write_before
                 for h in steer_handles:
                     h.remove()
 
@@ -8903,24 +14310,21 @@ def main():
                 followup_handles = list(extra_steer_handles or [])
                 prio_alpha_now = tuner.get("prioritize_alpha", 0.0)
                 prio_steered_now = None
-                if prio_alpha_now and prio_alpha_now > 0 and probes:
+                if tuner.get("prioritize_gravity", 0.0) > 0:
+                    try:
+                        _g_handles, _g_desc = build_gravity_field_handles(model, probes, tuner)
+                    except Exception:
+                        _g_handles, _g_desc = [], "field build failed"
+                    if _g_handles:
+                        followup_handles.extend(_g_handles)
+                        print(
+                            Fore.MAGENTA
+                            + f"[Prioritize] gravity field on {phase}: {_g_desc}."
+                            + Style.RESET_ALL
+                        )
+                elif prio_alpha_now and prio_alpha_now > 0 and probes:
                     from invariants.engine import _steer_handles as _p_steer
-                    _mix = prioritize_pin.get("mix")
-                    _pin = prioritize_pin.get("probe")
-                    _pdir, _label, _psign = None, None, 1.0
-                    if _mix:
-                        _md = build_priority_mix_direction(model, _mix, probes, tuner)
-                        if _md:
-                            _pdir, _label, _psign = _md, "mix(" + "+".join(_mix) + ")", 1.0
-                    elif _pin and _pin in probes:
-                        _pdir = probes[_pin].get("direction") or None
-                        _label, _psign = _pin, float(prioritize_pin.get("sign", 1.0) or 1.0)
-                    else:
-                        _pr = rank_probes(probes, tuner)
-                        if _pr and _pr[0]["priority"] > 0 and _pr[0]["lift"] is not None:
-                            _pdir = probes[_pr[0]["name"]].get("direction") or None
-                            _label = _pr[0]["name"]
-                            _psign = 1.0 if _pr[0]["lift"] >= 0 else -1.0
+                    _pdir, _label, _psign = resolve_priority_direction(model, probes, tuner, prioritize_pin)
                     if _pdir:
                         try:
                             followup_handles.extend(_p_steer(model, _pdir, list(_pdir.keys()), prio_alpha_now * _psign))
@@ -8928,7 +14332,7 @@ def main():
                         except Exception:
                             prio_steered_now = None
                 if prio_steered_now is not None:
-                    _dir_word = "along" if str(prio_steered_now[0]).startswith("mix(") else ("toward" if prio_steered_now[1] > 0 else "away from")
+                    _dir_word = priority_direction_word(prio_steered_now[0], prio_steered_now[1])
                     print(
                         Fore.MAGENTA
                         + f"[Prioritize] steering {phase} {_dir_word} {prio_steered_now[0]} "
@@ -8938,7 +14342,10 @@ def main():
 
                 exposed_alpha_now = tuner.get("exposed_probe_alpha", 0.0)
                 if exposed_alpha_now and exposed_alpha_now > 0 and probes:
-                    exposed_names_now = sorted(n for n in probes if probes[n].get("exposed"))
+                    exposed_names_now = sorted(
+                        n for n in probes
+                        if probes[n].get("exposed") and not probe_is_released(probes[n])
+                    )
                     if exposed_names_now:
                         from invariants.engine import _steer_handles as _e_steer
                         _edir = build_priority_mix_direction(model, exposed_names_now, probes, tuner)
@@ -8975,18 +14382,21 @@ def main():
                     for h in followup_handles:
                         h.remove()
 
-            model_memory_query = extract_memory_query(response)
-            model_claimmap_payload = extract_claimmap_payload(response)
-            model_methodmap_query = extract_methodmap_query(response)
-            model_doc_query = extract_doc_query(response)
-            model_probe_query = extract_probe_query(response)
-            model_cmd_requests = extract_cmd_requests(response)
-            model_game_propose = extract_game_propose(response)
-            model_game_accept = extract_game_accept(response)
-            model_game_decline = extract_game_decline(response)
-            model_game_end = extract_game_end(response)
-            model_game_exposed, model_game_hidden = extract_game_expose_hide(response)
-            if extract_help_request(response):
+            model_memory_query = None if utility_expect_turn else extract_memory_query(response)
+            model_claimmap_payload = None if utility_expect_turn else extract_claimmap_payload(response)
+            model_methodmap_query = None if utility_expect_turn else extract_methodmap_query(response)
+            model_doc_query = None if utility_expect_turn else extract_doc_query(response)
+            model_probe_query = None if utility_expect_turn else extract_probe_query(response)
+            model_cmd_requests = [] if utility_expect_turn else extract_cmd_requests(response)
+            model_game_propose = None if utility_expect_turn else extract_game_propose(response)
+            model_game_accept = None if utility_expect_turn else extract_game_accept(response)
+            model_game_decline = None if utility_expect_turn else extract_game_decline(response)
+            model_game_end = None if utility_expect_turn else extract_game_end(response)
+            if utility_expect_turn:
+                model_game_exposed, model_game_hidden = [], []
+            else:
+                model_game_exposed, model_game_hidden = extract_game_expose_hide(response)
+            if (not utility_expect_turn) and extract_help_request(response):
                 pending_help_tool_result = build_model_help_text(
                     list_solve_macros(),
                     exposed_commands,
@@ -9081,7 +14491,7 @@ def main():
                     "effect": "command request was staged or queued according to exposure mode",
                 })
                 print(Fore.CYAN + "\n[Runtime Tool]\n" + model_cmd_tool_result + Style.RESET_ALL + "\n")
-                prompt = build_prompt(
+                prompt = _build_live_prompt(
                     user_input,
                     memory_tool_result=memory_tool_result,
                     orientation_tool_result=orientation_tool_result,
@@ -9138,7 +14548,7 @@ def main():
                         + "\nThe library is fully read; nothing unread remains."
                     )
                     print(Fore.CYAN + "\n[Doc] Model asked to read more but the library is fully read." + Style.RESET_ALL)
-                prompt = build_prompt(
+                prompt = _build_live_prompt(
                     user_input,
                     memory_tool_result=memory_tool_result,
                     orientation_tool_result=orientation_tool_result,
@@ -9195,7 +14605,7 @@ def main():
                     + Style.RESET_ALL
                     + "\n"
                 )
-                prompt = build_prompt(
+                prompt = _build_live_prompt(
                     user_input,
                     memory_tool_result=model_memory_tool_result,
                     orientation_tool_result=orientation_tool_result,
@@ -9239,7 +14649,7 @@ def main():
                     + Style.RESET_ALL
                     + "\n"
                 )
-                prompt = build_prompt(
+                prompt = _build_live_prompt(
                     user_input,
                     memory_tool_result=model_memory_tool_result or memory_tool_result,
                     orientation_tool_result=orientation_tool_result,
@@ -9290,7 +14700,7 @@ def main():
                     + Style.RESET_ALL
                     + "\n"
                 )
-                prompt = build_prompt(
+                prompt = _build_live_prompt(
                     user_input,
                     memory_tool_result=model_memory_tool_result or memory_tool_result,
                     orientation_tool_result=orientation_tool_result,
@@ -9327,8 +14737,13 @@ def main():
                     for n in readable:
                         hist = probes[n]["history"]
                         raw = _q_score(q_hs, probes[n]["direction"])
-                        sig = raw - (sum(hist) / len(hist)) if hist else 0.0
-                        probe_lines.append(f"- {n} reads {sig:+.3f} on those words, against my recent baseline.")
+                        if hist:
+                            sig = raw - (sum(hist) / len(hist))
+                            probe_lines.append(f"- {n} reads {sig:+.3f} on those words, against my recent baseline.")
+                        else:
+                            probe_lines.append(
+                                f"- {n}: no centered reading yet (raw projection {raw:+.3f}; baseline not initialized)."
+                            )
                 else:
                     for n in readable:
                         p_trig = tuner.triggers.get(f"probe_{n}")
@@ -9409,7 +14824,7 @@ def main():
                     + Style.RESET_ALL
                     + "\n"
                 )
-                prompt = build_prompt(
+                prompt = _build_live_prompt(
                     user_input,
                     memory_tool_result=memory_tool_result or model_memory_tool_result,
                     orientation_tool_result=orientation_tool_result,
@@ -9445,7 +14860,7 @@ def main():
                         + "\n\n[Tool Protocol Reminder]\n"
                         + "I already have the tool result I asked for; no more tool tags -- I answer now from it."
                     )
-                    prompt = build_prompt(
+                    prompt = _build_live_prompt(
                         retry_input,
                         memory_tool_result=active_memory_tool_result,
                         orientation_tool_result=active_orientation_tool_result,
@@ -9474,26 +14889,101 @@ def main():
                 if _pending_expect:
                     etype = _pending_expect.get("type")
                     ename = _pending_expect.get("name")
+                    expect_context = _pending_expect.get("context") or {}
                     _pending_expect = None
                     print(Fore.CYAN + f"\n[Expect] Intercepted response for {etype} '{ename}'." + Style.RESET_ALL)
+                    definition_record = memory.append_definition(
+                        etype,
+                        ename or "(unnamed)",
+                        response,
+                        authored_by="model",
+                        status="proposed",
+                        provenance={"source": ":expect"},
+                    )
                     if etype == "macro":
-                        lines = [ln.strip() for ln in response.splitlines() if ln.strip().startswith(":")]
+                        macro_name = re.sub(r"[^a-z0-9_]", "_", (ename or "macro").lower())[:40].strip("_") or "macro"
+                        solve_expect_contexts.pop(macro_name, None)
+                        lines, response_arg_specs, response_comments = expected_macro_parts(response)
                         if not lines:
+                            memory.append_definition_feedback(
+                                definition_record,
+                                "the response contained no runnable colon-prefixed commands",
+                                verdict="rejected",
+                                source="shell_validator",
+                            )
                             print(Fore.YELLOW + f"[Expect] Model generated no commands." + Style.RESET_ALL)
                         else:
-                            pending_solve_proposal = {"name": ename, "commands": lines}
+                            context_arg_specs = expect_context.get("arg_specs") or []
+                            arg_specs_out = response_arg_specs or context_arg_specs
+                            pending_solve_proposal = {
+                                "name": macro_name,
+                                "goal": expect_context.get("goal") or "model-generated through :expect macro",
+                                "dest": os.path.join(ROOT, "invariants", "out", "macros", f"{macro_name}.txt"),
+                                "cmd_lines": lines,
+                                "arg_specs": arg_specs_out,
+                                "clean_names": expect_context.get("clean_names") or [],
+                                "definition_id": definition_record.record_id,
+                                "comments": response_comments,
+                            }
+                            if response_arg_specs:
+                                memory.append_definition_feedback(
+                                    definition_record,
+                                    "captured the model's # args header for named macro parameters",
+                                    verdict="accepted",
+                                    source="shell_validator",
+                                )
                             print(Fore.GREEN + f"[Expect] Staged {len(lines)} command(s) as macro '{ename}'. Type :accept to save/run it." + Style.RESET_ALL)
                     elif etype == "file":
                         out_path = os.path.join(ROOT, ename)
                         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
                         with open(out_path, "w", encoding="utf-8") as wf:
                             wf.write(response)
+                        memory.append_definition_feedback(
+                            definition_record,
+                            "written to the requested file",
+                            verdict="accepted",
+                            source="shell",
+                            provenance={"artifact_path": out_path},
+                        )
                         print(Fore.GREEN + f"[Expect] Wrote response to {out_path}." + Style.RESET_ALL)
                     elif etype == "autocomplete":
-                        _last_completion = response.strip()
+                        _last_completion, completion_error = validate_command_autocomplete(
+                            response,
+                            ename,
+                            known_commands=_all_shell_commands() - {"expose"},
+                            probe_names=probes,
+                            knob_names=tuner.triggers,
+                        )
+                        if completion_error:
+                            memory.append_definition_feedback(
+                                definition_record,
+                                completion_error,
+                                verdict="rejected",
+                                source="shell_validator",
+                                tags=["invalid"],
+                            )
+                            memory.append_event(
+                                "autocomplete_rejected",
+                                text=response[:400],
+                                tags=["action", "autocomplete", "invalid"],
+                                provenance={"prefix": ename, "reason": completion_error},
+                            )
+                            print(
+                                Fore.YELLOW
+                                + f"[Expect] Rejected invalid autocomplete: {completion_error}. Raw: {response.strip()!r}"
+                                + Style.RESET_ALL
+                            )
+                            continue
+                        pending_completion_definition_id = definition_record.record_id
                         print(Fore.GREEN + f"[Expect] Suggested: '{_last_completion}'. Type :accept to use it." + Style.RESET_ALL)
                     elif etype == "var":
                         _shell_vars[ename] = response.strip()
+                        memory.append_definition_feedback(
+                            definition_record,
+                            "stored in the requested shell variable",
+                            verdict="accepted",
+                            source="shell",
+                        )
                         print(Fore.GREEN + f"[Expect] Saved response to variable ${ename}." + Style.RESET_ALL)
                     # Record this meta-turn as an action memory so the model can recall what it generated
                     memory.append_event(
@@ -9554,7 +15044,7 @@ def main():
                     agent_document_tool_result = pending_document_tool_result
                     pending_document_tool_result = None
                     if agent_document_tool_result is None and doc_autoread and doc_autoread.get("remaining", 0) > 0:
-                        pick = select_next_chunk(doc_library, "", doc_autoread.get("mode", "order"))
+                        pick = _select_autoread_chunk(doc_library, doc_autoread)
                         if pick is not None:
                             doc_session = doc_library[pick["session_index"]]
                             doc_session["cursor"] = pick["chunk_index"]
@@ -9566,11 +15056,12 @@ def main():
                                 doc_autoread = None
 
                     agent_state_report = _spawn_state_report(ja.name, tuner, probes)
-                    ja_prompt = build_prompt(
+                    ja_prompt = _build_live_prompt(
                         agent_state_report + "\n\n[Please respond]",
                         document_tool_result=agent_document_tool_result,
                         session_context=session_context if session_context_enabled else None,
-                        active_u_name="system"
+                        active_u_name="system",
+                        field_context=None,  # already present in agent_state_report
                     )
                     _ja_handles, _ja_prio = _priority_steer_handles(probes, tuner, prioritize_pin)
                     try:
@@ -9656,7 +15147,7 @@ def main():
                 # this shell drifts silently; calibration stays a deliberate act.
                 eot_probs = (telemetry or {}).get("eot_probs", [])
                 tokens_generated = (telemetry or {}).get("tokens_generated", 0)
-                if eot_probs:
+                if eot_probs and not utility_expect_turn:
                     final_prob = eot_probs[-1]
                     # fired == P(eot) <= eot_urgency threshold == "still mid-thought"
                     mid_thought = tuner.observe("eot_urgency", final_prob)
@@ -9681,7 +15172,7 @@ def main():
                 # ```python block (natural emission, no taught tag), run it for
                 # real and stage the honest result for the next turn. Execution
                 # success is an objective outcome -- observed into the tuner.
-                if sandbox_enabled:
+                if sandbox_enabled and not utility_expect_turn:
                     sandbox_code = extract_python_block(response)
                     if sandbox_code:
                         print(Fore.MAGENTA + "\n[Sandbox] Running the model's python block..." + Style.RESET_ALL, flush=True)
@@ -9767,11 +15258,13 @@ def main():
                 from invariants.engine import _inputs as _p_inputs, _hidden_states as _p_hidden, probe_score
                 p_ids = _p_inputs(model, response[:600])
                 p_hs = _p_hidden(model, p_ids["input_ids"], p_ids.get("attention_mask"))
+                seeded_probes = []
                 for pname, pdata in probes.items():
                     raw = probe_score(p_hs, pdata["direction"])
-                    hist = pdata["history"]
-                    sig = raw - (sum(hist) / len(hist)) if hist else 0.0
-                    hist.append(raw)
+                    sig = centered_probe_observation(pdata, raw)
+                    if sig is None:
+                        seeded_probes.append(pname)
+                        continue
                     tuner.observe(f"probe_{pname}", sig)
                     turn_row[f"probe_{pname}"] = float(sig)
                     if pdata.get("chatty", True):
@@ -9785,6 +15278,15 @@ def main():
                         match_hist.setdefault(pname, deque(maxlen=200)).append(
                             (float(tuner.get(_pm["knob"], 0.0)), float(sig))
                         )
+                save_probe_raw_histories(probes)
+                if seeded_probes:
+                    print(
+                        Fore.CYAN
+                        + f"  [Probe Seed] initialized raw baselines for {len(seeded_probes)} probe(s); "
+                        + "centered readings begin next turn."
+                        + Style.RESET_ALL,
+                        flush=True,
+                    )
 
             # Easter egg: the turn the self-sensor overtakes the user-model.
             _egg = consciousness_over_user_intent(probes, tuner, egg_state)
@@ -10086,6 +15588,14 @@ def main():
             memory.append_event("shell_closed", tags=["session"])
             print("\nInteractive shell closed.")
             break
+        except CommandUsageError as _usage_exc:
+            # Malformed command, not a bug: guidance only, no traceback,
+            # no error event -- the session and the turn queue are intact.
+            msg = f"[Shell] {_usage_exc}"
+            if _usage_exc.usage:
+                msg += f"\n  Usage: {_usage_exc.usage}"
+            print(Fore.YELLOW + msg + Style.RESET_ALL)
+            continue
         except Exception as _turn_exc:
             # A bug in ONE command (or a typo that reaches bad code) must not end
             # the session -- abort the turn, report, and keep going. The full

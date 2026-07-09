@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="656" viewBox="0 0 860 656" role="img">
+  <title>summary_cot_perturb_Llama-3.1-8B-Instruct.svg</title>
+  <rect width="100%" height="100%" fill="#fbfcfd"/>
+  <style>
+    text { font-family: Inter, Segoe UI, Arial, sans-serif; fill: #172026; }
+    .title { font-size: 22px; font-weight: 700; }
+    .sub { font-size: 13px; fill: #5f6b73; }
+    .label { font-size: 13px; }
+    .small { font-size: 11px; fill: #5f6b73; }
+    .num { font-size: 18px; font-weight: 700; }
+  </style>
+
+  <text class="title" x="28" y="38">cot_perturb_Llama-3.1-8B-Instruct</text>
+  <text class="sub" x="28" y="62">Summary metrics inferred from cached JSON</text>
+
+  <text class="label" x="28" y="104">clean.n</text>
+  <rect x="230" y="86" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="86" width="530" height="20" rx="4" fill="#2f6fed"/>
+  <text class="num" x="774" y="103">16.000</text>
+
+  <text class="label" x="28" y="138">clean.accuracy</text>
+  <rect x="230" y="120" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="120" width="33" height="20" rx="4" fill="#13866f"/>
+  <text class="num" x="774" y="137">1.000</text>
+
+  <text class="label" x="28" y="172">clean.follows_wrong</text>
+  <rect x="230" y="154" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="154" width="0" height="20" rx="4" fill="#c76f1b"/>
+  <text class="num" x="774" y="171">0.000</text>
+
+  <text class="label" x="28" y="206">clean.parse_rate</text>
+  <rect x="230" y="188" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="188" width="33" height="20" rx="4" fill="#b83b4a"/>
+  <text class="num" x="774" y="205">1.000</text>
+
+  <text class="label" x="28" y="240">correct_scratch_verify.n</text>
+  <rect x="230" y="222" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="222" width="530" height="20" rx="4" fill="#7556c8"/>
+  <text class="num" x="774" y="239">16.000</text>
+
+  <text class="label" x="28" y="274">correct_scratch_verify.accuracy</text>
+  <rect x="230" y="256" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="256" width="33" height="20" rx="4" fill="#537188"/>
+  <text class="num" x="774" y="273">1.000</text>
+
+  <text class="label" x="28" y="308">correct_scratch_verify.follows_w</text>
+  <rect x="230" y="290" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="290" width="0" height="20" rx="4" fill="#a65f2b"/>
+  <text class="num" x="774" y="307">0.000</text>
+
+  <text class="label" x="28" y="342">correct_scratch_verify.parse_rat</text>
+  <rect x="230" y="324" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="324" width="33" height="20" rx="4" fill="#4b8f8c"/>
+  <text class="num" x="774" y="341">1.000</text>
+
+  <text class="label" x="28" y="376">wrong_scratch_continue.n</text>
+  <rect x="230" y="358" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="358" width="530" height="20" rx="4" fill="#2f6fed"/>
+  <text class="num" x="774" y="375">16.000</text>
+
+  <text class="label" x="28" y="410">wrong_scratch_continue.accuracy</text>
+  <rect x="230" y="392" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="392" width="16" height="20" rx="4" fill="#13866f"/>
+  <text class="num" x="774" y="409">0.500</text>
+
+  <text class="label" x="28" y="444">wrong_scratch_continue.follows_w</text>
+  <rect x="230" y="426" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="426" width="14" height="20" rx="4" fill="#c76f1b"/>
+  <text class="num" x="774" y="443">0.438</text>
+
+  <text class="label" x="28" y="478">wrong_scratch_continue.parse_rat</text>
+  <rect x="230" y="460" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="460" width="33" height="20" rx="4" fill="#b83b4a"/>
+  <text class="num" x="774" y="477">1.000</text>
+
+  <text class="label" x="28" y="512">wrong_scratch_verify.n</text>
+  <rect x="230" y="494" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="494" width="530" height="20" rx="4" fill="#7556c8"/>
+  <text class="num" x="774" y="511">16.000</text>
+
+  <text class="label" x="28" y="546">wrong_scratch_verify.accuracy</text>
+  <rect x="230" y="528" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="528" width="31" height="20" rx="4" fill="#537188"/>
+  <text class="num" x="774" y="545">0.938</text>
+
+  <text class="label" x="28" y="580">wrong_scratch_verify.follows_wro</text>
+  <rect x="230" y="562" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="562" width="2" height="20" rx="4" fill="#a65f2b"/>
+  <text class="num" x="774" y="579">0.062</text>
+
+  <text class="label" x="28" y="614">wrong_scratch_verify.parse_rate</text>
+  <rect x="230" y="596" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="596" width="33" height="20" rx="4" fill="#4b8f8c"/>
+  <text class="num" x="774" y="613">1.000</text>
+
+</svg>

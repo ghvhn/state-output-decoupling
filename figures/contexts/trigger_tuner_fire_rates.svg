@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="724" viewBox="0 0 860 724" role="img">
+  <title>trigger_tuner_fire_rates.svg</title>
+  <rect width="100%" height="100%" fill="#fbfcfd"/>
+  <style>
+    text { font-family: Inter, Segoe UI, Arial, sans-serif; fill: #172026; }
+    .title { font-size: 22px; font-weight: 700; }
+    .sub { font-size: 13px; fill: #5f6b73; }
+    .label { font-size: 13px; }
+    .small { font-size: 11px; fill: #5f6b73; }
+    .num { font-size: 18px; font-weight: 700; }
+  </style>
+
+  <text class="title" x="28" y="38">Trigger tuner fire rates</text>
+  <text class="sub" x="28" y="62">Observed hooks from default and agent-specific phen-shell tuners</text>
+
+  <text class="label" x="28" y="104">default:intent_settling</text>
+  <rect x="230" y="86" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="86" width="446" height="20" rx="4" fill="#2f6fed"/>
+  <text class="num" x="774" y="103">51%</text>
+  <text class="small" x="846" y="102">observed 98</text>
+
+  <text class="label" x="28" y="138">cpu_smart_and_speedy:intent_sett</text>
+  <rect x="230" y="120" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="120" width="446" height="20" rx="4" fill="#13866f"/>
+  <text class="num" x="774" y="137">51%</text>
+  <text class="small" x="846" y="136">observed 98</text>
+
+  <text class="label" x="28" y="172">trudi:intent_settling</text>
+  <rect x="230" y="154" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="154" width="446" height="20" rx="4" fill="#c76f1b"/>
+  <text class="num" x="774" y="171">51%</text>
+  <text class="small" x="846" y="170">observed 98</text>
+
+  <text class="label" x="28" y="206">trudi:probe_speed_d4096</text>
+  <rect x="230" y="188" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="188" width="530" height="20" rx="4" fill="#b83b4a"/>
+  <text class="num" x="774" y="205">61%</text>
+  <text class="small" x="846" y="204">observed 436</text>
+
+  <text class="label" x="28" y="240">trudi:probe_neutral</text>
+  <rect x="230" y="222" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="222" width="521" height="20" rx="4" fill="#7556c8"/>
+  <text class="num" x="774" y="239">60%</text>
+  <text class="small" x="846" y="238">observed 436</text>
+
+  <text class="label" x="28" y="274">trudi:probe_memory_need</text>
+  <rect x="230" y="256" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="256" width="513" height="20" rx="4" fill="#537188"/>
+  <text class="num" x="774" y="273">59%</text>
+  <text class="small" x="846" y="272">observed 436</text>
+
+  <text class="label" x="28" y="308">trudi:probe_memory_alpha</text>
+  <rect x="230" y="290" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="290" width="513" height="20" rx="4" fill="#a65f2b"/>
+  <text class="num" x="774" y="307">59%</text>
+  <text class="small" x="846" y="306">observed 436</text>
+
+  <text class="label" x="28" y="342">trudi:probe_done</text>
+  <rect x="230" y="324" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="324" width="507" height="20" rx="4" fill="#4b8f8c"/>
+  <text class="num" x="774" y="341">58%</text>
+  <text class="small" x="846" y="340">observed 436</text>
+
+  <text class="label" x="28" y="376">trudi:probe_done_d4096</text>
+  <rect x="230" y="358" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="358" width="507" height="20" rx="4" fill="#2f6fed"/>
+  <text class="num" x="774" y="375">58%</text>
+  <text class="small" x="846" y="374">observed 436</text>
+
+  <text class="label" x="28" y="410">trudi:probe_claimmap_alpha</text>
+  <rect x="230" y="392" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="392" width="505" height="20" rx="4" fill="#13866f"/>
+  <text class="num" x="774" y="409">58%</text>
+  <text class="small" x="846" y="408">observed 436</text>
+
+  <text class="label" x="28" y="444">trudi:probe_consciousness</text>
+  <rect x="230" y="426" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="426" width="503" height="20" rx="4" fill="#c76f1b"/>
+  <text class="num" x="774" y="443">58%</text>
+  <text class="small" x="846" y="442">observed 436</text>
+
+  <text class="label" x="28" y="478">trudi:probe_neutral_d4096</text>
+  <rect x="230" y="460" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="460" width="503" height="20" rx="4" fill="#b83b4a"/>
+  <text class="num" x="774" y="477">58%</text>
+  <text class="small" x="846" y="476">observed 436</text>
+
+  <text class="label" x="28" y="512">trudi:probe_understanding_d4096</text>
+  <rect x="230" y="494" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="494" width="501" height="20" rx="4" fill="#7556c8"/>
+  <text class="num" x="774" y="511">57%</text>
+  <text class="small" x="846" y="510">observed 436</text>
+
+  <text class="label" x="28" y="546">trudi:probe_understanding</text>
+  <rect x="230" y="528" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="528" width="499" height="20" rx="4" fill="#537188"/>
+  <text class="num" x="774" y="545">57%</text>
+  <text class="small" x="846" y="544">observed 436</text>
+
+  <text class="label" x="28" y="580">trudi:probe_accuracy</text>
+  <rect x="230" y="562" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="562" width="499" height="20" rx="4" fill="#a65f2b"/>
+  <text class="num" x="774" y="579">57%</text>
+  <text class="small" x="846" y="578">observed 436</text>
+
+  <text class="label" x="28" y="614">default:probe_micrograin</text>
+  <rect x="230" y="596" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="596" width="497" height="20" rx="4" fill="#4b8f8c"/>
+  <text class="num" x="774" y="613">57%</text>
+  <text class="small" x="846" y="612">observed 436</text>
+
+  <text class="label" x="28" y="648">trudi:probe_micrograin</text>
+  <rect x="230" y="630" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="630" width="497" height="20" rx="4" fill="#2f6fed"/>
+  <text class="num" x="774" y="647">57%</text>
+  <text class="small" x="846" y="646">observed 436</text>
+
+  <text class="label" x="28" y="682">trudi:probe_conversational_effic</text>
+  <rect x="230" y="664" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="664" width="493" height="20" rx="4" fill="#13866f"/>
+  <text class="num" x="774" y="681">56%</text>
+  <text class="small" x="846" y="680">observed 436</text>
+
+</svg>

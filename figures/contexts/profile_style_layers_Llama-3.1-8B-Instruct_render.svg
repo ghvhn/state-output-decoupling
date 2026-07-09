@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="420" viewBox="0 0 920 420" role="img">
+  <title>profile_style_layers_Llama-3.1-8B-Instruct_render.svg</title>
+  <rect width="100%" height="100%" fill="#fbfcfd"/>
+  <style>
+    text { font-family: Inter, Segoe UI, Arial, sans-serif; fill: #172026; }
+    .title { font-size: 22px; font-weight: 700; }
+    .sub { font-size: 13px; fill: #5f6b73; }
+    .label { font-size: 13px; }
+    .small { font-size: 11px; fill: #5f6b73; }
+    .num { font-size: 18px; font-weight: 700; }
+  </style>
+
+  <text class="title" x="28" y="38">style_layers_Llama-3.1-8B-Instruct</text>
+  <text class="sub" x="28" y="62">Layer profile: render (32 layers)</text>
+  <rect x="76" y="92" width="760" height="250" fill="#ffffff" stroke="#d7dde2"/>
+
+  <line x1="76" y1="342.0" x2="836" y2="342.0" stroke="#d7dde2" stroke-width="1"/>
+  <text class="small" x="24" y="346.0">0.00</text>
+
+  <line x1="76" y1="292.0" x2="836" y2="292.0" stroke="#d7dde2" stroke-width="1"/>
+  <text class="small" x="24" y="296.0">0.20</text>
+
+  <line x1="76" y1="242.0" x2="836" y2="242.0" stroke="#d7dde2" stroke-width="1"/>
+  <text class="small" x="24" y="246.0">0.40</text>
+
+  <line x1="76" y1="192.0" x2="836" y2="192.0" stroke="#d7dde2" stroke-width="1"/>
+  <text class="small" x="24" y="196.0">0.60</text>
+
+  <line x1="76" y1="142.0" x2="836" y2="142.0" stroke="#d7dde2" stroke-width="1"/>
+  <text class="small" x="24" y="146.0">0.80</text>
+
+  <line x1="76" y1="92.0" x2="836" y2="92.0" stroke="#d7dde2" stroke-width="1"/>
+  <text class="small" x="24" y="96.0">1.00</text>
+  <polyline points="76.0,100.3 100.5,100.3 125.0,100.3 149.5,100.3 174.1,108.7 198.6,125.3 223.1,125.3 247.6,133.7 272.1,125.3 296.6,150.3 321.2,150.3 345.7,150.3 370.2,142.0 394.7,150.3 419.2,167.0 443.7,167.0 468.3,142.0 492.8,150.3 517.3,108.7 541.8,108.7 566.3,100.3 590.8,92.0 615.4,100.3 639.9,92.0 664.4,92.0 688.9,92.0 713.4,92.0 737.9,92.0 762.5,92.0 787.0,92.0 811.5,92.0 836.0,92.0" fill="none" stroke="#2f6fed" stroke-width="2.4"/>
+  <rect x="76" y="374" width="12" height="12" fill="#2f6fed"/>
+  <text class="small" x="94" y="385">style_nn</text>
+  <polyline points="76.0,333.7 100.5,333.7 125.0,333.7 149.5,333.7 174.1,325.3 198.6,308.7 223.1,308.7 247.6,300.3 272.1,308.7 296.6,283.7 321.2,283.7 345.7,283.7 370.2,292.0 394.7,283.7 419.2,267.0 443.7,267.0 468.3,292.0 492.8,283.7 517.3,325.3 541.8,325.3 566.3,333.7 590.8,342.0 615.4,333.7 639.9,342.0 664.4,342.0 688.9,342.0 713.4,342.0 737.9,342.0 762.5,342.0 787.0,342.0 811.5,342.0 836.0,342.0" fill="none" stroke="#13866f" stroke-width="2.4"/>
+  <rect x="221" y="374" width="12" height="12" fill="#13866f"/>
+  <text class="small" x="239" y="385">content_nn</text>
+
+</svg>

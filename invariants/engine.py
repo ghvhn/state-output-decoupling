@@ -14,8 +14,17 @@ import time
 import ctypes
 import os
 import re
+import warnings
 from collections import deque
 from pathlib import Path
+
+# bitsandbytes 4-bit ops call a deprecated torch internal on every block;
+# the FutureWarning is theirs to fix and floods the shell each generation.
+warnings.filterwarnings(
+    "ignore",
+    message=r".*_check_is_size will be removed in a future PyTorch release.*",
+    category=FutureWarning,
+)
 
 import torch
 import numpy as np
@@ -245,6 +254,17 @@ def load_model(name: str = "meta-llama/Llama-3.1-8B-Instruct", local_files_only:
         raise ValueError("Unknown load mode. Use auto, full, slow, 4bit, or cpu.")
 
     model.eval()
+    # The hub generation_config ships sampling params (temperature/top_p)
+    # while every engine generate() runs greedy (do_sample=False), which
+    # makes transformers warn "generation flags are not valid" on each run.
+    # Align the config with actual use; callers that sample pass their own
+    # temperature explicitly, which still overrides this.
+    gcfg = getattr(model, "generation_config", None)
+    if gcfg is not None:
+        gcfg.do_sample = False
+        gcfg.temperature = None
+        gcfg.top_p = None
+        gcfg.top_k = None
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()

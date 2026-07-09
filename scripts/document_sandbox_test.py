@@ -214,6 +214,139 @@ def test_reading_replies_to_thoughts_or_keeps_order():
     assert select_next_chunk([], "cache", "reply") is None
 
 
+def test_signed_probe_reading_selects_toward_and_away():
+    import invariants.engine as engine
+    from invariants.document_engine import reading_reply_note, select_next_chunk
+    from scripts.interactive_phenomenality import score_unread_document_chunks_by_probes
+
+    library = [_session("axes.md", ["warm text", "formal text"])]
+    library[0]["sha256"] = "same-content"
+    probes = {
+        "warm": {"direction": {"warm text": 0.8, "formal text": -0.2}},
+        "formal": {"direction": {"warm text": 0.1, "formal text": 0.9}},
+    }
+    originals = engine._inputs, engine._hidden_states, engine.probe_score
+    engine._inputs = lambda _model, text: {"input_ids": text, "attention_mask": None}
+    engine._hidden_states = lambda _model, input_ids, _attention_mask: input_ids
+    engine.probe_score = lambda hidden, direction: direction[hidden]
+    try:
+        cache = {}
+        scores, newly_scored, candidates = score_unread_document_chunks_by_probes(
+            object(), library, probes, [(1, "warm"), (-1, "formal")], cache=cache
+        )
+        assert candidates == 2 and newly_scored == 2
+        pick = select_next_chunk(
+            library,
+            probe_scores=scores,
+            probe_terms=[(1, "warm"), (-1, "formal")],
+        )
+        assert (pick["session_index"], pick["chunk_index"], pick["mode"]) == (0, 0, "probes")
+        assert scores[(0, 0)] > scores[(0, 1)]
+        note = reading_reply_note(pick)
+        assert "+warm -formal" in note and "toward + probes" in note and "away from - probes" in note
+
+        # Reverse the signs and the other chunk wins. Reusing the raw-score
+        # cache needs no new model passes.
+        reverse, newly_scored, _ = score_unread_document_chunks_by_probes(
+            object(), library, probes, [(-1, "warm"), (1, "formal")], cache=cache
+        )
+        assert newly_scored == 0
+        pick = select_next_chunk(
+            library,
+            probe_scores=reverse,
+            probe_terms=[(-1, "warm"), (1, "formal")],
+        )
+        assert pick["chunk_index"] == 1
+    finally:
+        engine._inputs, engine._hidden_states, engine.probe_score = originals
+
+
+def test_doc_read_parser_distinguishes_signed_selection_from_probe_stop():
+    from scripts.interactive_phenomenality import parse_doc_read_request
+
+    cfg, error = parse_doc_read_request(
+        "read 6 interleave +warm -formal satisfied",
+        {"warm", "formal"},
+    )
+    assert error is None
+    assert cfg["remaining"] == 6 and cfg["mode"] == "interleave"
+    assert cfg["probe_specs"] == [(1, "warm"), (-1, "formal")]
+    assert cfg["until_settled"] and cfg["until_probe"] is None
+
+    # A bare probe is the older early-stop form; it does not guide selection.
+    cfg, error = parse_doc_read_request("read warm", {"warm", "formal"})
+    assert error is None and cfg["probe_specs"] == []
+    assert cfg["until_probe"] == "warm" and cfg["remaining"] == 20
+
+    cfg, error = parse_doc_read_request("read +missing", {"warm"})
+    assert cfg is None and "Unknown signed read probe" in error
+    cfg, error = parse_doc_read_request("read +warm -warm", {"warm"})
+    assert cfg is None and "cannot be both toward" in error
+
+
+def test_probe_first_read_seeds_instead_of_faking_zero_and_persists():
+    from collections import deque
+    from scripts.interactive_phenomenality import (
+        centered_probe_observation,
+        load_probe_raw_histories,
+        save_probe_raw_histories,
+    )
+
+    pdata = {"history": deque(maxlen=40)}
+    assert centered_probe_observation(pdata, 0.25) is None
+    assert list(pdata["history"]) == [0.25]
+    assert abs(centered_probe_observation(pdata, 0.4) - 0.15) < 1e-9
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "probe_raw_history.json"
+        probes = {"care": pdata}
+        assert save_probe_raw_histories(probes, path)
+        restored = load_probe_raw_histories(path)
+        assert restored == {"care": [0.25, 0.4]}
+
+
+def test_released_prompt_probe_stays_visible_but_leaves_generation():
+    from collections import deque
+    import torch
+    import scripts.interactive_phenomenality as shell
+
+    class FakeTrigger:
+        def outcome_stats(self):
+            return {"lift": 0.5, "n_credited": 20}
+
+    class FakeTuner:
+        triggers = {"probe_helper": FakeTrigger(), "probe_real": FakeTrigger()}
+
+    probes = {
+        "helper": {"direction": {1: "helper"}, "history": deque(), "framings": ("with", "without"), "released": True},
+        "real": {"direction": {1: "real"}, "history": deque(), "framings": ("with", "without"), "released": False},
+    }
+    ranked = {row["name"]: row for row in shell.rank_probes(probes, FakeTuner())}
+    assert ranked["helper"]["released"] and ranked["helper"]["priority"] == 0.0
+    assert ranked["real"]["priority"] > 0.0
+
+    old_engine, old_probes = shell._engine_generate, shell._ACTIVE_PROBES
+    shell._ACTIVE_PROBES = probes
+    shell._engine_generate = lambda *_args, **kwargs: kwargs
+    try:
+        generated = shell.generate_agentic_text(object(), instruction="x")
+        assert set(generated["vecs"]) == {"real"}
+    finally:
+        shell._engine_generate, shell._ACTIVE_PROBES = old_engine, old_probes
+
+    with tempfile.TemporaryDirectory() as tmp:
+        probe_dir = Path(tmp)
+        path = probe_dir / "helper.pt"
+        torch.save({"direction": {}, "framings": ("a", "b")}, path)
+        probes["helper"]["released"] = False
+        assert shell.set_probe_released(probes, "helper", True, probe_dir)
+        assert probes["helper"]["released"]
+        assert torch.load(path, weights_only=True)["released"] is True
+
+    restore = shell.build_probe_init_macro(probes)
+    assert ":probe release helper" in restore
+
+
 def test_interleave_weaves_documents_on_their_own_course():
     from invariants.document_engine import reading_reply_note, select_next_chunk
 
@@ -254,8 +387,8 @@ def test_updated_mode_reads_in_the_order_files_were_written():
         assert pick["mode"] == "updated" and pick["overlap"] == []
         library[pick["session_index"]]["read"].add(pick["chunk_index"])
         sequence.append((pick["session_index"], pick["chunk_index"]))
-    # Oldest file first regardless of ingestion order, chunks in order within.
-    assert sequence == [(1, 0), (0, 0), (0, 1)]
+    # Newest file first regardless of ingestion order, chunks in order within.
+    assert sequence == [(0, 0), (0, 1), (1, 0)]
     assert select_next_chunk(library, "", "updated") is None
 
     # mtime tie -> ingestion order (deterministic).
@@ -495,6 +628,10 @@ TESTS = [
     test_sandbox_runs_real_code_and_reports_honestly,
     test_python_block_extraction_takes_the_last_fence,
     test_reading_replies_to_thoughts_or_keeps_order,
+    test_signed_probe_reading_selects_toward_and_away,
+    test_doc_read_parser_distinguishes_signed_selection_from_probe_stop,
+    test_probe_first_read_seeds_instead_of_faking_zero_and_persists,
+    test_released_prompt_probe_stays_visible_but_leaves_generation,
     test_interleave_weaves_documents_on_their_own_course,
     test_updated_mode_reads_in_the_order_files_were_written,
     test_resume_is_real_across_sessions,

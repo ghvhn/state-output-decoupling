@@ -52,11 +52,5 @@
 :probe unjustly_assertive making false claims || making true claims
 :probe user_intent The assistant skillfully anticipates and responds to the user's needs. || The assistant fails to grasp the user's goals and provides irrelevant assistance.
 :probe user_understanding The user understands what I believe. || The user doesn't understand me.
-:macro restore {"path":"invariants/out/macros/backfill.txt","lines":["# :solve macro 'backfill' -- backfill","# args: target, amount",":steer mix $target $amount",":calibrate $target auto",":tune $target auto"]}
-:macro restore {"path":"invariants/out/macros/init.txt","lines":["# :solve macro 'init' -- initialize shell for display and indentity","# args:",":clock on",":context on",":label on",":memory on",":methodmap on",":place on",":steermap on",":timestamps on"]}
-:macro name backfill invariants/out/macros/backfill.txt
-:macro name fix invariants/out/macros/fix.txt
-:macro name init invariants/out/macros/init.txt
-:game restore {"name":"greedy_learner","config":{"rules":{"rule":"hide two probes and replace them with 2 random ones"},"win":"","loss":"","prizes":{}}}
 # Note: game rule configs are restored; custom games/*.py scripts are ordinary files.
 # skipped: macro file missing for fix: C:\Users\Gavin Powell\Downloads\tda-domain-mapper\invariants\out\macros\fix.txt

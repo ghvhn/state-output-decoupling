@@ -7,6 +7,13 @@ system is a deliberate command (nothing auto-drifts); tuned values persist
 across sessions; anything folded into the model's context is minimal and in
 its own first-person voice.
 
+> **Grammar authority:** exact argument order and types live in
+> [docs/COMMANDS.md](docs/COMMANDS.md), regenerated at every shell start.
+> Its "Declared argument contracts" section is rendered from the same
+> `CommandSpec` objects that PARSE those commands, so it cannot drift from
+> behavior; this file is the narrative companion (what each family is for
+> and the house physics behind it).
+
 ## Session & context
 
 - **`exit` / `quit`** — close cleanly (logs `shell_closed`; an interrupted
@@ -117,6 +124,52 @@ Knobs you'll actually touch:
 | `verifier_time_reserve_sec` | 20.0 | time forcibly reserved for verification before hitting the global timeout |
 | `relax_agreement_under_urgency` | 0.0 | boolean flag (>= 1.0 is true) to lower the required agreement when time is short |
 | `stop_on_critical_urgency` | 1.0 | boolean flag (>= 1.0 is true) to forcefully halt generation if frantic urgency is reached |
+
+## Gravity field (steering as physics)
+
+Tuning, steering, and calibration share one frame: every probe is a body — a
+mass at its direction on the unit sphere. Each token's hidden state is pulled
+along the sphere tangent, pull ∝ mass/(d+eps)² with d = 1−cos. Tuning sets the
+field's live constants (G, envelope cap, doppler, law step); calibration
+places a body's firing horizon from its own observed orbits; every push stays
+inside the envelope cap.
+
+- **`:steer field|gravity init|on|off [G] | status`** — the master switch.
+  `init` loads/migrates every field surface without inventing laws or
+  unfreezing bodies; while on, the field REPLACES pin/mix steering.
+- **`:steer mass <probe> <m|auto>`** — a body's gravitational coefficient
+  (negative = repulsor; masses normalize to |sum|=1 when the field applies).
+  `auto` returns it to its live signed evidence lift each turn.
+- **`:steer g <node> <source|off> [scale [offset]]`** — personal G: bind one
+  node's coupling to a live source instead of global G (`prioritize_alpha`).
+  Sources: number, `probe:<name>`, `knob:<name>`, `status:ram|vram`,
+  `lift:<trigger>`, `outcome:<trigger>`, `family:<name>`, `global`.
+- **`:steer time <node> <source|off> [scale [offset]]`** — local clock: the
+  node's gravity evolves on its own timeline (rate clamped 0.05..20).
+- **`:steer freeze <probe|@anchor> [off]`** — inertial coefficient: the body
+  keeps PULLING but stops MOVING itself, so it cannot habituate to its own
+  gravity. Frozen anchors stop responding to laws; `off` thaws.
+- **`:steer pole <body> <family[+|-]> [off]`** / **`:steer law <famA> <famB>
+  <k|off>`** — selective magnetism: poled bodies interact only where a law
+  couples their families (k>0 like repels/unlike attracts; unlisted pairs
+  inert; `:tune gravity_law_step` integrates, moving only unfrozen anchors).
+- **`:steer bodies`** — the whole physics at a glance: masses, personal Gs,
+  qualities, sets, exclusions, families, clocks, shapes, poles, laws, knobs.
+
+**The outcome channel is mappable — correlatable and steerable.** Every
+tracked stream is credited each turn with its own signal and the turn's
+outcome, so each credit history carries "did this actually help" per stream:
+
+- *Draw it*: `:figure outcome:<trigger>` (credited outcomes in credit order),
+  `:figure lift:<trigger>` (rolling fired-vs-unfired lift against a 0-line),
+  `:figure outcomes` (every credited trigger at once).
+- *Correlate it*: `:figure patterns` reports `credited_outcome` — the
+  signal↔outcome Pearson r per stream — and outcome maps carry `signal_r=`
+  next to the binary lift.
+- *Steer by it*: `lift:<trigger>` / `outcome:<trigger>` are field sources —
+  a body's G (or a clock, or a quality strength) can be driven by proven
+  productivity instead of assertion. Outcomes still never move a threshold
+  on their own; routing them into force is an explicit command.
 
 ## Documents & reading
 

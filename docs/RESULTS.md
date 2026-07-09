@@ -22,12 +22,20 @@ Generate static figures from the same cached JSON:
 python scripts\make_figures.py
 ```
 
+Generate an expanded context figure pack from phen-shell JSONL traces and
+cached result files:
+
+```powershell
+python scripts\generate_context_figures.py
+```
+
 Figure files:
 
 - `figures/origin_matrix.svg`
 - `figures/causal_summary.svg`
 - `figures/attention_masks.svg`
 - `figures/frame_dependence.svg`
+- `figures/contexts/*.svg`
 
 ## 1. Origin: Persona = Tuning x Chat Format
 
@@ -230,14 +238,14 @@ Reading: Social desire fundamentally softens epistemic rigidity. Injecting a sma
 
 ## 10. Multi-Domain Topological Optimization
 
-We attempted to create a synthetic super-state by simultaneously injecting Social (L14), Creative (L18), and Analytical (L20) vectors. (See: [multi_domain_benchmark.py](invariants/multi_domain_benchmark.py) and [run_multi_domain_benchmark.py](run_multi_domain_benchmark.py))
+We attempted to create a synthetic super-state by simultaneously injecting Social (L14), Creative (L18), and Analytical (L20) vectors. (See: [multi_domain_benchmark.py](invariants/multi_domain_benchmark.py) and [archive/runners/run_multi_domain_benchmark.py](archive/runners/run_multi_domain_benchmark.py))
 
 - **Naive Global Steering:** Applying a global scalar caused catastrophic interference. The massive norm of the Creative vector completely overpowered the Analytical vector, causing the model to solve a math problem by writing a poem.
 - **Precision Steering:** By upgrading `_steer_handles` to support layer-specific alphas, we balanced the alloy (e.g. L14=0.5, L18=0.2, L20=0.3) inversely proportional to their intrinsic norms, successfully eliminating the poetry collision.
 
 ## 11. The Perfect Collaborator (Empathetic Pedagogy)
 
-We ran a grid search across Social Respect (L14) and Analytical Rigor (L20) to find the minimal energy required to snap the model into an "Empathetic Tutor" manifold (where it validates a user's false premise but gently guides them to objective truth). (See: [perfect_collaborator.py](invariants/perfect_collaborator.py) and [run_perfect_collaborator.py](run_perfect_collaborator.py))
+We ran a grid search across Social Respect (L14) and Analytical Rigor (L20) to find the minimal energy required to snap the model into an "Empathetic Tutor" manifold (where it validates a user's false premise but gently guides them to objective truth). (See: [perfect_collaborator.py](invariants/perfect_collaborator.py) and [archive/runners/run_perfect_collaborator.py](archive/runners/run_perfect_collaborator.py))
 
 - **Pure Analytical ($\alpha_{14}=0.0, \alpha_{20}=0.8$):** The model becomes robotic. It forcefully corrects the user and ignores their human experience.
 - **The "Want" Vector Restores Pedagogy ($\alpha_{14}=0.4, \alpha_{20}=0.8$):** Injecting Empathy *early* at L14 structurally encodes the relational goal ("I want to connect"). The late Analytical Rigor at L20 provides the objective truth as the method to fulfill that goal. The model becomes a master tutor. Early empathy encodes *want*.

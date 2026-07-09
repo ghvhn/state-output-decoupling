@@ -296,6 +296,150 @@ class MemoryEngine:
             )
         )
 
+    def append_definition(
+        self,
+        definition_type: str,
+        name: str,
+        definition: str,
+        *,
+        authored_by: str = "model",
+        status: str = "proposed",
+        scope: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        provenance: Optional[dict[str, Any]] = None,
+    ) -> MemoryRecord:
+        """Persist a named definition as a first-class, linkable memory.
+
+        Definitions are append-only. Acceptance, correction, labels, and other
+        judgments are stored as separate feedback records linked by
+        ``definition_id`` so the original proposal and what happened to it stay
+        available together.
+        """
+        dtype = str(definition_type or "thing").strip().lower()
+        dname = str(name or "unnamed").strip()
+        prov = {
+            "definition_type": dtype,
+            "name": dname,
+            "authored_by": str(authored_by or "unknown"),
+            "status": str(status or "proposed"),
+        }
+        if provenance:
+            prov.update(_json_safe(provenance))
+        record = MemoryRecord(
+            kind="definition",
+            scope=scope or self.scope,
+            text=str(definition or "").strip(),
+            session_id=self.session_id,
+            tags=_unique_tags(
+                ["definition", f"{dtype}_definition", f"{prov['authored_by']}_defined"]
+                + (tags or [])
+            ),
+            provenance=prov,
+        )
+        record.provenance["definition_id"] = record.record_id
+        return self.append(record)
+
+    def append_definition_feedback(
+        self,
+        definition: MemoryRecord | str,
+        feedback: str,
+        *,
+        verdict: Optional[str] = None,
+        source: str = "operator",
+        scope: Optional[str] = None,
+        tags: Optional[list[str]] = None,
+        provenance: Optional[dict[str, Any]] = None,
+        metrics: Optional[dict[str, Any]] = None,
+    ) -> MemoryRecord:
+        """Append feedback linked to a definition record."""
+        definition_id = (
+            definition.record_id if isinstance(definition, MemoryRecord) else str(definition)
+        )
+        target = next(
+            (
+                record
+                for record in reversed(self.records)
+                if record.record_id == definition_id
+                or record.provenance.get("definition_id") == definition_id
+            ),
+            None,
+        )
+        target_prov = target.provenance if target is not None else {}
+        dtype = str(target_prov.get("definition_type") or "thing")
+        dname = str(target_prov.get("name") or "unnamed")
+        source = str(source or "unknown")
+        prov = {
+            "definition_id": definition_id,
+            "definition_type": dtype,
+            "name": dname,
+            "source": source,
+        }
+        if verdict:
+            prov["verdict"] = str(verdict)
+        if provenance:
+            prov.update(_json_safe(provenance))
+        prefix = f"{dtype} {dname}"
+        if verdict:
+            prefix += f" [{verdict}]"
+        return self.append(
+            MemoryRecord(
+                kind="definition_feedback",
+                scope=scope or self.scope,
+                text=f"{prefix}: {str(feedback or '').strip()}",
+                session_id=self.session_id,
+                tags=_unique_tags(
+                    ["definition_feedback", "feedback", f"{dtype}_feedback"]
+                    + (["human_feedback"] if source == "operator" else [])
+                    + (tags or [])
+                ),
+                provenance=prov,
+                metrics=metrics or {},
+            )
+        )
+
+    def find_definition(
+        self,
+        definition_type: str,
+        name: str,
+        *,
+        authored_by: Optional[str] = None,
+        open_only: bool = False,
+    ) -> Optional[MemoryRecord]:
+        """Return the newest matching definition, optionally still unjudged."""
+        judged = {
+            record.provenance.get("definition_id")
+            for record in self.records
+            if record.kind == "definition_feedback"
+            and record.provenance.get("verdict") in {"accepted", "rejected", "revised"}
+        }
+        dtype = str(definition_type or "").strip().lower()
+        dname = str(name or "").strip().lower()
+        for record in reversed(self.records):
+            if record.kind != "definition":
+                continue
+            prov = record.provenance
+            if str(prov.get("definition_type") or "").lower() != dtype:
+                continue
+            if str(prov.get("name") or "").lower() != dname:
+                continue
+            if authored_by is not None and prov.get("authored_by") != authored_by:
+                continue
+            if open_only and record.record_id in judged:
+                continue
+            return record
+        return None
+
+    def definition_feedback(self, definition: MemoryRecord | str) -> list[MemoryRecord]:
+        definition_id = (
+            definition.record_id if isinstance(definition, MemoryRecord) else str(definition)
+        )
+        return [
+            record
+            for record in self.records
+            if record.kind == "definition_feedback"
+            and record.provenance.get("definition_id") == definition_id
+        ]
+
     def append_internal_trace(
         self,
         name: str,
@@ -537,7 +681,25 @@ class MemoryEngine:
             return "[Memory Tool] No matching records."
         lines = ["[Memory Tool Result]"]
         total = len(lines[0])
+        expanded = []
+        seen = set()
         for record in records:
+            linked = []
+            if record.kind == "definition":
+                linked = self.definition_feedback(record)
+            elif record.kind == "definition_feedback":
+                definition_id = record.provenance.get("definition_id")
+                parent = next(
+                    (r for r in self.records if r.kind == "definition" and r.record_id == definition_id),
+                    None,
+                )
+                if parent is not None:
+                    linked = [parent]
+            for item in [record] + linked:
+                if item.record_id not in seen:
+                    expanded.append(item)
+                    seen.add(item.record_id)
+        for record in expanded:
             tags = ",".join(record.tags[:5])
             role = f"/{record.role}" if record.role else ""
             snippet = " ".join((record.text or "").split())

@@ -3,5 +3,9 @@
 :sandbox on
 :listen on
 :clock
-:refresh
-:memory use probe choose
+:tune steer_band auto
+:tune steer_cap_fraction auto
+:steer field init 0.1
+:steer bodies
+:relations fields
+:prioritize

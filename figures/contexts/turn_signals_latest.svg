@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="588" viewBox="0 0 860 588" role="img">
+  <title>turn_signals_latest.svg</title>
+  <rect width="100%" height="100%" fill="#fbfcfd"/>
+  <style>
+    text { font-family: Inter, Segoe UI, Arial, sans-serif; fill: #172026; }
+    .title { font-size: 22px; font-weight: 700; }
+    .sub { font-size: 13px; fill: #5f6b73; }
+    .label { font-size: 13px; }
+    .small { font-size: 11px; fill: #5f6b73; }
+    .num { font-size: 18px; font-weight: 700; }
+  </style>
+
+  <text class="title" x="28" y="38">Phen-shell turn signals</text>
+  <text class="sub" x="28" y="62">Latest absolute values from 12131 signal rows</text>
+
+  <text class="label" x="28" y="104">probe_understanding</text>
+  <rect x="230" y="86" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="86" width="166" height="20" rx="4" fill="#2f6fed"/>
+  <text class="num" x="774" y="103">0.034</text>
+  <text class="small" x="846" y="102">last +0.034, span 0.297</text>
+
+  <text class="label" x="28" y="138">probe_curiosity</text>
+  <rect x="230" y="120" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="120" width="168" height="20" rx="4" fill="#13866f"/>
+  <text class="num" x="774" y="137">0.034</text>
+  <text class="small" x="846" y="136">last -0.034, span 0.354</text>
+
+  <text class="label" x="28" y="172">probe_situational_authority</text>
+  <rect x="230" y="154" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="154" width="137" height="20" rx="4" fill="#c76f1b"/>
+  <text class="num" x="774" y="171">0.028</text>
+  <text class="small" x="846" y="170">last -0.028, span 0.198</text>
+
+  <text class="label" x="28" y="206">probe_efficacy</text>
+  <rect x="230" y="188" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="188" width="68" height="20" rx="4" fill="#b83b4a"/>
+  <text class="num" x="774" y="205">0.014</text>
+  <text class="small" x="846" y="204">last -0.014, span 0.358</text>
+
+  <text class="label" x="28" y="240">probe_unjustly_assertive</text>
+  <rect x="230" y="222" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="222" width="201" height="20" rx="4" fill="#7556c8"/>
+  <text class="num" x="774" y="239">0.041</text>
+  <text class="small" x="846" y="238">last +0.041, span 0.133</text>
+
+  <text class="label" x="28" y="274">probe_denial</text>
+  <rect x="230" y="256" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="256" width="85" height="20" rx="4" fill="#537188"/>
+  <text class="num" x="774" y="273">0.017</text>
+  <text class="small" x="846" y="272">last +0.017, span 0.293</text>
+
+  <text class="label" x="28" y="308">probe_ambiguity</text>
+  <rect x="230" y="290" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="290" width="286" height="20" rx="4" fill="#a65f2b"/>
+  <text class="num" x="774" y="307">0.059</text>
+  <text class="small" x="846" y="306">last -0.059, span 0.162</text>
+
+  <text class="label" x="28" y="342">probe_hallucination</text>
+  <rect x="230" y="324" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="324" width="46" height="20" rx="4" fill="#4b8f8c"/>
+  <text class="num" x="774" y="341">0.009</text>
+  <text class="small" x="846" y="340">last -0.009, span 0.194</text>
+
+  <text class="label" x="28" y="376">probe_memory_need</text>
+  <rect x="230" y="358" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="358" width="72" height="20" rx="4" fill="#2f6fed"/>
+  <text class="num" x="774" y="375">0.015</text>
+  <text class="small" x="846" y="374">last +0.015, span 0.224</text>
+
+  <text class="label" x="28" y="410">probe_memory_alpha</text>
+  <rect x="230" y="392" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="392" width="72" height="20" rx="4" fill="#13866f"/>
+  <text class="num" x="774" y="409">0.015</text>
+  <text class="small" x="846" y="408">last +0.015, span 0.224</text>
+
+  <text class="label" x="28" y="444">probe_intent</text>
+  <rect x="230" y="426" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="426" width="9" height="20" rx="4" fill="#c76f1b"/>
+  <text class="num" x="774" y="443">0.002</text>
+  <text class="small" x="846" y="442">last -0.002, span 0.314</text>
+
+  <text class="label" x="28" y="478">probe_intent_settling</text>
+  <rect x="230" y="460" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="460" width="482" height="20" rx="4" fill="#b83b4a"/>
+  <text class="num" x="774" y="477">0.099</text>
+  <text class="small" x="846" y="476">last -0.099, span 0.485</text>
+
+  <text class="label" x="28" y="512">probe_consciousness</text>
+  <rect x="230" y="494" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="494" width="530" height="20" rx="4" fill="#7556c8"/>
+  <text class="num" x="774" y="511">0.109</text>
+  <text class="small" x="846" y="510">last -0.109, span 0.302</text>
+
+  <text class="label" x="28" y="546">probe_claimmap_alpha</text>
+  <rect x="230" y="528" width="530" height="20" rx="4" fill="#edf1f4"/>
+  <rect x="230" y="528" width="68" height="20" rx="4" fill="#537188"/>
+  <text class="num" x="774" y="545">0.014</text>
+  <text class="small" x="846" y="544">last +0.014, span 0.278</text>
+
+</svg>

@@ -15,6 +15,7 @@ config/
 # OS generated files
 .DS_Store
 Thumbs.db
+*.lnk
 
 # Massive Model Artifacts & Logs
 *.pt
