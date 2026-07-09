@@ -135,6 +135,22 @@ Knobs you'll actually touch:
 | `relax_agreement_under_urgency` | 0.0 | boolean flag (>= 1.0 is true) to lower the required agreement when time is short |
 | `stop_on_critical_urgency` | 1.0 | boolean flag (>= 1.0 is true) to forcefully halt generation if frantic urgency is reached |
 
+## Command knobs (criteria & metric)
+
+Every exposed tool and every command carries its own knob pair, registered
+lazily on first use (typos never mint a knob) and at exposure:
+
+- **`cmd_<word>`** (metric) — observed on every generated reply: signal 1
+  when the command ran since the last reply, 0 otherwise; credited with the
+  turn's sense. Its fired-vs-unfired lift answers *"are turns that use this
+  command more productive?"* and composes with the whole outcome surface:
+  `:figure lift:cmd_doc`, field source `lift:cmd_doc`, the `:tune` listing.
+- **`cmd_<word>_criteria`** (criteria) — the activation bar. When an
+  exposure's `because` clause names a probe, the shell observes that probe's
+  live signal into this knob each reply, so the bar calibrates against a
+  real distribution (`:calibrate cmd_<word>_criteria <pct>`) rather than
+  being asserted; with no named probe it stays a manual dial.
+
 ## Gravity field (steering as physics)
 
 Tuning, steering, and calibration share one frame: every probe is a body — a

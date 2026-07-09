@@ -69,7 +69,7 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:game <name>` -- run a python script from games/ with full access to live system state; infinite flexibility for custom rules and interactions
 - `:game no | decline` -- decline the game the model just proposed
 - `:accept [n|all] | :reject [n|all]` -- a game may STAGE a command instead of running it; nothing a game chose runs until you accept it here
-- `:expose [@agent] [stage|direct] :<command> [fixed args...] [steer <magnitude>] [because <activation>] | :expose off [@agent] <target>` -- runtime tool access: make/remove a command callable by the model as <<TOOL: :command args>>; bare/default = staged for :accept, direct = queued immediately; mode goes BEFORE the command so fixed args are never read as keywords (the legacy ':expose :cmd direct args' order is still accepted); fixed args are prefilled; model only supplies the remaining tail; because records when the tool should activate; steer records its strength/effect; off works for commands, probes, and knobs with the same order
+- `:expose [@agent] [stage|direct] :<command> [fixed args...] [steer <magnitude>] [because <activation>] | :expose off [@agent] <target>` -- runtime tool access: make/remove a command callable by the model as <<TOOL: :command args>>; bare/default = staged for :accept, direct = queued immediately; mode goes BEFORE the command so fixed args are never read as keywords (the legacy ':expose :cmd direct args' order is still accepted); fixed args are prefilled; model only supplies the remaining tail; because records when the tool should activate; steer records its strength/effect; off works for commands, probes, and knobs with the same order. Every exposure registers its knob pair: cmd_<word> (metric: used-vs-unused outcome lift, drawable/steerable as lift:cmd_<word>) and cmd_<word>_criteria (activation bar; observes the probe named in the because-clause, so it calibrates); every KNOWN command mints the same metric knob on first use
 - `:expose <probe|knob> [off]` -- without leading ':', expose a probe sensor or tuner knob to the model's <<PROBE: name>> tool
 - `:hide <command> | :hide off <command>` -- documentation/writing visibility: hide/reveal a command from model-facing help, suggestions, command discovery, and macro/profile writing hints. Tool access is unchanged; use :expose off :command to remove runtime access
 - `:impact` -- consequence trail: what its words caused, and whether experienced impact tracks better deliberation
@@ -142,8 +142,8 @@ described: violations print the usage line instead of executing.
   - e.g. `:steer field init 0.1`
   - e.g. `:steer gravity on`
   - e.g. `:steer field`
-- `:steer freeze <probe|@anchor> [off]` -- Inertial coefficient: the body keeps PULLING but stops MOVING itself. A frozen probe's rolling baseline stops drifting (it cannot habituate to its own gravity); a frozen anchor stops responding to laws. off thaws.
-  - `<probe|@anchor>` (word) -- the mass to freeze or thaw
+- `:steer freeze <probe|@anchor|choose> [off]` -- Inertial coefficient: the body keeps PULLING but stops MOVING itself. A frozen probe's rolling baseline stops drifting (it cannot habituate to its own gravity); a frozen anchor stops responding to laws. off thaws.
+  - `<probe|@anchor|choose>` (probe) -- the mass to freeze or thaw; choose = the model picks a probe
   - `[off]` (word, optional) -- thaw: the baseline drifts / the anchor moves under laws again
   - e.g. `:steer freeze curiosity`
   - e.g. `:steer freeze @pin off`
@@ -161,13 +161,14 @@ described: violations print the usage line instead of executing.
   - `[k|off]` (word, optional) -- signed coupling constant, or off to remove
   - e.g. `:steer law integrity chaos -0.3`
   - e.g. `:steer law integrity chaos off`
-- `:steer mass <probe> <m|auto>` -- Set a body's gravitational coefficient. Positive mass attracts the hidden state, negative repels; masses are normalized (|sum|=1) when the field applies. auto returns the mass to its live signed evidence lift each turn.
-  - `<probe>` (word) -- an active probe: a mass at its direction
+- `:steer mass <probe|choose> <m|auto>` -- Set a body's gravitational coefficient. Positive mass attracts the hidden state, negative repels; masses are normalized (|sum|=1) when the field applies. auto returns the mass to its live signed evidence lift each turn.
+  - `<probe|choose>` (probe) -- an active probe: a mass at its direction; choose = the model picks
   - `<m|auto>` (word) -- signed mass (negative = repulsor) or auto = live signed lift
   - e.g. `:steer mass ambiguity -0.5`
   - e.g. `:steer mass fun auto`
-- `:steer pole <probe|@anchor> <family[+|-]> [off]` -- Type a body with a signed pole in a concept family. Poled bodies exert force on each other ONLY where a ':steer law' couples their families -- selective magnetism layered over the universal field.
-  - `<probe|@anchor>` (word) -- the mass to type
+  - e.g. `:steer mass choose auto`
+- `:steer pole <probe|@anchor|choose> <family[+|-]> [off]` -- Type a body with a signed pole in a concept family. Poled bodies exert force on each other ONLY where a ':steer law' couples their families -- selective magnetism layered over the universal field.
+  - `<probe|@anchor|choose>` (probe) -- the mass to type; choose = the model picks a probe
   - `<family[+|-]>` (word) -- family name with optional sign (default +)
   - `[off]` (word, optional) -- remove this pole from the body
   - e.g. `:steer pole honesty integrity+`

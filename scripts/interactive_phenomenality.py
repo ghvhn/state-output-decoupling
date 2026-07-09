@@ -2174,13 +2174,17 @@ class ArgSpec:
     kinds:
       word  -- one token, kept verbatim
       name  -- one token, sanitized to [a-z0-9_] (probe/composite identifier)
+      probe -- one token naming a probe; 'choose'/'choice'/'auto' resolve
+               through the probe_resolver passed to parse() (the model or
+               the evidence picks), other tokens pass through untouched for
+               the handler's own resolution
       int   -- one token, integer; lo/hi clamp after parsing
       float -- one token, float; lo/hi clamp after parsing
       text  -- the rest of the line, raw spacing preserved (must be last)
     variadic=True (last positional only) consumes every remaining token.
     """
 
-    KINDS = ("word", "name", "int", "float", "text")
+    KINDS = ("word", "name", "probe", "int", "float", "text")
 
     def __init__(self, name, kind="word", required=True, default=None,
                  display=None, lo=None, hi=None, variadic=False, choices=None, help=""):
@@ -2201,9 +2205,18 @@ class ArgSpec:
         inner = self.display + (" ..." if self.variadic else "")
         return f"<{inner}>" if self.required else f"[{inner}]"
 
-    def coerce(self, tok, fail):
+    def coerce(self, tok, fail, probe_resolver=None):
         if self.kind == "name":
             return re.sub(r"[^a-z0-9_]", "_", tok.lower())[:40]
+        if self.kind == "probe":
+            if tok.lower() in ("choose", "choice", "auto"):
+                if probe_resolver is None:
+                    fail(f"{self.name} does not accept '{tok}' here")
+                resolved = probe_resolver(tok)
+                if not resolved:
+                    fail(f"no probe chosen for {self.name}")
+                return resolved
+            return tok
         if self.kind in ("int", "float"):
             caster = int if self.kind == "int" else float
             try:
@@ -2315,8 +2328,10 @@ class CommandSpec:
         prints it) -- for handler-level violations the grammar can't express."""
         raise CommandUsageError(message, usage=self.usage())
 
-    def parse(self, raw):
-        """Parse the text after the command path; infallible by contract."""
+    def parse(self, raw, probe_resolver=None):
+        """Parse the text after the command path; infallible by contract.
+        probe_resolver resolves 'choose'/'auto' tokens of kind=probe args
+        (the shell passes resolve_probe_choice bound to the live probes)."""
         raw = (raw or "").strip()
         values = {}
         for opt in self.opts:
@@ -2334,7 +2349,7 @@ class CommandSpec:
                 toks = args.tokens[i:]
                 if not toks and spec.required:
                     self.fail(f"missing {spec.name}")
-                values[spec.name] = [spec.coerce(t, self.fail) for t in toks] if toks else list(spec.default or [])
+                values[spec.name] = [spec.coerce(t, self.fail, probe_resolver) for t in toks] if toks else list(spec.default or [])
                 i = len(args.tokens)
             else:
                 tok = args.get(i)
@@ -2343,7 +2358,7 @@ class CommandSpec:
                         self.fail(f"missing {spec.name}")
                     values[spec.name] = spec.default
                 else:
-                    values[spec.name] = spec.coerce(tok, self.fail)
+                    values[spec.name] = spec.coerce(tok, self.fail, probe_resolver)
                     i += 1
         if i < len(args.tokens):
             self.fail(f"unexpected argument(s): {' '.join(args.tokens[i:])}")
@@ -2517,10 +2532,11 @@ STEER_MASS_SPEC = register_spec(CommandSpec(
     "state, negative repels; masses are normalized (|sum|=1) when the field "
     "applies. auto returns the mass to its live signed evidence lift each turn.",
     args=[
-        ArgSpec("probe", help="an active probe: a mass at its direction"),
+        ArgSpec("probe", kind="probe", display="probe|choose",
+                help="an active probe: a mass at its direction; choose = the model picks"),
         ArgSpec("m", display="m|auto", help="signed mass (negative = repulsor) or auto = live signed lift"),
     ],
-    examples=[":steer mass ambiguity -0.5", ":steer mass fun auto"],
+    examples=[":steer mass ambiguity -0.5", ":steer mass fun auto", ":steer mass choose auto"],
 ))
 
 STEER_G_SPEC = register_spec(CommandSpec(
@@ -2558,7 +2574,8 @@ STEER_FREEZE_SPEC = register_spec(CommandSpec(
     "frozen probe's rolling baseline stops drifting (it cannot habituate to "
     "its own gravity); a frozen anchor stops responding to laws. off thaws.",
     args=[
-        ArgSpec("body", display="probe|@anchor", help="the mass to freeze or thaw"),
+        ArgSpec("body", kind="probe", display="probe|@anchor|choose",
+                help="the mass to freeze or thaw; choose = the model picks a probe"),
         ArgSpec("flag", required=False, choices=("off", "false"), display="off",
                 help="thaw: the baseline drifts / the anchor moves under laws again"),
     ],
@@ -2571,7 +2588,8 @@ STEER_POLE_SPEC = register_spec(CommandSpec(
     "force on each other ONLY where a ':steer law' couples their families -- "
     "selective magnetism layered over the universal field.",
     args=[
-        ArgSpec("body", display="probe|@anchor", help="the mass to type"),
+        ArgSpec("body", kind="probe", display="probe|@anchor|choose",
+                help="the mass to type; choose = the model picks a probe"),
         ArgSpec("pole", display="family[+|-]", help="family name with optional sign (default +)"),
         ArgSpec("flag", required=False, choices=("off", "remove"), display="off",
                 help="remove this pole from the body"),
@@ -2817,6 +2835,29 @@ def slice_cache_indices(cache_memory, filters, times):
                 continue
         out.append(i)
     return out
+
+
+def ensure_command_knobs(tuner, word):
+    """Every command carries its own knob pair (the house rule: criteria &
+    metric for every exposed tool, every command). Registered lazily on first
+    use and at exposure -- never a dead knob for a command nobody ran.
+
+    - cmd_<word> (METRIC): a credited stream. Each generated reply observes
+      signal 1.0 when the command ran since the last reply, 0.0 otherwise,
+      and credits the turn's sense as outcome -- so its fired-vs-unfired lift
+      answers "are turns that use this command more productive?". Composes
+      with the whole outcome surface: :figure lift:cmd_<word>, field source
+      lift:cmd_<word>, :tune listing.
+    - cmd_<word>_criteria (CRITERIA): the activation bar. When an exposure's
+      because-clause names a probe, each reply observes that probe's live
+      signal into this knob, so the bar calibrates against a real
+      distribution (:calibrate cmd_<word>_criteria <pct>) instead of being
+      asserted; with no named probe it stays a manual dial.
+    """
+    w = re.sub(r"[^a-z0-9_]", "_", str(word).lstrip(":").lower()).strip("_")[:40]
+    metric = tuner.register(f"cmd_{w}", 0.5, kind="threshold", comparator=">=")
+    criteria = tuner.register(f"cmd_{w}_criteria", 0.0, kind="threshold", comparator=">=")
+    return w, metric, criteria
 
 
 def parse_count(text, default):
@@ -5691,7 +5732,11 @@ COMMAND_HELP_LINES = [
     "                (the legacy ':expose :cmd direct args' order is still accepted);",
     "                fixed args are prefilled; model only supplies the remaining tail;",
     "                because records when the tool should activate; steer records its strength/effect; off works",
-    "                for commands, probes, and knobs with the same order)",
+    "                for commands, probes, and knobs with the same order. Every exposure",
+    "                registers its knob pair: cmd_<word> (metric: used-vs-unused outcome lift,",
+    "                drawable/steerable as lift:cmd_<word>) and cmd_<word>_criteria (activation",
+    "                bar; observes the probe named in the because-clause, so it calibrates);",
+    "                every KNOWN command mints the same metric knob on first use)",
     "          :expose <probe|knob> [off]  (without leading ':', expose a probe sensor",
     "                or tuner knob to the model's <<PROBE: name>> tool)",
     "          :hide <command> | :hide off <command>  (documentation/writing visibility:",
@@ -7012,6 +7057,7 @@ def main():
     except Exception as _md_err:
         print(Fore.YELLOW + f"[Docs] Could not refresh COMMANDS.md: {_md_err}" + Style.RESET_ALL)
 
+    commands_since_reply = set()
     pending_memory_tool_result = None
     pending_orientation_tool_result = None
     pending_claimmap_tool_result = None
@@ -8353,6 +8399,19 @@ def main():
             command_because = None
             if user_input.startswith(":") or user_input.startswith("@"):
                 user_input, command_because = split_because(user_input)
+            # Criteria & metric per command: note every KNOWN command word
+            # that runs; the next reply's credit block turns the set into
+            # each command's used-vs-unused outcome stream. Unknown words
+            # (typos) never mint a knob.
+            if user_input.startswith(":"):
+                _cw_m = re.match(r":([a-z0-9_]+)", user_input.lower())
+                if _cw_m and (
+                    f":{_cw_m.group(1)}" in KNOWN_COMMANDS
+                    or _cw_m.group(1) in macro_aliases
+                    or _cw_m.group(1) in exposed_commands
+                ):
+                    _cw, _, _ = ensure_command_knobs(tuner, _cw_m.group(1))
+                    commands_since_reply.add(_cw)
             target_agent = None
             if user_input.startswith("@"):
                 t_parts = user_input.split(maxsplit=1)
@@ -10807,6 +10866,17 @@ def main():
                 print(Fore.CYAN + f"         fixed args: {fixed_args or '(none; model supplies the full tail)'}" + Style.RESET_ALL)
                 print(Fore.CYAN + f"         activation: {command_exposure_activation(word, exposed_commands[word])}" + Style.RESET_ALL)
                 print(Fore.CYAN + f"         steer: {command_exposure_steer(exposed_commands[word])}" + Style.RESET_ALL)
+                _ekw, _, _ = ensure_command_knobs(tuner, word)
+                _ecrit_probe = next(
+                    (p for p in probes if activation and re.search(rf"(?<!\w){re.escape(p)}(?!\w)", activation, re.IGNORECASE)),
+                    None,
+                )
+                _ecrit_note = (
+                    f"observing probe '{_ecrit_probe}' each reply -- calibratable"
+                    if _ecrit_probe else "manual dial (name a probe in the because-clause to make it observable)"
+                )
+                print(Fore.CYAN + f"         knobs: cmd_{_ekw} (metric: used-vs-unused lift; ':figure lift:cmd_{_ekw}') "
+                      + f"and cmd_{_ekw}_criteria ({_ecrit_note})." + Style.RESET_ALL)
                 if not activation:
                     print(Fore.YELLOW + f"         Note: no activation criterion recorded. Re-run with 'because <activation>' so the tool has a real trigger." + Style.RESET_ALL)
                 if word in hidden_commands:
@@ -11609,7 +11679,11 @@ def main():
                     continue
                 # :steer pole <body> <family[+|-]> [off] -- type a body.
                 if sargs and sargs[0].lower() == "pole":
-                    pole_ns = STEER_POLE_SPEC.parse(" ".join(sargs[1:]))
+                    pole_ns = STEER_POLE_SPEC.parse(
+                        " ".join(sargs[1:]),
+                        probe_resolver=lambda tok: resolve_probe_choice(
+                            tok, probes, model=model, config=config, action_name="steer pole"),
+                    )
                     bodies = steer_bodies()
                     bname_raw = pole_ns.body.lstrip("@")
                     fam, sign = parse_pole_spec(pole_ns.pole)
@@ -11793,7 +11867,11 @@ def main():
                     continue
                 # :steer mass <probe> <m|auto> -- gravitational coefficient.
                 if sargs and sargs[0].lower() == "mass":
-                    mass_ns = STEER_MASS_SPEC.parse(" ".join(sargs[1:]))
+                    mass_ns = STEER_MASS_SPEC.parse(
+                        " ".join(sargs[1:]),
+                        probe_resolver=lambda tok: resolve_probe_choice(
+                            tok, probes, model=model, config=config, action_name="steer mass"),
+                    )
                     pname = mass_ns.probe
                     if pname not in probes:
                         print(Fore.YELLOW + f"[Steer] '{pname}' is not an active probe.{did_you_mean(pname, probes)}" + Style.RESET_ALL)
@@ -11813,7 +11891,11 @@ def main():
                 # :steer freeze <probe> [off] -- inertial coefficient: the mass
                 # keeps pulling but its own rolling baseline stops moving.
                 if sargs and sargs[0].lower() in ("freeze", "unfreeze"):
-                    freeze_ns = STEER_FREEZE_SPEC.parse(" ".join(sargs[1:]))
+                    freeze_ns = STEER_FREEZE_SPEC.parse(
+                        " ".join(sargs[1:]),
+                        probe_resolver=lambda tok: resolve_probe_choice(
+                            tok, probes, model=model, config=config, action_name="steer freeze"),
+                    )
                     pname = freeze_ns.body
                     thaw = sargs[0].lower() == "unfreeze" or bool(freeze_ns.flag)
                     aname = re.sub(r"[^a-z0-9_]", "_", pname.lstrip("@").lower()).strip("_")
@@ -15506,6 +15588,35 @@ def main():
             if turn_sense is not None:
                 tuner.credit("generation_seconds", gen_seconds, turn_sense)
                 tuner.credit("vram_gb", vram_reserved, turn_sense)
+            # Every command's METRIC knob: observed EVERY reply (signal 1.0
+            # when it ran since the last reply, 0.0 otherwise -- the
+            # distribution stays visible even on senseless turns), credited
+            # with this turn's sense when one exists. Lift then reads "are
+            # turns that use this command more productive?" -- drawable and
+            # steerable like any stream (lift:cmd_<word>).
+            for _kname in [k for k in tuner.triggers if k.startswith("cmd_") and not k.endswith("_criteria")]:
+                _ksig = 1.0 if _kname[4:] in commands_since_reply else 0.0
+                tuner.observe(_kname, _ksig)
+                if turn_sense is not None:
+                    tuner.credit(_kname, _ksig, turn_sense)
+            # Exposed tools' CRITERIA knobs observe the probe named in their
+            # activation clause, so the bar calibrates against a real
+            # distribution instead of an asserted number.
+            for _xw, _xcfg in list((exposed_commands or {}).items()):
+                _xact = str((_xcfg or {}).get("activation") or "")
+                if not _xact:
+                    continue
+                _xp = next(
+                    (p for p in probes if re.search(rf"(?<!\w){re.escape(p)}(?!\w)", _xact, re.IGNORECASE)),
+                    None,
+                )
+                if _xp is None:
+                    continue
+                _xptrig = tuner.triggers.get(f"probe_{_xp}")
+                if _xptrig is not None and _xptrig.signals:
+                    _, _, _xcrit = ensure_command_knobs(tuner, _xw)
+                    _xcrit.observe(float(_xptrig.signals[-1]))
+            commands_since_reply.clear()
             last_clock = {
                 "generation_seconds": gen_seconds,
                 "tokens_generated": int(_tg or 0),
