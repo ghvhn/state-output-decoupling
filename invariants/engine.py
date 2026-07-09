@@ -121,7 +121,9 @@ def _resolve_auto_mode() -> str:
     full   (>= 18 GB VRAM): fp16 fully on GPU.
     4bit   (10-18 GB VRAM): nf4 on GPU, much faster than CPU-offload.
     slow   (< 10 GB VRAM):  GPU/CPU split with disk offload.
-    cpu    (no CUDA):       float32 on CPU; only sane for small models.
+    cpu    (no CUDA):       fp32 when it fits beside the OS, bfloat16 when
+                            RAM is tight (paging costs more than bf16 math);
+                            cpu32/cpu16 force the dtype.
     """
     if not torch.cuda.is_available():
         print(
@@ -179,9 +181,86 @@ def _load_slow_model(source, common_kwargs):
     )
 
 
-def _load_cpu_model(source, common_kwargs):
+def _system_available_gib():
+    """System-wide available physical RAM in GiB (GlobalMemoryStatusEx);
+    0.0 when unavailable (non-Windows) -- callers treat 0 as 'unknown'."""
+    try:
+        class _MSX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_uint32), ("dwMemoryLoad", ctypes.c_uint32),
+                ("ullTotalPhys", ctypes.c_uint64), ("ullAvailPhys", ctypes.c_uint64),
+                ("ullTotalPageFile", ctypes.c_uint64), ("ullAvailPageFile", ctypes.c_uint64),
+                ("ullTotalVirtual", ctypes.c_uint64), ("ullAvailVirtual", ctypes.c_uint64),
+                ("ullAvailExtendedVirtual", ctypes.c_uint64),
+            ]
+        st = _MSX()
+        st.dwLength = ctypes.sizeof(_MSX)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+            return st.ullAvailPhys / 1024 ** 3
+    except Exception:
+        pass
+    return 0.0
+
+
+def _dir_weight_bytes(source):
+    """Total bytes of the model's weight shards on disk (safetensors, else
+    .bin). Shards are ~2 bytes/param, so this approximates the fp16 size."""
+    try:
+        p = Path(source)
+        if not p.is_dir():
+            return 0
+        st = sum(f.stat().st_size for f in p.glob("*.safetensors"))
+        return st or sum(f.stat().st_size for f in p.glob("*.bin"))
+    except Exception:
+        return 0
+
+
+def _cpu_dtype_for(weight_gib, avail_gib, force=None, headroom_gib=3.0):
+    """Pick the CPU dtype from the DEVICE's reality, not a constant.
+
+    fp32 doubles the on-disk (fp16-sized) weights; on a box where that
+    doesn't fit beside the OS, the model pages to disk and swap dominates
+    every forward -- bfloat16 halves the footprint and wins by not paging,
+    even though fp32 math is faster per-op. Unknown sizes keep fp32."""
+    if force is not None:
+        return force
+    if weight_gib <= 0 or avail_gib <= 0:
+        return torch.float32
+    if weight_gib * 2.0 + headroom_gib > avail_gib:
+        return torch.bfloat16
+    return torch.float32
+
+
+def _tune_cpu_threads():
+    """Pin torch to physical cores for CPU inference: SMT siblings contend
+    for the same vector units during GEMM, and one interop thread avoids
+    oversubscribing a busy laptop. TORCH_NUM_THREADS overrides."""
+    try:
+        logical = os.cpu_count() or 1
+        physical = max(1, logical // 2)
+        torch.set_num_threads(int(os.environ.get("TORCH_NUM_THREADS", physical)))
+        try:
+            torch.set_num_interop_threads(1)
+        except RuntimeError:
+            pass  # parallel work already started; keep the current setting
+        print(f"  CPU threads: {torch.get_num_threads()} compute / 1 interop.", flush=True)
+    except Exception:
+        pass
+
+
+def _load_cpu_model(source, common_kwargs, force_dtype=None):
+    _tune_cpu_threads()
     kwargs = dict(common_kwargs)
-    kwargs["dtype"] = torch.float32  # fp16 math is slow/unsupported on most CPUs
+    weight_gib = _dir_weight_bytes(source) / 1024 ** 3
+    avail_gib = _system_available_gib()
+    dtype = _cpu_dtype_for(weight_gib, avail_gib, force=force_dtype)
+    if dtype is torch.bfloat16 and force_dtype is None:
+        print(
+            f"  CPU load: tight RAM ({avail_gib:.1f}GiB free vs ~{weight_gib * 2:.1f}GiB fp32) "
+            f"-> bfloat16 (~{weight_gib:.1f}GiB resident). Force fp32 with load mode 'cpu32'.",
+            flush=True,
+        )
+    kwargs["dtype"] = dtype
     model = AutoModelForCausalLM.from_pretrained(source, **kwargs)
     return model.to("cpu")
 
@@ -250,8 +329,14 @@ def load_model(name: str = "meta-llama/Llama-3.1-8B-Instruct", local_files_only:
         )
     elif mode == "cpu":
         model = _load_cpu_model(source, common_kwargs)
+    elif mode in ("cpu32", "cpu-fp32"):
+        model = _load_cpu_model(source, common_kwargs, force_dtype=torch.float32)
+        mode = "cpu"
+    elif mode in ("cpu16", "cpu-bf16"):
+        model = _load_cpu_model(source, common_kwargs, force_dtype=torch.bfloat16)
+        mode = "cpu"
     else:
-        raise ValueError("Unknown load mode. Use auto, full, slow, 4bit, or cpu.")
+        raise ValueError("Unknown load mode. Use auto, full, slow, 4bit, cpu, cpu32, or cpu16.")
 
     model.eval()
     # The hub generation_config ships sampling params (temperature/top_p)

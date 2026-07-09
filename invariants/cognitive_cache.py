@@ -106,8 +106,15 @@ class CognitiveCache:
                 for item in raw:
                     entry = self._coerce_entry(item)
                     if entry is not None:
+                        # Vectors are HELD in float16: cosine retrieval is
+                        # insensitive to the halving, and on a RAM-tight
+                        # CPU-only box the cache would otherwise cost twice
+                        # the resident memory. The retrieval interface stays
+                        # float32/consumer-dtype (upcast on read).
+                        entry["trigger"] = entry["trigger"].half()
+                        entry["delta"] = entry["delta"].half()
                         self.memory.append(entry)
-                print(f"[Cognitive Cache] Loaded {len(self.memory)} episodic memories from {self.file.name}.")
+                print(f"[Cognitive Cache] Loaded {len(self.memory)} episodic memories from {self.file.name} (fp16-resident).")
             except Exception as e:
                 print(f"[Cognitive Cache] Error loading cache: {e}")
                 self.memory = []
@@ -159,8 +166,8 @@ class CognitiveCache:
             datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         )
         self.memory.append({
-            "trigger": trigger,
-            "delta": vec,
+            "trigger": trigger.half(),
+            "delta": vec.half(),
             "metadata": metadata,
         })
         if len(self.memory) > self.max_memories:
@@ -197,7 +204,18 @@ class CognitiveCache:
         best_meta = None
         
         for item in self.memory:
-            entry = self._coerce_entry(item)
+            # Fast path: everything load()/store() put in self.memory is
+            # already a coerced {trigger, delta, metadata} dict -- re-coercing
+            # here copied EVERY vector on EVERY retrieval (real cost on a
+            # CPU-only box). Foreign shapes still coerce.
+            if (
+                isinstance(item, dict)
+                and torch.is_tensor(item.get("trigger"))
+                and torch.is_tensor(item.get("delta"))
+            ):
+                entry = item
+            else:
+                entry = self._coerce_entry(item)
             if entry is None:
                 continue
             metadata = entry.get("metadata", {})
@@ -225,7 +243,7 @@ class CognitiveCache:
             vec = entry["delta"]
             if trigger.numel() != curr.numel() or vec.numel() != curr.numel():
                 continue
-            sim = F.cosine_similarity(curr.view(-1), trigger.view(-1), dim=0).item()
+            sim = F.cosine_similarity(curr.view(-1), trigger.view(-1).float(), dim=0).item()
             if sim > best_sim:
                 best_sim = sim
                 best_vec = vec
