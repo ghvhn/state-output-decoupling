@@ -9,6 +9,7 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:claimmap <first text> || <second text>`
 - `:consider <trigger_metric> <tool_name> <positive text> || <negative text>` -- mint a custom activation-triggered steering tool from a contrastive pair; set <tool_name>_alpha with :tune before it can steer
 - `:steermap`
+- `:slice [time A..B] [probe <name>] [scope <s>] [reason <r>] [layers <lo> <hi>] [steps A..B] [index A..B] [drop|export <path>]` -- slice what the cognitive cache carries by any axis it records; entries are timestamped at store (stored_at) or time-bounded via the synthesis- trace join; listing always shows first; drop excises the slice AFTER writing a backup and refuses to run without an axis; export saves the slice to a .pt without touching the cache; bare :slice = summary
 - `:steer` -- envelope + observed push distribution + data-implied cap/band
 - `:steer field|gravity init|on|off [default-G] | status` -- init loads/migrates every field surface and enables it without inventing laws or moving frozen bodies; prioritize becomes a FIELD, not a pin: every probe is a mass at its direction; each token is pulled along the sphere tangent by mass/((1-cos)+eps)^2, so the push depends on where the state IS. Masses default to signed evidence lift (negative = repulsor), normalized to |sum|=1; prioritize_alpha is the default G but personal/family G can replace it; every push stays inside the envelope cap
 - `:steer mass <probe> <m|auto>` -- gravitational coefficient override; negative repels; auto returns it to its live signed lift
@@ -129,6 +130,12 @@ described: violations print the usage line instead of executing.
   - e.g. `:probe explain neutral 2.5`
   - e.g. `:probe explain neutral choose`
   - e.g. `:probe explain self_model prompt`
+- `:slice [filters]` -- Slice what the cognitive cache carries, by any axis it records: time (stored_at when stamped, trace-join bounds otherwise), probe/expert, scope, reason, layers, steps, or raw index. Bare :slice summarizes the cache. The listing is always shown first; 'drop' excises the slice (backup written first, refuses to run without an axis), 'export' saves the slice to a .pt without touching the cache.
+  - `[filters]` (text, optional) -- axis pairs: time <from>..<to> | probe|expert <name> | scope <s> | reason <r> | layers <lo> <hi> | steps <a>..<b> | index <a>..<b>; range ends may be empty; final token may be an action: drop | export <path>
+  - e.g. `:slice time 2026-07-09T13:54..2026-07-09T14:02`
+  - e.g. `:slice probe reliability steps 40..`
+  - e.g. `:slice index 470..472 drop`
+  - e.g. `:slice scope interactive_phenomenality export invariants/out/shell_slice.pt`
 - `:steer field [init|on|off|status] [G]` -- The field master switch (alias :steer gravity). init loads/migrates every field surface without inventing laws or unfreezing bodies; on/off flips prioritize_gravity (while on, the field REPLACES pin/mix steering); status shows G, masses (normalized, signed), overrides, and quality members.
   - `[init|on|off|status]` (word, optional) -- what to do with the field
   - `[G]` (float, optional) -- default global G (prioritize_alpha) to set alongside init/on

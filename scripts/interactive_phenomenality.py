@@ -2629,6 +2629,195 @@ CALIBRATE_SPEC = register_spec(CommandSpec(
     examples=[":calibrate accuracy", ":calibrate fun self_intent", ":calibrate accuracy:timestamps on"],
 ))
 
+SLICE_SPEC = register_spec(CommandSpec(
+    ":slice",
+    "Slice what the cognitive cache carries, by any axis it records: time "
+    "(stored_at when stamped, trace-join bounds otherwise), probe/expert, "
+    "scope, reason, layers, steps, or raw index. Bare :slice summarizes the "
+    "cache. The listing is always shown first; 'drop' excises the slice "
+    "(backup written first, refuses to run without an axis), 'export' saves "
+    "the slice to a .pt without touching the cache.",
+    args=[
+        ArgSpec("filters", kind="text", required=False,
+                help="axis pairs: time <from>..<to> | probe|expert <name> | scope <s> | "
+                     "reason <r> | layers <lo> <hi> | steps <a>..<b> | index <a>..<b>; "
+                     "range ends may be empty; final token may be an action: drop | export <path>"),
+    ],
+    examples=[":slice time 2026-07-09T13:54..2026-07-09T14:02",
+              ":slice probe reliability steps 40..",
+              ":slice index 470..472 drop",
+              ":slice scope interactive_phenomenality export invariants/out/shell_slice.pt"],
+))
+
+
+def _slice_range(val, caster, what, fail):
+    if ".." not in val:
+        fail(f"{what} must be <from>..<to> (either side may be empty), got '{val}'")
+    a, b = val.split("..", 1)
+    try:
+        return (caster(a) if a else None, caster(b) if b else None)
+    except ValueError:
+        fail(f"{what} bounds must be {caster.__name__} values, got '{val}'")
+
+
+def parse_slice_filters(tokens, fail):
+    """Parse the ':slice' axis mini-grammar into (filters, (action, arg)).
+    Total: unknown axes and malformed ranges go through fail() -> usage."""
+    filters = {}
+    action, action_arg = "list", None
+    i = 0
+    while i < len(tokens):
+        key = tokens[i].lower()
+
+        def val(what):
+            if i + 1 >= len(tokens):
+                fail(f"'{key}' needs {what}")
+            return tokens[i + 1]
+
+        if key in ("probe", "expert"):
+            filters["expert"] = val("a name"); i += 2
+        elif key == "scope":
+            filters["scope"] = val("a scope"); i += 2
+        elif key == "reason":
+            filters["reason"] = val("a reason"); i += 2
+        elif key == "time":
+            filters["time"] = _slice_range(val("<from>..<to>"), str, "time", fail); i += 2
+        elif key == "steps":
+            filters["steps"] = _slice_range(val("<a>..<b>"), int, "steps", fail); i += 2
+        elif key == "index":
+            filters["index"] = _slice_range(val("<a>..<b>"), int, "index", fail); i += 2
+        elif key == "layers":
+            if i + 2 >= len(tokens):
+                fail("'layers' needs <lo> <hi>")
+            try:
+                lo, hi = int(tokens[i + 1]), int(tokens[i + 2])
+            except ValueError:
+                fail("'layers' bounds must be integers")
+            filters["layers"] = (min(lo, hi), max(lo, hi)); i += 3
+        elif key == "drop":
+            action = "drop"; i += 1
+        elif key == "export":
+            action_arg = val("a path"); action = "export"; i += 2
+        else:
+            fail(
+                f"unknown slice axis '{tokens[i]}' (axes: time, probe/expert, scope, "
+                "reason, layers, steps, index; actions: drop, export <path>)"
+            )
+    return filters, (action, action_arg)
+
+
+def cache_entry_times(cache_memory, memory):
+    """Per-entry (exact_ts, lo_bound, hi_bound), 19-char ISO or None.
+
+    stored_at wins (entries stamped at store time); unstamped entries are
+    LCS-aligned to the session's timestamped synthesis traces -- the same
+    order-preserving fingerprint join as scripts/cache_trace_join.py -- and
+    entries with no aligned trace (pings, spawn/solve generations) inherit
+    their nearest aligned neighbors as bounds."""
+    trace_re = re.compile(r"expert=(\S+?);\s*layers=(\d+)\D+?(\d+);\s*steps=(\d+)")
+    traces = []
+    for r in getattr(memory, "records", []) or []:
+        if getattr(r, "kind", None) != "internal_trace":
+            continue
+        if "synthesis_trace" not in (getattr(r, "tags", None) or []):
+            continue
+        m = trace_re.search(getattr(r, "text", "") or "")
+        if m:
+            traces.append((
+                (getattr(r, "timestamp", "") or "")[:19],
+                (m.group(1), int(m.group(2)), int(m.group(3)), int(m.group(4))),
+            ))
+    fps, exact = [], []
+    for e in cache_memory:
+        md = e.get("metadata") or {}
+        fps.append((md.get("expert"), md.get("start_layer"), md.get("end_layer"), md.get("steps")))
+        sa = (md.get("stored_at") or "")[:19]
+        exact.append(sa or None)
+    n, m_ = len(fps), len(traces)
+    if n and m_:
+        dp = [[0] * (m_ + 1) for _ in range(n + 1)]
+        for i in range(n - 1, -1, -1):
+            row, below = dp[i], dp[i + 1]
+            for j in range(m_ - 1, -1, -1):
+                row[j] = below[j + 1] + 1 if fps[i] == traces[j][1] else max(below[j], row[j + 1])
+        i = j = 0
+        while i < n and j < m_:
+            if fps[i] == traces[j][1]:
+                if exact[i] is None:
+                    exact[i] = traces[j][0]
+                i += 1; j += 1
+            elif dp[i + 1][j] >= dp[i][j + 1]:
+                i += 1
+            else:
+                j += 1
+    after = [None] * n
+    last = None
+    for i in range(n):
+        if exact[i] is None:
+            after[i] = last
+        else:
+            last = exact[i]
+    out = [None] * n
+    nxt = None
+    for i in range(n - 1, -1, -1):
+        if exact[i] is not None:
+            out[i] = (exact[i], exact[i], exact[i])
+            nxt = exact[i]
+        else:
+            out[i] = (None, after[i], nxt)
+    return out
+
+
+def slice_cache_indices(cache_memory, filters, times):
+    """Indices of cache entries matching EVERY given axis. Total function.
+    Time bounds compare as ISO prefixes, so a bare date matches its whole day;
+    an unstamped entry matches when its bound window intersects the filter."""
+    def ts_ge(ts, lo):
+        return ts >= lo or ts.startswith(lo)
+
+    def ts_le(ts, hi):
+        return ts <= hi or ts.startswith(hi)
+
+    out = []
+    for i, e in enumerate(cache_memory):
+        md = e.get("metadata") or {}
+        if "expert" in filters:
+            ne = str(md.get("expert") or "").lower()
+            ne = ne[6:] if ne.startswith("probe_") else ne
+            nw = filters["expert"].lower()
+            nw = nw[6:] if nw.startswith("probe_") else nw
+            if not (ne == nw or ne.startswith(nw)):
+                continue
+        if "scope" in filters and str(md.get("cache_write_scope") or "") != filters["scope"]:
+            continue
+        if "reason" in filters and str(md.get("reason") or "").lower() != filters["reason"].lower():
+            continue
+        if "layers" in filters:
+            lo, hi = filters["layers"]
+            s, e2 = md.get("start_layer"), md.get("end_layer")
+            if s is None or e2 is None or e2 < lo or s > hi:
+                continue
+        if "steps" in filters:
+            lo, hi = filters["steps"]
+            st = md.get("steps")
+            if st is None or (lo is not None and st < lo) or (hi is not None and st > hi):
+                continue
+        if "index" in filters:
+            lo, hi = filters["index"]
+            if (lo is not None and i < lo) or (hi is not None and i > hi):
+                continue
+        if "time" in filters:
+            flo, fhi = filters["time"]
+            ex, tlo, thi = times[i]
+            earliest = ex or tlo
+            latest = ex or thi
+            if fhi is not None and earliest is not None and not ts_le(earliest, fhi):
+                continue
+            if flo is not None and latest is not None and not ts_ge(latest, flo):
+                continue
+        out.append(i)
+    return out
+
 
 def parse_count(text, default):
     parts = text.split()
@@ -3295,6 +3484,8 @@ def macro_line_affects_probes_or_tuning(line):
         return len(toks) >= 2  # bare :queue lists; queue calibrate/clear/drop mutate
     if low.startswith(":suggest"):
         return len(toks) >= 2 and toks[1].lower() == "apply"  # :suggest apply auto-queues
+    if low.startswith(":slice"):
+        return "drop" in (t.lower() for t in toks[1:])  # listing/export read-only; drop excises cache
     return False
 
 
@@ -5289,7 +5480,7 @@ def _run_shell_benchmark(model, config, tuner, probes, prioritize_pin, req, agen
 
 
 KNOWN_COMMANDS = (
-    ":context", ":memory", ":methodmap", ":claimmap", ":steermap", ":steer",
+    ":context", ":memory", ":methodmap", ":claimmap", ":steermap", ":steer", ":slice",
     ":figure", ":figures", ":benchmark",
     ":probe", ":label", ":calibrate", ":suggest", ":tune", ":doc", ":sandbox",
     ":experts", ":impact", ":clock", ":prioritize", ":release", ":listen",
@@ -5322,6 +5513,12 @@ COMMAND_HELP_LINES = [
     "                (mint a custom activation-triggered steering tool from a contrastive pair;",
     "                set <tool_name>_alpha with :tune before it can steer)",
     "          :steermap",
+    "          :slice [time A..B] [probe <name>] [scope <s>] [reason <r>] [layers <lo> <hi>] [steps A..B] [index A..B] [drop|export <path>]",
+    "                (slice what the cognitive cache carries by any axis it records; entries",
+    "                are timestamped at store (stored_at) or time-bounded via the synthesis-",
+    "                trace join; listing always shows first; drop excises the slice AFTER",
+    "                writing a backup and refuses to run without an axis; export saves the",
+    "                slice to a .pt without touching the cache; bare :slice = summary)",
     "          :steer  (envelope + observed push distribution + data-implied cap/band)",
     "          :steer field|gravity init|on|off [default-G] | status  (init loads/migrates every",
     "                field surface and enables it without inventing laws or moving frozen bodies;",
@@ -10072,6 +10269,83 @@ def main():
                     + "decoupled from the signal -- so its causal lift can be measured, not assumed. :release {tname} off to re-couple.".replace("{tname}", tname)
                     + Style.RESET_ALL
                 )
+                continue
+            if user_input == ":slice" or user_input.startswith(":slice "):
+                slice_ns = SLICE_SPEC.parse(user_input[len(":slice"):])
+                from invariants.agentic_engine import _global_cache as _slice_cache
+                slice_tokens = (slice_ns.filters or "").split()
+                slice_filters, (s_action, s_arg) = parse_slice_filters(slice_tokens, SLICE_SPEC.fail)
+                slice_times = cache_entry_times(_slice_cache.memory, memory)
+                if not slice_tokens:
+                    stamped = sum(1 for t in slice_times if t[0])
+                    from collections import Counter as _SliceCtr
+                    exp_counts = _SliceCtr(
+                        str((e.get("metadata") or {}).get("expert")) for e in _slice_cache.memory
+                    )
+                    print(Fore.CYAN + f"[Slice] cache carries {len(_slice_cache.memory)} entries "
+                          + f"({stamped} time-resolvable: stored_at or trace-aligned)." + Style.RESET_ALL)
+                    print(Fore.CYAN + "[Slice] top experts: "
+                          + ", ".join(f"{k} x{v}" for k, v in exp_counts.most_common(6)) + Style.RESET_ALL)
+                    print(Fore.CYAN + "[Slice] axes: time A..B | probe <name> | scope <s> | reason <r> | "
+                          + "layers <lo> <hi> | steps A..B | index A..B; actions: drop | export <path>" + Style.RESET_ALL)
+                    continue
+                slice_idxs = slice_cache_indices(_slice_cache.memory, slice_filters, slice_times)
+                print(Fore.CYAN + f"[Slice] {len(slice_idxs)} of {len(_slice_cache.memory)} entries match." + Style.RESET_ALL)
+                for i in slice_idxs[:20]:
+                    md = _slice_cache.memory[i].get("metadata") or {}
+                    ex, tlo, thi = slice_times[i]
+                    when = ex or f"({tlo or '?'} .. {thi or '?'})"
+                    print(Fore.CYAN
+                          + f"  [{i}] {when}  expert={md.get('expert')} layers={md.get('start_layer')}"
+                          + f"-{md.get('end_layer')} steps={md.get('steps')} scope={md.get('cache_write_scope')}"
+                          + Style.RESET_ALL)
+                if len(slice_idxs) > 20:
+                    print(Fore.CYAN + f"  ... +{len(slice_idxs) - 20} more (narrow the axes, or export)." + Style.RESET_ALL)
+                if s_action == "export":
+                    if not slice_idxs:
+                        print(Fore.YELLOW + "[Slice] nothing matched; nothing exported." + Style.RESET_ALL)
+                        continue
+                    try:
+                        torch.save([_slice_cache.memory[i] for i in slice_idxs], s_arg)
+                    except Exception as _sexc:
+                        print(Fore.YELLOW + f"[Slice] export failed: {_sexc}" + Style.RESET_ALL)
+                        continue
+                    memory.append_event(
+                        "cache_slice_exported",
+                        text=f"{len(slice_idxs)} entries -> {s_arg}",
+                        tags=["cache", "slice"],
+                        provenance={"filters": {k: list(v) if isinstance(v, tuple) else v for k, v in slice_filters.items()},
+                                    "count": len(slice_idxs), "path": str(s_arg)},
+                    )
+                    print(Fore.GREEN + f"[Slice] exported {len(slice_idxs)} entrie(s) to {s_arg}." + Style.RESET_ALL)
+                    continue
+                if s_action == "drop":
+                    if not slice_filters:
+                        SLICE_SPEC.fail("refusing to drop with no axis -- that would empty the whole cache")
+                    if not slice_idxs:
+                        print(Fore.YELLOW + "[Slice] nothing matched; nothing dropped." + Style.RESET_ALL)
+                        continue
+                    import shutil as _slice_shutil
+                    import time as _slice_time
+                    backup = str(_slice_cache.file) + f".bak-{_slice_time.strftime('%Y%m%d_%H%M%S')}"
+                    try:
+                        _slice_shutil.copy2(_slice_cache.file, backup)
+                        print(Fore.CYAN + f"[Slice] backup written: {backup}" + Style.RESET_ALL)
+                    except Exception as _bexc:
+                        print(Fore.YELLOW + f"[Slice] backup failed ({_bexc}); a drop would be unrecoverable -- aborting." + Style.RESET_ALL)
+                        continue
+                    for i in sorted(slice_idxs, reverse=True):
+                        del _slice_cache.memory[i]
+                    _slice_cache.save()
+                    memory.append_event(
+                        "cache_sliced",
+                        text=f"dropped {len(slice_idxs)} entries",
+                        tags=["cache", "slice"],
+                        provenance={"filters": {k: list(v) if isinstance(v, tuple) else v for k, v in slice_filters.items()},
+                                    "indices": slice_idxs[:50], "backup": backup},
+                    )
+                    print(Fore.GREEN + f"[Slice] dropped {len(slice_idxs)} entrie(s); cache now holds "
+                          + f"{len(_slice_cache.memory)}. Backup: {backup}" + Style.RESET_ALL)
                 continue
             if user_input.startswith(":experts"):
                 earg = user_input[len(":experts"):].strip().lower()

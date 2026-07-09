@@ -51,6 +51,16 @@ its own first-person voice.
   matches.
 - **`:steermap`** — steer-map store summary: top action/layer/step groups
   with acceptance-aware success rates.
+- **`:slice [axes...] [drop|export <path>]`** — slice what the cognitive
+  cache carries by any axis it records: `time A..B` (entries are stamped at
+  store; older ones get bounds from the order-preserving synthesis-trace
+  join), `probe <name>`, `scope <s>`, `reason <r>`, `layers <lo> <hi>`,
+  `steps A..B`, `index A..B`. The matching slice always lists first; `drop`
+  excises it only after writing a backup (and refuses with no axis — no
+  accidental full wipe); `export <path>` saves the slice to a `.pt` without
+  touching the cache. Bare `:slice` summarizes. This is the surgical tool
+  for cache hygiene — e.g. removing diagnostic-ping noise identified by
+  time window: `:slice time 2026-07-09T13:54..2026-07-09T13:56 drop`.
 
 ## Steering readout & calibration
 
