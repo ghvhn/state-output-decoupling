@@ -18,14 +18,17 @@ from scripts.interactive_phenomenality import (
     backfill_scoring_names,
     build_prompt,
     confident_probe_match,
+    EXPOSE_TARGET_SPEC,
     expect_generation_profile,
     expected_macro_parts,
     extract_memory_query,
     macro_arg_header_items,
     queue_macro_text,
+    resolve_expose_choice_target,
     restore_config_overrides,
     scrub_unstaged_memory_status,
     suggest_command_catalog,
+    validate_command_autocomplete,
 )
 
 
@@ -392,6 +395,27 @@ def test_expected_macro_parts_preserves_args_comment_without_running_comments():
     assert "# comment only; never executed" in comments
 
 
+def test_expose_choose_resolves_through_command_spec_class():
+    ns = EXPOSE_TARGET_SPEC.parse(
+        "choose steer 0.1",
+        choice_resolver=lambda raw: ":suggest",
+    )
+    assert ns.target == ":suggest"
+    assert ns.tail == "steer 0.1"
+    assert resolve_expose_choice_target("suggest", ["suggest"], model=None, config=None) == ":suggest"
+
+
+def test_validate_autocomplete_accepts_expose_choose():
+    completion, error = validate_command_autocomplete(
+        ":expose choose",
+        known_commands={"suggest", "probe", "steer"},
+        probe_names=set(),
+        knob_names=set(),
+    )
+    assert completion == ":expose choose"
+    assert error is None
+
+
 TESTS = [
     test_memory_engine_is_tool_not_prompt_builder,
     test_turns_are_logged_with_provenance_and_reloaded,
@@ -412,6 +436,8 @@ TESTS = [
     test_macro_queue_treats_hash_lines_as_comments,
     test_expect_macro_uses_low_memory_utility_profile_and_restores_config,
     test_expected_macro_parts_preserves_args_comment_without_running_comments,
+    test_expose_choose_resolves_through_command_spec_class,
+    test_validate_autocomplete_accepts_expose_choose,
 ]
 
 

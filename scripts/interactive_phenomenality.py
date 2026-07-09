@@ -2246,13 +2246,15 @@ class ArgSpec:
                through the probe_resolver passed to parse() (the model or
                the evidence picks), other tokens pass through untouched for
                the handler's own resolution
+      choice -- one token where 'choose'/'choice'/'auto' resolve through the
+                generic choice_resolver; other tokens pass through untouched
       int   -- one token, integer; lo/hi clamp after parsing
       float -- one token, float; lo/hi clamp after parsing
       text  -- the rest of the line, raw spacing preserved (must be last)
     variadic=True (last positional only) consumes every remaining token.
     """
 
-    KINDS = ("word", "name", "probe", "int", "float", "text")
+    KINDS = ("word", "name", "probe", "choice", "int", "float", "text")
 
     def __init__(self, name, kind="word", required=True, default=None,
                  display=None, lo=None, hi=None, variadic=False, choices=None, help=""):
@@ -2273,16 +2275,17 @@ class ArgSpec:
         inner = self.display + (" ..." if self.variadic else "")
         return f"<{inner}>" if self.required else f"[{inner}]"
 
-    def coerce(self, tok, fail, probe_resolver=None):
+    def coerce(self, tok, fail, probe_resolver=None, choice_resolver=None):
         if self.kind == "name":
             return re.sub(r"[^a-z0-9_]", "_", tok.lower())[:40]
-        if self.kind == "probe":
+        if self.kind in ("probe", "choice"):
             if tok.lower() in ("choose", "choice", "auto"):
-                if probe_resolver is None:
+                resolver = probe_resolver if self.kind == "probe" else choice_resolver
+                if resolver is None:
                     fail(f"{self.name} does not accept '{tok}' here")
-                resolved = probe_resolver(tok)
+                resolved = resolver(tok)
                 if not resolved:
-                    fail(f"no probe chosen for {self.name}")
+                    fail(f"no {'probe chosen' if self.kind == 'probe' else 'choice resolved'} for {self.name}")
                 return resolved
             return tok
         if self.kind in ("int", "float"):
@@ -2396,10 +2399,11 @@ class CommandSpec:
         prints it) -- for handler-level violations the grammar can't express."""
         raise CommandUsageError(message, usage=self.usage())
 
-    def parse(self, raw, probe_resolver=None):
+    def parse(self, raw, probe_resolver=None, choice_resolver=None):
         """Parse the text after the command path; infallible by contract.
         probe_resolver resolves 'choose'/'auto' tokens of kind=probe args
-        (the shell passes resolve_probe_choice bound to the live probes)."""
+        (the shell passes resolve_probe_choice bound to the live probes).
+        choice_resolver does the same for generic choice args."""
         raw = (raw or "").strip()
         values = {}
         for opt in self.opts:
@@ -2417,7 +2421,10 @@ class CommandSpec:
                 toks = args.tokens[i:]
                 if not toks and spec.required:
                     self.fail(f"missing {spec.name}")
-                values[spec.name] = [spec.coerce(t, self.fail, probe_resolver) for t in toks] if toks else list(spec.default or [])
+                values[spec.name] = [
+                    spec.coerce(t, self.fail, probe_resolver, choice_resolver)
+                    for t in toks
+                ] if toks else list(spec.default or [])
                 i = len(args.tokens)
             else:
                 tok = args.get(i)
@@ -2426,7 +2433,7 @@ class CommandSpec:
                         self.fail(f"missing {spec.name}")
                     values[spec.name] = spec.default
                 else:
-                    values[spec.name] = spec.coerce(tok, self.fail, probe_resolver)
+                    values[spec.name] = spec.coerce(tok, self.fail, probe_resolver, choice_resolver)
                     i += 1
         if i < len(args.tokens):
             self.fail(f"unexpected argument(s): {' '.join(args.tokens[i:])}")
@@ -2715,6 +2722,18 @@ CALIBRATE_SPEC = register_spec(CommandSpec(
     ],
     examples=[":calibrate accuracy", ":calibrate fun self_intent", ":calibrate accuracy:timestamps on"],
 ))
+
+EXPOSE_TARGET_SPEC = CommandSpec(
+    ":expose",
+    "Resolve the first expose target. choose/auto selects an exposable command; "
+    "bare probes/knobs/memory stay bare.",
+    args=[
+        ArgSpec("target", kind="choice", display=":command|choose|probe|knob|memory",
+                help="target to expose; choose/auto resolves to a command target"),
+        ArgSpec("tail", kind="text", required=False,
+                help="remaining mode/fixed-arg/steer text after the target"),
+    ],
+)
 
 SLICE_SPEC = register_spec(CommandSpec(
     ":slice",
@@ -4041,7 +4060,11 @@ def parse_expose_prefix(eargs):
             mode_prefix is None
             and (low in EXPOSE_STAGE_WORDS or low in EXPOSE_DIRECT_WORDS)
             and len(toks) > 1
-            and (toks[1].startswith(":") or toks[1].startswith("@"))
+            and (
+                toks[1].startswith(":")
+                or toks[1].startswith("@")
+                or toks[1].lower() in ("choose", "choice", "auto")
+            )
         ):
             mode_prefix = "direct" if low in EXPOSE_DIRECT_WORDS else "stage"
             toks = toks[1:]
@@ -4083,6 +4106,8 @@ def validate_command_autocomplete(
                 return None, f"{target!r} is not an exposable command"
         else:
             sensor = re.sub(r"[^a-z0-9_]", "_", target.lower())[:40].strip("_")
+            if sensor in {"choose", "choice", "auto"}:
+                return candidate, None
             readable = {str(name).lower() for name in probe_names}
             readable.update(str(name).lower() for name in knob_names)
             readable.add("memory")
@@ -4673,6 +4698,15 @@ def resolve_probe_choice(pname_raw, options, model=None, config=None, action_nam
         return None
 
     return pname_raw.replace("probe_", "") if pname_raw.startswith("probe_") else pname_raw
+
+
+def resolve_expose_choice_target(raw, command_options, model=None, config=None, action_name=":expose command"):
+    """Resolve ':expose choose' into an actual command target like ':suggest'."""
+    picked = resolve_probe_choice(raw, command_options, model=model, config=config, action_name=action_name)
+    if not picked:
+        return None
+    word = str(picked).lstrip(":").lower()
+    return f":{word}" if word else None
 
 
 # --- :figures -- draw the state-output figures ------------------------------
@@ -5833,13 +5867,14 @@ COMMAND_HELP_LINES = [
     "          :game no | decline           (decline the game the model just proposed)",
     "          :accept [n|all] | :reject [n|all]  (a game may STAGE a command instead of",
     "                running it; nothing a game chose runs until you accept it here)",
-    "          :expose [@agent] [stage|direct] :<command> [fixed args...] [steer <magnitude>] [because <activation>] | :expose off [@agent] <target>",
+    "          :expose [@agent] [stage|direct] :<command>|choose [fixed args...] [steer <magnitude>] [because <activation>] | :expose off [@agent] <target>",
     "                (runtime tool access:",
     "                make/remove a command callable by the model as <<TOOL: :command args>>;",
     "                bare/default = staged for :accept, direct = queued immediately;",
     "                mode goes BEFORE the command so fixed args are never read as keywords",
     "                (the legacy ':expose :cmd direct args' order is still accepted);",
     "                fixed args are prefilled; model only supplies the remaining tail;",
+    "                choose/auto picks an exposable command; off choose picks among exposed command tools;",
     "                because records when the tool should activate; steer records its strength/effect; off works",
     "                for commands, probes, and knobs with the same order. Every exposure",
     "                registers its knob pair: cmd_<word> (metric: used-vs-unused outcome lift,",
@@ -9380,16 +9415,8 @@ def main():
                     because_ctx = f"The operator provided the following underlying reason/rationale for this macro:\n{command_because}\nMake sure your generated macro commands strongly reflect this rationale.\n\n"
                     print(Fore.CYAN + "[Solve] Passing your 'because' rationale to the model." + Style.RESET_ALL)
                 default_solve_prompt = (
-                    "# SOLVE_MACRO_V2_UTILITY_SAFE\n"
+                    "# SOLVE_MACRO_V3_NO_PROBE_MUTATION\n"
                     ":expect macro $sname\n"
-                    ":probe macro_author I am writing a precise list of colon-prefixed shell commands || I am generating conversational text\n"
-                    ":probe release macro_author off\n"
-                    ":probe backfill macro_author\n"
-                    ":steer macro_author 1.5\n"
-                    ":probe solve_goal I am fulfilling the user's specific request: $goal || I am doing something else\n"
-                    ":probe release solve_goal off\n"
-                    ":probe backfill solve_goal\n"
-                    ":steer solve_goal 1.5\n"
                     "You write macros for an interactive cognition shell. A macro is a list of ':' "
                     "commands, one per line.$prompt_args_str\n\n"
                     "${command_hints_str}\n"
@@ -9402,18 +9429,13 @@ def main():
                     "${because_ctx}"
                     "Write a macro named '${sname}' that does: ${goal}\n"
                     "Output ONLY the commands, one per line. Do not use markdown blocks or conversational text. "
-                    "Do not wrap arguments in quotes unless they contain spaces. Do not leave trailing colons or unfinished commands at the end.\n"
-                    ":steer macro_author 0\n"
-                    ":probe release macro_author\n"
-                    ":steer solve_goal 0\n"
-                    ":probe release solve_goal"
+                    "Do not wrap arguments in quotes unless they contain spaces. Do not leave trailing colons or unfinished commands at the end."
                 )
                 prompt = load_prompt(
                     "solve", 
                     default_solve_prompt, 
                     required_substring=(
-                        "# SOLVE_MACRO_V2_UTILITY_SAFE",
-                        ":probe release solve_goal",
+                        "# SOLVE_MACRO_V3_NO_PROBE_MUTATION",
                         "If this macro requires parameters to be flexible",
                     ),
                     prompt_args_str=prompt_args_str,
@@ -10874,7 +10896,26 @@ def main():
                     print(Fore.YELLOW + "[Expose] Usage: :expose [@agent] [stage|direct] :command [fixed args...] [steer <magnitude>] because <activation>, or :expose off @agent :command." + Style.RESET_ALL)
                     continue
                 target_agent = normalize_command_target(raw_agent) if raw_agent else ""
-                target = toks[0]
+                def _resolve_expose_choice(raw_choice):
+                    if turn_off_prefix:
+                        command_options = sorted(exposed_commands)
+                        action = ":expose off command"
+                    else:
+                        command_options = sorted(_all_shell_commands() - {"expose"})
+                        action = ":expose command"
+                    return resolve_expose_choice_target(
+                        raw_choice,
+                        command_options,
+                        model=model,
+                        config=config,
+                        action_name=action,
+                    )
+                expose_target_ns = EXPOSE_TARGET_SPEC.parse(
+                    " ".join(toks),
+                    choice_resolver=_resolve_expose_choice,
+                )
+                target = expose_target_ns.target
+                toks = [target] + (expose_target_ns.tail.split() if expose_target_ns.tail else [])
                 eargs = [target] + (["off"] if turn_off_prefix else []) + toks[1:]
                 mode_arg = eargs[1].lower() if len(eargs) > 1 else ""
                 if not target.startswith(":"):
