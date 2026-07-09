@@ -1,5 +1,6 @@
 import torch
 from pathlib import Path
+import datetime
 import io
 import os
 import re
@@ -148,10 +149,19 @@ class CognitiveCache:
             print("    [Cognitive Cache] Skipping store: trigger/vector shape mismatch.")
             return
 
+        metadata = dict(metadata or {})
+        # Every entry is timestamped at the single choke point, so cache rows
+        # can always be joined against the timestamped session/trace logs.
+        # (Entries before 2026-07-09 predate this and need the order-preserving
+        # join in scripts/cache_trace_join.py instead.)
+        metadata.setdefault(
+            "stored_at",
+            datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        )
         self.memory.append({
             "trigger": trigger,
             "delta": vec,
-            "metadata": metadata or {},
+            "metadata": metadata,
         })
         if len(self.memory) > self.max_memories:
             self.memory = self.memory[-self.max_memories:]
