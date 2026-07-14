@@ -183,6 +183,42 @@ def test_personal_g_and_time_change_effect_without_global_g():
     assert strong.norm() > weak.norm()
 
 
+def test_knob_node_can_govern_claimmap_alpha_with_real_time_source():
+    with tempfile.TemporaryDirectory() as tmp:
+        tuner = fresh_tuner(tmp)
+        tuner.register("claimmap_alpha", 0.02, kind="coefficient")
+        old = shell._STEER_BODIES
+        old_clock = dict(shell._LAST_CLOCK)
+        shell._STEER_BODIES = {
+            "loaded": True, "anchors": {}, "probe_poles": {}, "laws": {},
+            "fields": {
+                "knob:claimmap_alpha": {
+                    "g": shell.parse_field_source("knob:gain", 0.01, 0.0),
+                    "time": shell.parse_field_source("status:tokens_per_sec", 0.1, 1.0),
+                }
+            },
+            "g_families": {}, "qualities": {}, "sets": {},
+        }
+        shell._LAST_CLOCK["tokens_per_sec"] = 10.0
+        try:
+            assert shell.canonical_field_node(
+                "claimmap_alpha", tuner=tuner
+            ) == "knob:claimmap_alpha"
+            node, cfg = shell.field_target_config(
+                "knob:claimmap_alpha", create=True, tuner=tuner
+            )
+            assert node == "knob:claimmap_alpha"
+            assert cfg is shell._STEER_BODIES["fields"]["knob:claimmap_alpha"]
+            # G = gain*0.01 = 0.02; time = tokens_per_sec*0.1+1 = 2.
+            assert abs(shell.field_governed_knob_value(
+                "claimmap_alpha", tuner, {}
+            ) - 0.04) < 1e-9
+        finally:
+            shell._STEER_BODIES = old
+            shell._LAST_CLOCK.clear()
+            shell._LAST_CLOCK.update(old_clock)
+
+
 def test_explicit_personal_g_activates_before_lift_exists():
     with tempfile.TemporaryDirectory() as tmp:
         tuner = fresh_tuner(tmp)
@@ -502,6 +538,7 @@ TESTS = [
     test_quality_set_compliance_time_and_exact_exclusion,
     test_quality_time_vector_drives_without_g,
     test_personal_g_and_time_change_effect_without_global_g,
+    test_knob_node_can_govern_claimmap_alpha_with_real_time_source,
     test_explicit_personal_g_activates_before_lift_exists,
     test_field_hook_runs_with_personal_g_and_global_zero,
     test_quality_hook_runs_with_every_g_zero,

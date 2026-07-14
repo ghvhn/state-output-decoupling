@@ -4,23 +4,23 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 
 - `:help [model]` -- this list + your solve-macros; ':help model' shows what the MODEL can run on its own; ':help expose [off]' lets it call <<HELP>>
 - `:context, :context on, :context off, :context clear`
-- `:memory, :memory act|talk on|off|status|use [sentence [+probe -probe]]` -- :memory use/search [optional args] uses enabled lanes; empty reflects via :prioritize/farthest-from-0; :expose off memory hides model access; model-made definitions persist with linked accept/reject/label/place feedback
+- `:memory, :memory all|act|talk on|off|status, :memory act|talk use [sentence [+probe -probe]]` -- :memory use/search [optional args] uses enabled lanes; empty reflects via :prioritize/farthest-from-0; :expose off memory hides model access; model-made definitions persist with linked accept/reject/label/place feedback
 - `:methodmap <query>`
 - `:claimmap <first text> || <second text>`
 - `:consider <trigger_metric> <tool_name> <positive text> || <negative text>` -- mint a custom activation-triggered steering tool from a contrastive pair; set <tool_name>_alpha with :tune before it can steer
 - `:steermap`
 - `:slice [time A..B] [probe <name>] [scope <s>] [reason <r>] [layers <lo> <hi>] [steps A..B] [index A..B] [drop|export <path>]` -- slice what the cognitive cache carries by any axis it records; entries are timestamped at store (stored_at) or time-bounded via the synthesis- trace join; listing always shows first; drop excises the slice AFTER writing a backup and refuses to run without an axis; export saves the slice to a .pt without touching the cache; bare :slice = summary
 - `:steer` -- envelope + observed push distribution + data-implied cap/band
-- `:steer field|gravity init|on|off [default-G] | status` -- init loads/migrates every field surface and enables it without inventing laws or moving frozen bodies; prioritize becomes a FIELD, not a pin: every probe is a mass at its direction; each token is pulled along the sphere tangent by mass/((1-cos)+eps)^2, so the push depends on where the state IS. Masses default to signed evidence lift (negative = repulsor), normalized to |sum|=1; prioritize_alpha is the default G but personal/family G can replace it; every push stays inside the envelope cap
+- `:steer field|gravity on|off [default-G] | status | <G>` -- on loads/migrates every field surface and enables it without inventing laws or moving frozen bodies; a bare number is shorthand for 'on <G>', e.g. ':steer field 0.1'; prioritize becomes a FIELD, not a pin: every probe is a mass at its direction; each token is pulled along the sphere tangent by mass/((1-cos)+eps)^2, so the push depends on where the state IS. Masses default to signed evidence lift (negative = repulsor), normalized to |sum|=1; prioritize_alpha is the default G but personal/family G can replace it; every push stays inside the envelope cap
 - `:steer mass <probe> <m|auto>` -- gravitational coefficient override; negative repels; auto returns it to its live signed lift
-- `:steer g <probe|@anchor|layer:N|family:name> <source|off> [scale [offset]]` -- personal G; source = number, probe:name, knob:name, status:ram, lift:trigger, outcome:trigger (the credit channel as force -- outcomes steer), family:name, or global; layer G gates/multiplies personal G when both are set
+- `:steer g <probe|knob:name|@anchor|layer:N|family:name> <source|off> [scale [offset]]` -- personal G; source = number, probe:name, knob:name, status:ram, lift:trigger, outcome:trigger (the credit channel as force -- outcomes steer), family:name, or global; layer G gates/multiplies personal G when both are set
 - `:steer family <name> <G-source|add <node>|remove <node>|drop>` -- reusable G/time/shape families instead of one global field; set family clocks and shapes by targeting family:<name> with :steer time / :steer shape
-- `:steer time <node> <source|off> [scale [offset]]` -- align any probe, anchor, layer, or family clock to a probe, knob, RAM/VRAM status, outcome lift, another layer clock, or constant
+- `:steer time <node> <source|off> [scale [offset]]` -- align any probe, knob, anchor, layer, or family clock to a probe, knob, RAM/VRAM status, outcome lift, another layer clock, or constant
 - `:steer shape <node> point|gaussian <width>|shell <radius> <width>|plateau <radius> <edge>` -- the impact can occupy a smooth region or hollow shell, not only a point; several shaped members in a family compose an irregular holoid
 - `:steer quality <name> formula <expr-in-d> [strength <source> [scale [offset]]]` -- a quality is not G: it has its own safe distance formula; d=1-cos. Example: smelliness formula 1/(d+0.02)**4 spikes nearby; formulas omit spaces
-- `:steer set <law> quality <quality>` -- define a law-described set
-- `:steer set <law> add <node> [compliance <source> [scale [offset]]] [time <v1,v2,...>]` -- every member has its own live signed compliance and forward-time vector
-- `:steer set <law> exclude|include|remove <node> | drop` -- set exclusion is exact zero, not a very small coefficient
+- `:steer set <law> quality <quality|choose>` -- define a law-described set; choose = the model picks among defined qualities
+- `:steer set <law> add <node|choose> [compliance <source> [scale [offset]]] [time <v1,v2,...>]` -- every member has its own live signed compliance and forward-time vector; choose = the model picks a probe as the member
+- `:steer set <law> exclude|include|remove <node|choose> | drop` -- set exclusion is exact zero, not a very small coefficient
 - `:steer exclude <node> [off]` -- hard whole-field exclusion: the node participates in no G, quality, family, or set law at all; off makes it eligible again
 - `:steer freeze <probe|@anchor> [off]` -- inertial coefficient: the mass keeps pulling but it stops moving itself -- a probe's baseline stops drifting; an anchor stops responding to laws. It cannot habituate to its own gravity
 - `:steer anchor <name> [here|from <probe>|mass <m>|drop]` -- precision bodies: pin an exact latent point -- the last reply's state, or a copied probe direction -- as a mass in the field; frozen by default; bare ':steer anchor' lists
@@ -30,6 +30,7 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:figure [list|patterns|recent|all|probes|knobs|streams|phen|outcomes|<name>|outcome:<name>|lift:<name> ...] [last N] [out path.svg]` -- draw live tracked shell values from the same table used by :tune, :calibrate, :label, and :probe values. The outcome channel is mappable: outcome:<name> draws a trigger's credited outcomes, lift:<name> its rolling fired-vs-unfired lift (0-line = does firing help), 'outcomes' maps every credited trigger. 'patterns' adds trend, spike, regime-shift, oscillation, threshold, outcome, sense-correlation, next-turn-sense, and co-movement detection plus a .patterns.json sidecar
 - `:figures [list|all|<which> ...]` -- draw the state-output figures from the probe JSONs via scripts/make_lesswrong_figures.py -> docs/figures/; loose names: 1/schematic 2/render-u 3/pre-control 4/cot 5/origin; no args = all. Building runs in the first python that has matplotlib; list works anywhere
 - `:benchmark <ref> [n <N>] [tokens <T>] [evaluator number|exact|choice|contains] [contract]` -- score the LIVE model with the current tuning applied on a named item set: invariants/benchmarks/<ref>.jsonl, gsm8k, hf:<dataset>, or a file path. Bare native elicitation by default; 'contract' asks the FINAL/STATE form. '@agent :benchmark ref' measures that spawned agent; ':benchmark' alone lists the named sets; results land in invariants/out/shell_benchmark_*.json
+- `:group [name [set|add|remove <probe|knob|status:...|choose> ...]|drop|show]` -- named compact watch groups; :list is an alias. Items may be probes, knobs/streams, or statuses like status:ram, status:util, status:time, status:vram, status:tokens_per_sec; 'choose' lets the model pick a probe/knob to watch. Bare :group shows every group; definitions persist locally in invariants/out/watch_groups.json, which is ignored by git
 - `:probe <name> <with it> || <without it>` -- mint a named-concept sensor from YOUR contrastive framings; scores every turn; :probe lists; :probe drop <name>
 - `:probe [list] | :probe drop <name>` -- list probes or delete one
 - `:probe choose` -- ask the model to draft one runnable :probe <name> A || B command
@@ -49,10 +50,11 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:clean [queue|bindings|priority|all] [apply]` -- preview/apply a non-destructive cleanup of queued retries, dynamic tuner bindings, probe-match drive/validate modes, and priority targets; never deletes probes, histories, labels, docs, memories, or learned evidence
 - `:label <probe|stream> pos|neg` -- judge the MOST RECENT turn on that axis: credits its last signal with a human outcome -- supervised evidence alongside the automatic sense credit, so lift can reflect your judgment
 - `:suggest` -- scan the accrued state for ready moves, then show a one-line launcher of ALL visible user-facing commands; computed, never applied. :suggest apply auto-queues only the safe measurement/calibration ones
+- `:suggest [what you want] [:prefix]` -- with words after it, ask for exactly one runnable command toward a free-form goal; optional :prefix constrains the command family; stages it for :accept using the live command reference
 - `:suggest commands [filter]` -- show the full one-line launcher for every visible user-facing command/macro; optional filter narrows by command text
 - `:suggest gravity|field|physics` -- shortcut launcher for the whole steer/field command family: Gs, families, clocks, shapes, qualities, sets, exclusions
 - `:suggest :<command prefix>` -- complete one operator command from the live command reference; isolated from conversation history and cognitive cache
-- `:suggest because <reason>` -- use a probe-specific move only when the internal match clears both an absolute confidence floor and the runner-up; otherwise show state-wide moves and never backfill an arbitrary weak winner
+- `:suggest because <reason>` -- same goal-directed command suggestion, with the reason supplied through the normal because-clause
 - `:tune, :tune <name> <value>, :tune <name> auto [percentile]`
 - `:tune <knob|probe> dynamic <signed mix> [mult]` -- each turn set the target to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a probe-only target drives its own firing threshold; a name that is both a knob and a probe steers the KNOB -- name probe_<x> for the threshold
 - `:tune steer_cap_fraction auto [pct]` -- calibrate cap from observed pushes
@@ -79,7 +81,7 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:prioritize [choose|auto|<probe> [alpha]|pin <probe> [alpha]|mix <p...> [alpha]]` -- rank probes by evidence-weighted lift; <probe> sets a landscape target, pin duplicates direct :steer, mix moves a chosen field; alpha maps to prioritize_alpha and is off at 0
 - `:release <tool> [prob]` -- decouple a tool's firing from its signal for that fraction of turns -- separates causality so credit lift can be trusted
 - `:listen on|off|status` -- speak mid-reply: lines you type while it generates are ingested at the next chunk seam and appended to the live stream -- the model chooses to redirect or fold in; never dropped
-- `:macro <file> <c1> ; <c2> ...` -- write a macro; :macro restore <json> exactly restores one; :macro name <alias> <file> aliases it; :macro name self [file] writes a macro that REGENERATES probes, macros/commands, hidden/exposed command tools, and game configs; in macro/profile files, ':' starts a command, '#' is a comment, and any other nonblank line may run as a model query/text turn; :macro strip <alias|file> drops display-only lines in place, :macro name strip <src> [dest] writes a stripped copy
+- `:macro <file> <c1> ; <c2> ... | :macro <file> @source` -- write a macro; @source copies runnable lines from an existing macro/profile file; :macro restore <json> exactly restores one; :macro name <alias> <file> aliases it; :macro name self [file] writes a macro that REGENERATES probes, macros/commands, hidden/exposed command tools, and game configs; in macro/profile files, ':' starts a command, '#' is a comment, and any other nonblank line may run as a model query/text turn; :macro strip <alias|file> drops display-only lines in place, :macro name strip <src> [dest] writes a stripped copy
 - `:install <alias> <file> [goal]` -- converts a manual text file into a parameterized built-in command with proper solve/args headers
 - `:save self <name> | choose` -- alias for :macro name self; 'choose' asks the model to generate a name based on the current tuning state
 - `:spawn <name> join|replace|drop|create` -- load/create an executable setup profile for a target agent; any known command/macro can appear when it has a purpose. 'join' adds to the panel; 'replace [N]' takes the operator slot for N turns; 'drop' removes; 'create' writes only) Use @<name> :cmd to target a specific agent's tuning state
@@ -136,46 +138,49 @@ described: violations print the usage line instead of executing.
   - e.g. `:slice probe reliability steps 40..`
   - e.g. `:slice index 470..472 drop`
   - e.g. `:slice scope interactive_phenomenality export invariants/out/shell_slice.pt`
-- `:steer field [init|on|off|status] [G]` -- The field master switch (alias :steer gravity). init loads/migrates every field surface without inventing laws or unfreezing bodies; on/off flips prioritize_gravity (while on, the field REPLACES pin/mix steering); status shows G, masses (normalized, signed), overrides, and quality members.
-  - `[init|on|off|status]` (word, optional) -- what to do with the field
-  - `[G]` (float, optional) -- default global G (prioritize_alpha) to set alongside init/on
-  - e.g. `:steer field init 0.1`
-  - e.g. `:steer gravity on`
-  - e.g. `:steer field`
+- `:steer field [on|off|status] [G]` -- The field master switch (alias :steer gravity). on (or start) loads/migrates every field surface and switches the field on -- while on, the field REPLACES pin/mix steering -- without inventing laws or unfreezing bodies; off disables it; status shows G, masses (normalized, signed), overrides, and quality members. A bare number is shorthand for 'on <G>', so ':steer field 0.1' brings the field up with global G = 0.1.
+  - `[on|off|status]` (word, optional) -- on/start brings the field up and enables it; off disables; status reports
+  - `[G]` (float, optional) -- default global G (prioritize_alpha) to set alongside on
+  - e.g. `:steer field on 0.1`
+  - e.g. `:steer field 0.1`
+  - e.g. `:steer gravity off`
 - `:steer freeze <probe|@anchor|choose> [off]` -- Inertial coefficient: the body keeps PULLING but stops MOVING itself. A frozen probe's rolling baseline stops drifting (it cannot habituate to its own gravity); a frozen anchor stops responding to laws. off thaws.
   - `<probe|@anchor|choose>` (probe) -- the mass to freeze or thaw; choose = the model picks a probe
   - `[off]` (word, optional) -- thaw: the baseline drifts / the anchor moves under laws again
   - e.g. `:steer freeze curiosity`
   - e.g. `:steer freeze @pin off`
-- `:steer g [probe|@anchor|layer:N|family:name] [source|off] [scale] [offset]` -- Personal gravitational constant: bind one node's G to a live source instead of the global G (prioritize_alpha). A layer G gates/multiplies a body's G where both are set; family:<name> makes the node inherit that family's G. Bare :steer g lists every override.
-  - `[probe|@anchor|layer:N|family:name]` (word, optional) -- a body (probe or @anchor), one layer's clock/gate, or a whole family
-  - `[source|off]` (word, optional) -- live source: a number, probe:<name>, knob:<name>, status:ram|vram|cpu|ram_pct|tokens_per_sec (system vitals), lift:<trigger> (fired-vs-unfired outcome lift), outcome:<trigger> (rolling mean of recent credits), family:<name>, or global; off clears back to inherited
+- `:steer g [probe|knob:name|@anchor|layer:N|family:name] [source|off] [scale] [offset]` -- Personal gravitational constant: bind one node's G to a live source instead of the global G (prioritize_alpha). A layer G gates/multiplies a body's G where both are set; family:<name> makes the node inherit that family's G. Bare :steer g lists every override.
+  - `[probe|knob:name|@anchor|layer:N|family:name]` (word, optional) -- a body (probe or @anchor), one knob's field-governed scalar, one layer's clock/gate, or a whole family
+  - `[source|off]` (word, optional) -- live source: a number, a bare probe/knob/status/family name (resolved to whichever single namespace owns it; a collision asks for the qualified probe:<name>/knob:<name> form), ~<family>, #<layer>, ^<trigger> (fired-vs-unfired outcome lift), *<trigger> (rolling mean of recent credits), or global; statuses are vitals like ram|vram|cpu|ram_pct|tokens_per_sec; off clears back to inherited
   - `[scale]` (float, optional) -- multiply the source
   - `[offset]` (float, optional) -- add after scaling
   - e.g. `:steer g ambiguity knob:prioritize_alpha 0.5`
   - e.g. `:steer g layer:18 status:ram`
   - e.g. `:steer g fun off`
-- `:steer law [famA] [famB] [k|off]` -- Couple two pole families: k>0 like poles repel / unlike attract, k<0 flips, off removes; unlisted pairs are INERT. ':tune gravity_law_step' integrates the forces -- only unfrozen anchors move, probes never do. Bare :steer law lists the laws and the step.
-  - `[famA]` (word, optional) -- first pole family
-  - `[famB]` (word, optional) -- second pole family
+- `:steer law [famA|choose] [famB|choose] [k|off]` -- Couple two pole families: k>0 like poles repel / unlike attract, k<0 flips, off removes; unlisted pairs are INERT. ':tune gravity_law_step' integrates the forces -- only unfrozen anchors move, probes never do. Bare :steer law lists the laws and the step.
+  - `[famA|choose]` (choice, optional) -- first pole family; choose = the model picks among known families
+  - `[famB|choose]` (choice, optional) -- second pole family; choose = the model picks among known families
   - `[k|off]` (word, optional) -- signed coupling constant, or off to remove
   - e.g. `:steer law integrity chaos -0.3`
+  - e.g. `:steer law choose chaos -0.3`
   - e.g. `:steer law integrity chaos off`
-- `:steer mass <probe|choose> <m|auto>` -- Set a body's gravitational coefficient. Positive mass attracts the hidden state, negative repels; masses are normalized (|sum|=1) when the field applies. auto returns the mass to its live signed evidence lift each turn.
+- `:steer mass <probe|choose> <source|auto> [scale] [offset]` -- Set a body's gravitational coefficient. Positive mass attracts the hidden state, negative repels; masses are normalized (|sum|=1) when the field applies. auto returns the mass to its live signed evidence lift each turn.
   - `<probe|choose>` (probe) -- an active probe: a mass at its direction; choose = the model picks
-  - `<m|auto>` (word) -- signed mass (negative = repulsor) or auto = live signed lift
+  - `<source|auto>` (word) -- live source (negative = repulsor) or auto = live signed lift
+  - `[scale]` (float, optional) -- multiply the source
+  - `[offset]` (float, optional) -- add after scaling
   - e.g. `:steer mass ambiguity -0.5`
   - e.g. `:steer mass fun auto`
-  - e.g. `:steer mass choose auto`
+  - e.g. `:steer mass logic =ram -1.0`
 - `:steer pole <probe|@anchor|choose> <family[+|-]> [off]` -- Type a body with a signed pole in a concept family. Poled bodies exert force on each other ONLY where a ':steer law' couples their families -- selective magnetism layered over the universal field.
   - `<probe|@anchor|choose>` (probe) -- the mass to type; choose = the model picks a probe
   - `<family[+|-]>` (word) -- family name with optional sign (default +)
   - `[off]` (word, optional) -- remove this pole from the body
   - e.g. `:steer pole honesty integrity+`
   - e.g. `:steer pole @pin integrity off`
-- `:steer time <probe|@anchor|layer:N|family:name> <source|off> [scale] [offset]` -- Local clock: align a node's forward-time rate to a live source so its gravity evolves on its own timeline (rate clamped to 0.05..20). off returns the node to the global clock (rate 1).
-  - `<probe|@anchor|layer:N|family:name>` (word) -- a body (probe or @anchor), one layer's clock/gate, or a whole family
-  - `<source|off>` (word) -- live source: a number, probe:<name>, knob:<name>, status:ram|vram|cpu|ram_pct|tokens_per_sec (system vitals), lift:<trigger> (fired-vs-unfired outcome lift), outcome:<trigger> (rolling mean of recent credits), family:<name>, or global; off clears back to inherited
+- `:steer time <probe|knob:name|@anchor|layer:N|family:name> <source|off> [scale] [offset]` -- Local clock: align a node's forward-time rate to a live source so its gravity evolves on its own timeline (rate clamped to 0.05..20). off returns the node to the global clock (rate 1).
+  - `<probe|knob:name|@anchor|layer:N|family:name>` (word) -- a body (probe or @anchor), one knob's field-governed scalar, one layer's clock/gate, or a whole family
+  - `<source|off>` (word) -- live source: a number, a bare probe/knob/status/family name (resolved to whichever single namespace owns it; a collision asks for the qualified probe:<name>/knob:<name> form), ~<family>, #<layer>, ^<trigger> (fired-vs-unfired outcome lift), *<trigger> (rolling mean of recent credits), or global; statuses are vitals like ram|vram|cpu|ram_pct|tokens_per_sec; off clears back to inherited
   - `[scale]` (float, optional) -- multiply the source
   - `[offset]` (float, optional) -- add after scaling
   - e.g. `:steer time @sink probe:urgency`

@@ -1,11 +1,23 @@
+# basic visibility
 :timestamps on
-:experts on
-:sandbox on
-:listen on
 :clock
-:tune steer_band auto
-:tune steer_cap_fraction auto
+
+# activate full flexible gravity/field system
 :steer field init 0.1
+
+# make claimmap_alpha field-governed
+:steer g knob:claimmap_alpha status:ram_pct 0.0002
+:steer time knob:claimmap_alpha status:generation_seconds 0.1 0.5
+
+# useful startup watch group
+:group core set status:time status:ram status:util status:generation_seconds status:tokens_per_sec knob:claimmap_alpha knob:prioritize_alpha
+
+# show the live field + relationships
 :steer bodies
 :relations fields
-:prioritize
+:group core show
+
+# optional ~ comment-out as desired
+:listen on
+:memory status
+:suggest gravity

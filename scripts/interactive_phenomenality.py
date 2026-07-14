@@ -320,6 +320,8 @@ def gravity_field_masses(probes, tuner):
         if not dirs or probe_is_released(pdata) or (configured.get(node_key) or {}).get("excluded"):
             continue  # released probes are observational-only: no force
         m = pdata.get("mass")
+        if isinstance(m, dict):
+            m = resolve_field_source(m, probes, tuner, steer_bodies().get("families", {}))
         if m is None:
             if ranked is None:
                 ranked = {r["name"]: r for r in rank_probes(probes, tuner)}
@@ -345,7 +347,10 @@ def gravity_field_masses(probes, tuner):
     for name, body in steer_bodies()["anchors"].items():
         if (configured.get(f"anchor:{name}") or {}).get("excluded"):
             continue
-        m = float(body.get("mass", 1.0) or 0.0)
+        m = body.get("mass", 1.0)
+        if isinstance(m, dict):
+            m = resolve_field_source(m, probes, tuner, steer_bodies().get("families", {}))
+        m = float(m or 0.0)
         dirs = body.get("dirs") or {}
         if abs(m) < 1e-9 or not dirs:
             continue
@@ -470,6 +475,42 @@ def parse_pole_spec(spec):
     return (s, sign) if s else (None, 0)
 
 
+def known_pole_families(bodies=None):
+    """Every pole family named anywhere: probe poles, anchor poles, law pairs.
+    Families exist by being used, so the union of uses IS the registry --
+    this is the choose-pool for ':steer law'."""
+    bodies = bodies or steer_bodies()
+    fams = set()
+    for poles in (bodies.get("probe_poles") or {}).values():
+        fams.update(poles or {})
+    for cfg in (bodies.get("anchors") or {}).values():
+        fams.update((cfg or {}).get("poles") or {})
+    for pair in bodies.get("laws") or {}:
+        fams.update(pair)
+    return sorted(fams)
+
+
+# Structurally distinct reference kinds carry an optional one-mark sigil:
+# layers are addresses (#16), lift/outcome are a trigger's two credit
+# channels (^name / *name), families are containers (~name). Scalar streams
+# (probes, knobs, statuses) are structurally identical and stay BARE -- a
+# bare name resolves to whichever single namespace owns it, and only a real
+# collision needs the spelled-out probe:/knob:/status: qualifier.
+FIELD_SOURCE_SIGILS = {"#": "layer", "^": "lift", "*": "outcome", "~": "family", ".": "probe", "=": "status", "%": "knob"}
+
+FIELD_STATUS_NAMES = {
+    "ram", "vram", "memory", "memory_live",
+    "ram_reserved", "vram_reserved", "memory_reserved",
+    "ram_peak", "vram_peak", "memory_peak",
+    "cuda", "gpu", "gravity_time", "time",
+    "gravity_potential", "potential",
+    "cpu", "cpu_pct", "utilization",
+    "sys_ram", "ram_pct", "memory_pct", "mem_load",
+    "tokens_per_sec", "gen_speed", "tps",
+    "gen_seconds", "generation_seconds",
+}
+
+
 def parse_field_source(raw, scale=1.0, offset=0.0):
     """Parse a live coefficient source used by personal G and local clocks.
 
@@ -479,6 +520,11 @@ def parse_field_source(raw, scale=1.0, offset=0.0):
     outcome lift; outcome:<trigger> = rolling mean of recent credited
     outcomes) -- outcomes exert force, not just appear on maps. Scale and
     offset let unlike units be aligned explicitly.
+
+    A bare name parses as kind 'auto': field_source_error resolves it to the
+    single namespace that owns it (probe/knob/status/family) and demands a
+    qualifier only on a real collision. Sigils mark the structurally
+    different kinds: #N layer, ^trigger lift, *trigger outcome, ~family.
     """
     text = str(raw or "").strip()
     try:
@@ -493,12 +539,14 @@ def parse_field_source(raw, scale=1.0, offset=0.0):
     low = text.lower()
     if low in ("global", "g", "prioritize_alpha"):
         kind, name = "global", "prioritize_alpha"
+    elif low[0] in FIELD_SOURCE_SIGILS:
+        kind, name = FIELD_SOURCE_SIGILS[low[0]], low[1:].strip()
     elif ":" in low:
         kind, name = low.split(":", 1)
         kind = {"gfamily": "family", "memory": "status"}.get(kind, kind)
     else:
-        return None
-    if kind not in ("probe", "knob", "status", "family", "layer", "lift", "outcome") or not name:
+        kind, name = "auto", low
+    if kind not in ("probe", "knob", "status", "family", "layer", "lift", "outcome", "auto") or not name:
         return None
     return {
         "kind": kind,
@@ -525,10 +573,29 @@ def format_field_source(spec):
 
 
 def field_source_error(spec, probes=None, tuner=None, families=None):
-    """Return a precise typo/error for a live source, or None when usable."""
+    """Return a precise typo/error for a live source, or None when usable.
+
+    Bare names (kind 'auto') are resolved IN PLACE to the single namespace
+    that owns them; owning more than one is an error demanding the qualified
+    form -- sources exert force, so a collision is never guessed."""
     if not spec:
         return "empty source"
     kind, name = spec.get("kind"), spec.get("name")
+    if kind == "auto":
+        owners = [k for k, has in (
+            ("probe", name in (probes or {})),
+            ("knob", tuner is not None and name in tuner.triggers),
+            ("status", name in FIELD_STATUS_NAMES),
+            ("family", name in (families or {})),
+        ) if has]
+        if not owners:
+            return f"no probe, knob, status, or family named '{name}'"
+        if len(owners) > 1:
+            return (
+                f"'{name}' is ambiguous -- it is a " + " and a ".join(owners)
+                + "; qualify it: " + " or ".join(f"{o}:{name}" for o in owners)
+            )
+        kind = spec["kind"] = owners[0]
     if kind == "probe" and name not in (probes or {}):
         return f"no probe named '{name}'"
     if kind == "knob" and (tuner is None or name not in tuner.triggers):
@@ -540,17 +607,7 @@ def field_source_error(spec, probes=None, tuner=None, families=None):
         return f"no credited trigger named '{name}' ({kind}: reads its outcome channel)"
     if kind == "family" and name not in (families or {}):
         return f"no G family named '{name}'"
-    if kind == "status" and name not in {
-        "ram", "vram", "memory", "memory_live",
-        "ram_reserved", "vram_reserved", "memory_reserved",
-        "ram_peak", "vram_peak", "memory_peak",
-        "cuda", "gpu", "gravity_time", "time",
-        "gravity_potential", "potential",
-        "cpu", "cpu_pct", "utilization",
-        "sys_ram", "ram_pct", "memory_pct", "mem_load",
-        "tokens_per_sec", "gen_speed", "tps",
-        "gen_seconds", "generation_seconds",
-    }:
+    if kind == "status" and name not in FIELD_STATUS_NAMES:
         return f"unknown status '{name}'"
     if kind == "layer":
         try:
@@ -663,22 +720,58 @@ def resolve_field_source(
             inherited, probes, tuner, families=families, fields=fields,
             _seen=seen, channel=channel,
         )
+    elif kind == "auto":
+        # Defensive: a bare-name spec that skipped field_source_error's
+        # in-place resolution. Same owner order; scale/offset apply once
+        # (the family recursion carries them, so return directly there).
+        name = spec.get("name")
+        if name in (probes or {}):
+            base = latest_probe_field_value(name, probes, tuner)
+        elif tuner is not None and name in tuner.triggers:
+            base = float(tuner.get(name, 0.0))
+        elif name in FIELD_STATUS_NAMES:
+            base = field_status_value(name)
+        elif name in (families or {}):
+            return resolve_field_source(
+                {**spec, "kind": "family"}, probes, tuner,
+                families=families, fields=fields, _seen=_seen, channel=channel,
+            )
+        else:
+            base = 0.0
     else:
         base = 0.0
     return base * float(spec.get("scale", 1.0)) + float(spec.get("offset", 0.0))
 
 
-def canonical_field_node(raw, probes=None, anchors=None, families=None):
-    """Return the persisted node key for a probe, anchor, layer, or family."""
+def canonical_field_node(raw, probes=None, anchors=None, families=None, tuner=None):
+    """Return the persisted node key for a probe, anchor, layer, family, or knob."""
     text = str(raw or "").strip()
     low = text.lower()
     probes = probes or {}
     anchors = anchors or {}
     families = families or {}
-    if text in probes:
+    knobs = {str(k).lower() for k in (getattr(tuner, "triggers", {}) or {})}
+    if ":" not in low:
+        owners = [k for k, has in (
+            ("probe", text in probes),
+            ("knob", low in knobs),
+            ("family", low in families),
+        ) if has]
+        if len(owners) > 1:
+            return None
+        if owners == ["probe"]:
+            return f"probe:{text}"
+        if owners == ["knob"]:
+            return f"knob:{low}"
+        if owners == ["family"]:
+            return f"family:{low}"
+    elif text in probes:
         return f"probe:{text}"
     if low.startswith("probe:") and text.split(":", 1)[1] in probes:
         return f"probe:{text.split(':', 1)[1]}"
+    if low.startswith(("knob:", "stream:")):
+        name = low.split(":", 1)[1]
+        return f"knob:{name}" if (not knobs or name in knobs) else None
     aname = re.sub(r"[^a-z0-9_]", "_", text.lstrip("@").lower()).strip("_")
     if text.startswith("@") and aname in anchors:
         return f"anchor:{aname}"
@@ -696,13 +789,14 @@ def canonical_field_node(raw, probes=None, anchors=None, families=None):
     return None
 
 
-def field_target_config(raw, probes=None, create=False):
+def field_target_config(raw, probes=None, create=False, tuner=None):
     bodies = steer_bodies()
     key = canonical_field_node(
         raw,
         probes=probes,
         anchors=bodies["anchors"],
         families=bodies["g_families"],
+        tuner=tuner,
     )
     if not key:
         return None, None
@@ -945,6 +1039,43 @@ def field_entry_config(body_name, layer, probes=None, tuner=None):
         "qualities": qualities,
         "excluded": bool(own.get("excluded") or layer_cfg.get("excluded")),
     }
+
+
+def field_governed_knob_value(name, tuner, probes=None, default=None):
+    """Effective scalar for a knob that has its own field node.
+
+    A knob node is not a latent mass; it has no direction. Its field settings
+    govern the scalar the shell applies: G-source supplies the magnitude, and
+    local time multiplies it as a real-parameter clock. With no field settings,
+    the ordinary tuner value is returned unchanged.
+    """
+    if tuner is None:
+        return float(default or 0.0)
+    base = float(tuner.get(name, default if default is not None else 0.0) or 0.0)
+    bodies = steer_bodies()
+    fields = bodies["fields"]
+    families = bodies["g_families"]
+    node = f"knob:{str(name).lower()}"
+    own = fields.get(node) or {}
+    if own.get("excluded"):
+        return base
+    fam = families.get(own.get("family")) or {}
+    g_spec = own.get("g")
+    if g_spec is None:
+        g_spec = fam.get("g")
+    value = (
+        resolve_field_source(g_spec, probes, tuner, families, fields)
+        if g_spec is not None else base
+    )
+    time_spec = own.get("time")
+    if time_spec is None:
+        time_spec = fam.get("time")
+    tau = (
+        resolve_field_source(time_spec, probes, tuner, families, fields, channel="time")
+        if time_spec is not None else 1.0
+    )
+    tau = max(0.05, min(20.0, float(tau)))
+    return float(value) * tau
 
 
 def law_coupling(poles_i, poles_j, laws):
@@ -1342,11 +1473,30 @@ def load_prompt(name, default_template, required_substring=None, **kwargs):
         except:
             return default_template
 
+def macro_safe_block(text):
+    """Quote dynamic content for embedding inside queued macro text.
+
+    The macro grammar is columnar: ':' at column 0 runs as a command and '#'
+    at column 0 is a dropped comment. Reference text, documents, prior macros,
+    staged memory, and because-rationales quoted INTO a prompt must therefore
+    never place either at column 0 -- otherwise a help usage line executes as
+    a real command (the ':suggest :steer' failure cascade) or a markdown
+    heading silently vanishes from what the model reads. One leading space
+    takes a line out of the grammar without changing what it says."""
+    return "\n".join(
+        " " + line if line.startswith((":", "#")) else line
+        for line in (text or "").splitlines()
+    )
+
+
 def queue_macro_text(text, queue):
     bundled = []
     current_text = []
     for line in text.splitlines():
-        if line.lstrip().startswith("#"):
+        # Columnar, like the command rule below: only a column-0 '#' is an
+        # authored macro comment. Indented '#' lines are quoted content
+        # (macro_safe_block output, markdown headings) and stay in the text.
+        if line.startswith("#"):
             continue
         if line.startswith(":"):
             if current_text:
@@ -1669,8 +1819,9 @@ def format_field_prompt_context(tuner=None, probes=None, max_chars=5000):
         ),
         (
             "Mechanics available: personal/layer G, G families, local clocks, shaped fields, "
-            "safe quality formulas over d=1-cos, law-defined sets, signed compliance, "
-            "forward-time vectors, set exclusion, and whole-field exclusion."
+            "field-governed knob scalars, safe quality formulas over d=1-cos, "
+            "law-defined sets, signed compliance, forward-time vectors, set exclusion, "
+            "and whole-field exclusion."
         ),
         "This state does not grant command access; only exposed tools may be called by the model.",
     ]
@@ -2356,12 +2507,17 @@ class CommandSpec:
     object, so behavior and reference cannot drift.
     """
 
-    def __init__(self, path, summary, args=(), opts=(), examples=()):
+    def __init__(self, path, summary, args=(), opts=(), examples=(), pre=None):
         self.path = path
         self.summary = summary
         self.args = list(args)
         self.opts = list(opts)
         self.examples = list(examples)
+        # Optional raw-text normalizer applied at the top of parse(). Shorthand
+        # a handler would otherwise expand by hand (':steer field 0.1' ->
+        # 'on 0.1') belongs here so execution, validation, and docs all see
+        # the same grammar; must be idempotent.
+        self.pre = pre
         seen_optional = False
         for i, a in enumerate(self.args):
             if (a.kind == "text" or a.variadic) and i != len(self.args) - 1:
@@ -2405,6 +2561,8 @@ class CommandSpec:
         (the shell passes resolve_probe_choice bound to the live probes).
         choice_resolver does the same for generic choice args."""
         raw = (raw or "").strip()
+        if self.pre is not None:
+            raw = self.pre(raw)
         values = {}
         for opt in self.opts:
             raw, values[opt.keyword] = opt.strip(raw, self.fail)
@@ -2446,6 +2604,21 @@ COMMAND_SPECS = {}
 def register_spec(spec):
     COMMAND_SPECS[spec.path] = spec
     return spec
+
+
+def matching_command_spec(candidate):
+    """Longest registered CommandSpec whose path is a word-prefix of this
+    command line. Returns (spec, remainder_text) or (None, "")."""
+    toks = (candidate or "").split()
+    low = [t.lower() for t in toks]
+    best = None
+    for path, spec in COMMAND_SPECS.items():
+        p = path.split()
+        if low[: len(p)] == p and (best is None or len(p) > len(best[1])):
+            best = (spec, p)
+    if best is None:
+        return None, ""
+    return best[0], " ".join(toks[len(best[1]):])
 
 
 def _hidden_command_words(hidden_commands):
@@ -2579,27 +2752,50 @@ PROBE_EXPLAIN_SPEC = register_spec(CommandSpec(
 # (G, envelope cap, doppler, law step); calibration sets a body's firing
 # horizon from its own observed orbits. Every push stays inside the envelope.
 
-_FIELD_NODE = "probe|@anchor|layer:N|family:name"
-_FIELD_NODE_HELP = "a body (probe or @anchor), one layer's clock/gate, or a whole family"
-_FIELD_SOURCE_HELP = ("live source: a number, probe:<name>, knob:<name>, "
-                      "status:ram|vram|cpu|ram_pct|tokens_per_sec (system vitals), "
-                      "lift:<trigger> (fired-vs-unfired outcome lift), outcome:<trigger> "
-                      "(rolling mean of recent credits), family:<name>, or global; off clears back to inherited")
+_FIELD_NODE = "probe|knob:name|@anchor|layer:N|family:name"
+_FIELD_NODE_HELP = "a body (probe or @anchor), one knob's field-governed scalar, one layer's clock/gate, or a whole family"
+_FIELD_SOURCE_HELP = ("live source: a number, a bare probe/knob/status/family name "
+                      "(resolved to whichever single namespace owns it; a collision asks "
+                      "for the qualified probe:<name>/knob:<name> form), ~<family>, "
+                      "#<layer>, ^<trigger> (fired-vs-unfired outcome lift), *<trigger> "
+                      "(rolling mean of recent credits), or global; statuses are vitals "
+                      "like ram|vram|cpu|ram_pct|tokens_per_sec; off clears back to inherited")
+
+def _field_bare_number_shorthand(raw):
+    """':steer field 0.1' == ':steer field on 0.1' -- an action word is never
+    numeric, so a leading number can only mean 'on <G>'. Idempotent."""
+    toks = raw.split()
+    if toks:
+        try:
+            float(toks[0])
+        except (TypeError, ValueError):
+            return raw
+        return "on " + raw
+    return raw
+
 
 STEER_FIELD_SPEC = register_spec(CommandSpec(
     ":steer field",
-    "The field master switch (alias :steer gravity). init loads/migrates every "
-    "field surface without inventing laws or unfreezing bodies; on/off flips "
-    "prioritize_gravity (while on, the field REPLACES pin/mix steering); "
-    "status shows G, masses (normalized, signed), overrides, and quality members.",
+    "The field master switch (alias :steer gravity). on (or start) loads/migrates "
+    "every field surface and switches the field on -- while on, the field REPLACES "
+    "pin/mix steering -- without inventing laws or unfreezing bodies; off disables it; "
+    "status shows G, masses (normalized, signed), overrides, and quality members. "
+    "A bare number is shorthand for 'on <G>', so ':steer field 0.1' brings the field "
+    "up with global G = 0.1.",
     args=[
+        # Advertised words are spelled out (on/off/status); the abbreviations
+        # init/full/flex/flexible stay accepted so older macros keep working,
+        # but they are not shown -- shorthand belongs in macros, not the grammar.
         ArgSpec("action", required=False, default="status",
-                choices=("init", "full", "flex", "flexible", "on", "off", "status"),
-                display="init|on|off|status", help="what to do with the field"),
+                choices=("on", "start", "initialize", "off", "status",
+                         "init", "full", "flex", "flexible"),
+                display="on|off|status",
+                help="on/start brings the field up and enables it; off disables; status reports"),
         ArgSpec("G", kind="float", required=False,
-                help="default global G (prioritize_alpha) to set alongside init/on"),
+                help="default global G (prioritize_alpha) to set alongside on"),
     ],
-    examples=[":steer field init 0.1", ":steer gravity on", ":steer field"],
+    examples=[":steer field on 0.1", ":steer field 0.1", ":steer gravity off"],
+    pre=_field_bare_number_shorthand,
 ))
 
 STEER_MASS_SPEC = register_spec(CommandSpec(
@@ -2610,9 +2806,11 @@ STEER_MASS_SPEC = register_spec(CommandSpec(
     args=[
         ArgSpec("probe", kind="probe", display="probe|choose",
                 help="an active probe: a mass at its direction; choose = the model picks"),
-        ArgSpec("m", display="m|auto", help="signed mass (negative = repulsor) or auto = live signed lift"),
+        ArgSpec("source", display="source|auto", help="live source (negative = repulsor) or auto = live signed lift"),
+        ArgSpec("scale", kind="float", required=False, help="multiply the source"),
+        ArgSpec("offset", kind="float", required=False, help="add after scaling"),
     ],
-    examples=[":steer mass ambiguity -0.5", ":steer mass fun auto", ":steer mass choose auto"],
+    examples=[":steer mass ambiguity -0.5", ":steer mass fun auto", ":steer mass logic =ram -1.0"],
 ))
 
 STEER_G_SPEC = register_spec(CommandSpec(
@@ -2680,11 +2878,14 @@ STEER_LAW_SPEC = register_spec(CommandSpec(
     "integrates the forces -- only unfrozen anchors move, probes never do. "
     "Bare :steer law lists the laws and the step.",
     args=[
-        ArgSpec("famA", required=False, help="first pole family"),
-        ArgSpec("famB", required=False, help="second pole family"),
+        ArgSpec("famA", kind="choice", required=False, display="famA|choose",
+                help="first pole family; choose = the model picks among known families"),
+        ArgSpec("famB", kind="choice", required=False, display="famB|choose",
+                help="second pole family; choose = the model picks among known families"),
         ArgSpec("k", required=False, display="k|off", help="signed coupling constant, or off to remove"),
     ],
-    examples=[":steer law integrity chaos -0.3", ":steer law integrity chaos off"],
+    examples=[":steer law integrity chaos -0.3", ":steer law choose chaos -0.3",
+              ":steer law integrity chaos off"],
 ))
 
 TUNE_SPEC = register_spec(CommandSpec(
@@ -3169,6 +3370,35 @@ def calibration_policy(name):
 # set in ITS stream's units; conversation_productive judges the sense stream.
 STREAM_ALIASES = {"intent": "intent_settling", "impact": "words_had_impact",
                   "productive": "sense", "sense": "sense"}
+WATCH_GROUPS_PATH = os.path.join(ROOT, "invariants", "out", "watch_groups.json")
+WATCH_STATUS_ALIASES = {
+    "ram": "ram_pct",
+    "mem": "ram_pct",
+    "memory": "ram_pct",
+    "memory_pct": "ram_pct",
+    "sys_ram": "ram_pct",
+    "util": "cpu_pct",
+    "utilization": "cpu_pct",
+    "cpu": "cpu_pct",
+    "cpu_util": "cpu_pct",
+    "time": "time",
+    "clock": "time",
+    "now": "time",
+    "vram": "vram",
+    "gpu": "gpu",
+    "cuda": "gpu",
+    "process_ram": "process_ram",
+    "rss": "process_ram",
+    "tokens": "tokens_per_sec",
+    "tps": "tokens_per_sec",
+    "gen_speed": "tokens_per_sec",
+    "tokens_per_sec": "tokens_per_sec",
+    "gen_seconds": "generation_seconds",
+    "generation_seconds": "generation_seconds",
+    "gravity_time": "gravity_time",
+    "gravity_potential": "gravity_potential",
+    "potential": "gravity_potential",
+}
 
 
 def _is_shadow_trigger(name, tuner):
@@ -3199,6 +3429,224 @@ def resolve_stream(name, tuner):
     if f"phen_{name}" in tuner.triggers:
         return f"phen_{name}"
     return None
+
+
+def watch_group_name(raw):
+    return re.sub(r"[^a-z0-9_]", "_", str(raw or "").lower())[:40].strip("_")
+
+
+def load_watch_groups(path=WATCH_GROUPS_PATH):
+    try:
+        with open(path, "r", encoding="utf-8") as gf:
+            raw = json.load(gf)
+    except (OSError, ValueError):
+        return {}
+    groups = {}
+    if not isinstance(raw, dict):
+        return groups
+    for gname, items in raw.items():
+        clean = watch_group_name(gname)
+        if not clean or not isinstance(items, list):
+            continue
+        good = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("kind", "")).lower()
+            name = str(item.get("name", "")).strip()
+            if kind in {"probe", "knob", "status"} and name:
+                good.append({"kind": kind, "name": name})
+        if good:
+            groups[clean] = good
+    return groups
+
+
+def save_watch_groups(groups, path=WATCH_GROUPS_PATH):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    clean = {}
+    for gname, items in sorted((groups or {}).items()):
+        name = watch_group_name(gname)
+        if not name:
+            continue
+        deduped = []
+        seen = set()
+        for item in items or []:
+            kind = str(item.get("kind", "")).lower()
+            iname = str(item.get("name", "")).strip()
+            key = (kind, iname)
+            if kind in {"probe", "knob", "status"} and iname and key not in seen:
+                seen.add(key)
+                deduped.append({"kind": kind, "name": iname})
+        if deduped:
+            clean[name] = deduped
+    with open(path, "w", encoding="utf-8") as gf:
+        json.dump(clean, gf, indent=2)
+
+
+def normalize_watch_status(name):
+    key = str(name or "").strip().lower()
+    key = WATCH_STATUS_ALIASES.get(key, key)
+    return key if key in set(WATCH_STATUS_ALIASES.values()) else None
+
+
+def normalize_watch_item(raw, probes=None, tuner=None):
+    """Resolve one group item to probe/knob/status without changing state."""
+    text = str(raw or "").strip()
+    if not text:
+        return None, "empty item"
+    low = text.lower()
+    if ":" in low:
+        kind, name = low.split(":", 1)
+        kind = kind.strip()
+        kind = {"p": "probe", "k": "knob", "stream": "knob", "stat": "status", "sys": "status"}.get(kind, kind)
+        name = name.strip()
+        if kind == "probe":
+            if name in (probes or {}):
+                return {"kind": "probe", "name": name}, None
+            return None, f"no probe named '{name}'"
+        if kind == "knob":
+            stream = resolve_stream(name, tuner) if tuner is not None else name
+            if tuner is not None and (stream is None or stream not in tuner.triggers):
+                return None, f"no knob/stream named '{name}'"
+            return {"kind": "knob", "name": stream or name}, None
+        if kind == "status":
+            status = normalize_watch_status(name)
+            if status:
+                return {"kind": "status", "name": status}, None
+            return None, f"unknown status '{name}'"
+        return None, f"unknown item kind '{kind}'"
+
+    status = normalize_watch_status(low)
+    if status:
+        return {"kind": "status", "name": status}, None
+    if low in (probes or {}):
+        return {"kind": "probe", "name": low}, None
+    stream = resolve_stream(low, tuner) if tuner is not None else None
+    if stream is not None and stream in tuner.triggers:
+        return {"kind": "knob", "name": stream}, None
+    return None, f"'{text}' is not an active probe, knob/stream, or known status"
+
+
+def watch_item_key(item):
+    return (str(item.get("kind", "")).lower(), str(item.get("name", "")).strip())
+
+
+def add_watch_items(existing, new_items):
+    out = list(existing or [])
+    seen = {watch_item_key(item) for item in out}
+    for item in new_items or []:
+        key = watch_item_key(item)
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
+    return out
+
+
+def remove_watch_items(existing, remove_items):
+    remove = {watch_item_key(item) for item in remove_items or []}
+    return [item for item in (existing or []) if watch_item_key(item) not in remove]
+
+
+def watch_choose_pool(probes, tuner):
+    """Names ':group ... choose' may resolve to: active probes and registered
+    knobs/streams. The per-probe `probe_<name>` bars are excluded -- the probe
+    itself already stands in for them -- and the list is order-preserving and
+    deduped so the model sees each candidate once."""
+    pool = list(probes or {})
+    if tuner is not None:
+        pool += [t for t in tuner.triggers if not str(t).startswith("probe_")]
+    return list(dict.fromkeys(pool))
+
+
+def _latest_turn_value(turn_log, key):
+    for row in reversed(list(turn_log or [])):
+        if key in row:
+            return row[key]
+    return None
+
+
+def watch_status_readout(name):
+    key = normalize_watch_status(name) or str(name or "").lower()
+    if key == "time":
+        return datetime.datetime.now().strftime("%H:%M:%S"), "local"
+    if key == "ram_pct":
+        pct, total, avail = _system_memory_status()
+        used = max(0.0, total - avail)
+        if total > 0:
+            return f"{pct:.0f}% ({used:.1f}/{total:.1f}GB)", "system RAM"
+        return "n/a", "system RAM unavailable"
+    if key == "cpu_pct":
+        return f"{_system_cpu_percent():.0f}%", "CPU util"
+    if key == "process_ram":
+        live, reserved, _peak, label = _memory_footprint_gb()
+        return f"{live:.2f}GB", f"process {label}"
+    if key == "vram":
+        live, reserved, _peak, label = _memory_footprint_gb()
+        return f"{live:.2f}GB live / {reserved:.2f}GB reserved", label
+    if key == "gpu":
+        return ("on" if torch.cuda.is_available() else "off"), "CUDA"
+    if key == "tokens_per_sec":
+        return f"{float(_LAST_CLOCK.get('tokens_per_sec') or 0.0):.1f}", "last turn tok/s"
+    if key == "generation_seconds":
+        return f"{float(_LAST_CLOCK.get('generation_seconds') or 0.0):.1f}s", "last turn"
+    if key == "gravity_time":
+        return f"{field_status_value('gravity_time'):.3g}", "field local time"
+    if key == "gravity_potential":
+        return f"{field_status_value('gravity_potential'):.3g}", "field potential"
+    return f"{field_status_value(key):.3g}", "status"
+
+
+def watch_item_readout(item, probes, tuner, turn_log):
+    kind = item.get("kind")
+    name = item.get("name")
+    if kind == "probe":
+        if name not in (probes or {}):
+            return f"probe:{name}", "missing", "not active"
+        value = latest_probe_field_value(name, probes, tuner)
+        trig = tuner.triggers.get(f"probe_{name}") if tuner is not None else None
+        note = "centered"
+        if trig is not None:
+            note += f"; bar {float(trig.value):+.3g}"
+            stats = trig.stats()
+            if stats.get("lift") is not None:
+                note += f"; lift {stats['lift']}"
+        return f"probe:{name}", f"{value:+.3f}", note
+    if kind == "knob":
+        trig = tuner.triggers.get(name) if tuner is not None else None
+        if trig is None:
+            return f"knob:{name}", "missing", "not registered"
+        latest = _latest_turn_value(turn_log, name)
+        if latest is None and trig.signals:
+            latest = trig.signals[-1]
+        if latest is None:
+            latest = trig.value
+            note = f"{trig.kind}; current/bar"
+        else:
+            note = f"{trig.kind}; bar {float(trig.value):+.3g}" if trig.kind == "threshold" else trig.kind
+        try:
+            shown = f"{float(latest):+.3f}"
+        except (TypeError, ValueError):
+            shown = str(latest)
+        return f"knob:{name}", shown, note
+    if kind == "status":
+        shown, note = watch_status_readout(name)
+        return f"status:{name}", shown, note
+    return f"{kind}:{name}", "?", "unknown item kind"
+
+
+def watch_group_lines(groups, probes, tuner, turn_log, names=None):
+    selected = list(names or sorted(groups))
+    lines = []
+    for gname in selected:
+        items = groups.get(gname)
+        if not items:
+            lines.append(f"[Group] {gname}: (empty or missing)")
+            continue
+        lines.append(f"[Group] {gname} ({len(items)} item(s))")
+        for item in items:
+            label, shown, note = watch_item_readout(item, probes, tuner, turn_log)
+            lines.append(f"  - {label}: {shown}  ({note})")
+    return lines
 
 
 def paired_threshold_multi(rows, target_stream, anchors, min_n=5, details=False):
@@ -3902,6 +4350,26 @@ def expand_macro_lines(target, macro_aliases, visited=None, depth=0, args=None):
     return bundled_out
 
 
+def macro_create_lines(body, macro_aliases=None):
+    """Resolve the body of legacy `:macro <file> ...`.
+
+    Plain text remains literal macro content. An `@file` body means "copy the
+    runnable lines from this existing macro/profile file", so `:macro init
+    @startup.txt` writes startup.txt's commands instead of the literal text
+    turn `startup.txt`.
+    """
+    body = (body or "").strip()
+    if body.startswith("@"):
+        source = body[1:].strip().strip('"').strip("'")
+        if not source:
+            raise ValueError("missing source file after @")
+        lines = expand_macro_lines(source, macro_aliases or {})
+        if lines is None:
+            raise FileNotFoundError(source)
+        return lines, source
+    return _split_macro_commands(body), None
+
+
 # `:game` config lives in games/<name>_rules.json. Rules stay flat top-level
 # keys (back-compat with old files); win/loss conditions and prizes live under
 # reserved '__'-prefixed keys. These words can't be used as rule names.
@@ -3962,6 +4430,7 @@ def command_takes_colon_command_arg(line):
         or low.startswith(":hide ")
         or low.startswith(":suggest ")
         or low.startswith(":queue ")
+        or low.startswith(":expect ")
     )
 
 
@@ -4093,6 +4562,13 @@ def validate_command_autocomplete(
     if not candidate.startswith(":"):
         return None, "the completion is not an operator command"
 
+    # Unfilled usage placeholders (':steer law [famA] [famB] [k|off]') parse
+    # as literal argument tokens and can only ever end in a usage error --
+    # reject them here so a copied help line is never suggested as runnable.
+    for tok in candidate.split():
+        if "<" in tok or ">" in tok or (tok.startswith("[") and tok.endswith("]")) or tok == "...":
+            return None, f"the completion contains an unfilled placeholder {tok!r}"
+
     if command_word(candidate) == "expose":
         args = candidate.split()[1:]
         _turn_off, _target_agent, _mode, rest = parse_expose_prefix(args)
@@ -4113,6 +4589,20 @@ def validate_command_autocomplete(
             readable.add("memory")
             if sensor not in readable:
                 return None, f"{target!r} is not an active probe or knob"
+
+    # Generation awareness: when the completed command has a declared
+    # CommandSpec, run the SAME parser that will execute it on :accept.
+    # A completion the shell itself would refuse is rejected here, with the
+    # usage line, instead of being suggested and failing later. choose/auto
+    # tokens pass through untouched -- the live run resolves them.
+    stripped, _because = split_because(candidate)
+    spec, spec_tail = matching_command_spec(stripped)
+    if spec is not None:
+        _passthrough = lambda tok: tok
+        try:
+            spec.parse(spec_tail, probe_resolver=_passthrough, choice_resolver=_passthrough)
+        except CommandUsageError as exc:
+            return None, f"the completion fails its own grammar ({exc}); usage: {spec.usage()}"
     return candidate, None
 
 
@@ -5665,7 +6155,7 @@ def _run_shell_benchmark(model, config, tuner, probes, prioritize_pin, req, agen
 
 KNOWN_COMMANDS = (
     ":context", ":memory", ":methodmap", ":claimmap", ":steermap", ":steer", ":slice",
-    ":figure", ":figures", ":benchmark",
+    ":group", ":list", ":figure", ":figures", ":benchmark",
     ":probe", ":label", ":calibrate", ":suggest", ":tune", ":doc", ":sandbox",
     ":experts", ":impact", ":clock", ":prioritize", ":release", ":listen",
     ":timestamps", ":history", ":queue", ":relations", ":clean", ":accept", ":reject", ":help", ":expose", ":hide",
@@ -5687,7 +6177,7 @@ COMMAND_HELP_LINES = [
     "Commands: :help [model]           (this list + your solve-macros; ':help model' shows what",
     "                the MODEL can run on its own; ':help expose [off]' lets it call <<HELP>>)",
     "          :context, :context on, :context off, :context clear",
-    "          :memory, :memory act|talk on|off|status|use [sentence [+probe -probe]]",
+    "          :memory, :memory all|act|talk on|off|status, :memory act|talk use [sentence [+probe -probe]]",
     "                :memory use/search [optional args] uses enabled lanes; empty reflects",
     "                via :prioritize/farthest-from-0; :expose off memory hides model access;",
     "                model-made definitions persist with linked accept/reject/label/place feedback",
@@ -5704,8 +6194,9 @@ COMMAND_HELP_LINES = [
     "                writing a backup and refuses to run without an axis; export saves the",
     "                slice to a .pt without touching the cache; bare :slice = summary)",
     "          :steer  (envelope + observed push distribution + data-implied cap/band)",
-    "          :steer field|gravity init|on|off [default-G] | status  (init loads/migrates every",
+    "          :steer field|gravity on|off [default-G] | status | <G>  (on loads/migrates every",
     "                field surface and enables it without inventing laws or moving frozen bodies;",
+    "                a bare number is shorthand for 'on <G>', e.g. ':steer field 0.1';",
     "                prioritize becomes a FIELD, not a pin: every",
     "                probe is a mass at its direction; each token is pulled along the sphere tangent",
     "                by mass/((1-cos)+eps)^2, so the push depends on where the state IS. Masses",
@@ -5714,26 +6205,28 @@ COMMAND_HELP_LINES = [
     "                push stays inside the envelope cap)",
     "          :steer mass <probe> <m|auto>  (gravitational coefficient override; negative repels;",
     "                auto returns it to its live signed lift)",
-    "          :steer g <probe|@anchor|layer:N|family:name> <source|off> [scale [offset]]",
+    "          :steer g <probe|knob:name|@anchor|layer:N|family:name> <source|off> [scale [offset]]",
     "                (personal G; source = number, probe:name, knob:name, status:ram, lift:trigger,",
     "                outcome:trigger (the credit channel as force -- outcomes steer), family:name,",
     "                or global; layer G gates/multiplies personal G when both are set)",
     "          :steer family <name> <G-source|add <node>|remove <node>|drop>",
     "                (reusable G/time/shape families instead of one global field; set family",
     "                clocks and shapes by targeting family:<name> with :steer time / :steer shape)",
-    "          :steer time <node> <source|off> [scale [offset]]  (align any probe, anchor, layer,",
-    "                or family clock to a probe, knob, RAM/VRAM status, outcome lift, another layer",
-    "                clock, or constant)",
+    "          :steer time <node> <source|off> [scale [offset]]  (align any probe, knob, anchor,",
+    "                layer, or family clock to a probe, knob, RAM/VRAM status, outcome lift,",
+    "                another layer clock, or constant)",
     "          :steer shape <node> point|gaussian <width>|shell <radius> <width>|plateau <radius> <edge>",
     "                (the impact can occupy a smooth region or hollow shell, not only a point;",
     "                several shaped members in a family compose an irregular holoid)",
     "          :steer quality <name> formula <expr-in-d> [strength <source> [scale [offset]]]",
     "                (a quality is not G: it has its own safe distance formula; d=1-cos. Example:",
     "                smelliness formula 1/(d+0.02)**4 spikes nearby; formulas omit spaces)",
-    "          :steer set <law> quality <quality>  (define a law-described set)",
-    "          :steer set <law> add <node> [compliance <source> [scale [offset]]] [time <v1,v2,...>]",
-    "                (every member has its own live signed compliance and forward-time vector)",
-    "          :steer set <law> exclude|include|remove <node> | drop",
+    "          :steer set <law> quality <quality|choose>  (define a law-described set; choose =",
+    "                the model picks among defined qualities)",
+    "          :steer set <law> add <node|choose> [compliance <source> [scale [offset]]] [time <v1,v2,...>]",
+    "                (every member has its own live signed compliance and forward-time vector;",
+    "                choose = the model picks a probe as the member)",
+    "          :steer set <law> exclude|include|remove <node|choose> | drop",
     "                (set exclusion is exact zero, not a very small coefficient)",
     "          :steer exclude <node> [off]  (hard whole-field exclusion: the node participates in",
     "                no G, quality, family, or set law at all; off makes it eligible again)",
@@ -5770,6 +6263,12 @@ COMMAND_HELP_LINES = [
     "                Bare native elicitation by default; 'contract' asks the FINAL/STATE form.",
     "                '@agent :benchmark ref' measures that spawned agent; ':benchmark' alone",
     "                lists the named sets; results land in invariants/out/shell_benchmark_*.json)",
+    "          :group [name [set|add|remove <probe|knob|status:...|choose> ...]|drop|show]  (named",
+    "                compact watch groups; :list is an alias. Items may be probes, knobs/streams,",
+    "                or statuses like status:ram, status:util, status:time, status:vram,",
+    "                status:tokens_per_sec; 'choose' lets the model pick a probe/knob to watch.",
+    "                Bare :group shows every group; definitions persist locally in",
+    "                invariants/out/watch_groups.json, which is ignored by git)",
     "          :probe <name> <with it> || <without it>  (mint a named-concept sensor from",
     "                YOUR contrastive framings; scores every turn; :probe lists; :probe drop <name>)",
     "          :probe [list] | :probe drop <name>  (list probes or delete one)",
@@ -5825,15 +6324,17 @@ COMMAND_HELP_LINES = [
     "          :suggest  (scan the accrued state for ready moves, then show a one-line",
     "                launcher of ALL visible user-facing commands; computed, never applied.",
     "                :suggest apply auto-queues only the safe measurement/calibration ones)",
+    "          :suggest [what you want] [:prefix]  (with words after it, ask for exactly one",
+    "                runnable command toward a free-form goal; optional :prefix constrains",
+    "                the command family; stages it for :accept using the live command reference)",
     "          :suggest commands [filter]  (show the full one-line launcher for every",
     "                visible user-facing command/macro; optional filter narrows by command text)",
     "          :suggest gravity|field|physics  (shortcut launcher for the whole steer/field",
     "                command family: Gs, families, clocks, shapes, qualities, sets, exclusions)",
     "          :suggest :<command prefix>  (complete one operator command from the live",
     "                command reference; isolated from conversation history and cognitive cache)",
-    "          :suggest because <reason>  (use a probe-specific move only when the internal match",
-    "                clears both an absolute confidence floor and the runner-up; otherwise show",
-    "                state-wide moves and never backfill an arbitrary weak winner)",
+    "          :suggest because <reason>  (same goal-directed command suggestion, with the",
+    "                reason supplied through the normal because-clause)",
     "          :tune, :tune <name> <value>, :tune <name> auto [percentile]",
     "          :tune <knob|probe> dynamic <signed mix> [mult]  (each turn set the target",
     "                to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a",
@@ -5904,7 +6405,9 @@ COMMAND_HELP_LINES = [
     "          :listen on|off|status        (speak mid-reply: lines you type while it",
     "                generates are ingested at the next chunk seam and appended to the",
     "                live stream -- the model chooses to redirect or fold in; never dropped)",
-    "          :macro <file> <c1> ; <c2> ...  (write a macro; :macro restore <json>",
+    "          :macro <file> <c1> ; <c2> ... | :macro <file> @source  (write a macro;",
+    "                @source copies runnable lines from an existing macro/profile file;",
+    "                :macro restore <json>",
     "                exactly restores one; :macro name <alias> <file> aliases it;",
     "                :macro name self [file] writes a macro that REGENERATES probes,",
     "                macros/commands, hidden/exposed command tools, and game configs;",
@@ -5999,6 +6502,11 @@ def build_command_autocomplete_reference(prefix, hidden_commands=None):
     shell help and regenerates docs/COMMANDS.md. Reading a prior conversation
     about that document is not equivalent: old interpretations can survive
     after the grammar changes.
+
+    The result is embedded in a queued macro prompt, so it is macro-safe by
+    construction: CommandSpec usage lines start with ':' at column 0, and
+    unquoted they would be split out of the prompt and EXECUTED as commands
+    (a cascade of usage errors + stray text turns instead of one completion).
     """
     visible_lines = visible_command_help_lines(hidden_commands)
     matches = find_command_help_entries(prefix, visible_lines)
@@ -6006,8 +6514,8 @@ def build_command_autocomplete_reference(prefix, hidden_commands=None):
     if matches or spec_matches:
         parts = [line for entry in matches for line in entry]
         parts.extend(line for entry in spec_matches for line in entry)
-        return "\n".join(parts)
-    return "\n".join(visible_lines)
+        return macro_safe_block("\n".join(parts))
+    return macro_safe_block("\n".join(visible_lines))
 
 
 def visible_command_help_lines(hidden_commands=None, lines=COMMAND_HELP_LINES):
@@ -6121,6 +6629,43 @@ def suggest_command_catalog(hidden_commands=None, macro_aliases=None, solve_macr
         seen.add(key)
         catalog.append({"kind": "macro", "command": command, "summary": summary})
     return catalog
+
+
+def build_goal_command_reference(hidden_commands=None, macro_aliases=None, solve_macros=None):
+    """Macro-safe one-line launcher catalog for goal-directed command choice.
+
+    Unlike `:suggest commands [filter]`, this is not a deterministic text
+    filter. It is reference material for a low-memory autocomplete turn whose
+    job is to choose exactly one runnable command toward a stated goal.
+    """
+    lines = []
+    for item in suggest_command_catalog(
+        hidden_commands=hidden_commands,
+        macro_aliases=macro_aliases,
+        solve_macros=solve_macros,
+    ):
+        prefix = "macro" if item["kind"] == "macro" else "cmd"
+        summary = item.get("summary") or ""
+        suffix = f" -- {summary}" if summary else ""
+        lines.append(f"{item['command']}  [{prefix}]{suffix}")
+    return macro_safe_block("\n".join(lines))
+
+
+def parse_suggest_goal_request(text):
+    """Split free-form `:suggest ...` text into (goal, optional :prefix).
+
+    The prefix can appear anywhere as a single colon-prefixed token:
+    `:suggest make a ram group :group` constrains the suggested command to
+    `:group`, while the remaining words stay the goal.
+    """
+    goal_parts = []
+    prefix = ""
+    for tok in (text or "").split():
+        if tok.startswith(":") and not prefix:
+            prefix = tok
+        else:
+            goal_parts.append(tok)
+    return " ".join(goal_parts).strip(), prefix
 
 
 def render_commands_md(lines=COMMAND_HELP_LINES):
@@ -6475,18 +7020,6 @@ OPT_IN_CAPABILITY = {"claimmap_alpha", "memory_alpha", "expert_proof_weight", "s
 # only move a bar. explore/expose CHANGE behavior or surface state to the model,
 # so they stay a deliberate hand.
 SUGGEST_APPLY_SAFE = {"calibrate", "commit", "backfill"}
-
-
-def confident_probe_match(probe_scores, min_similarity=0.25, min_margin=0.03):
-    """Select a probe only when the reason match clears a floor and margin."""
-    ranked = sorted(probe_scores.items(), key=lambda item: item[1], reverse=True)
-    if not ranked:
-        return None, ranked
-    best_name, best_score = ranked[0]
-    margin = best_score - ranked[1][1] if len(ranked) > 1 else best_score
-    if best_score < min_similarity or margin < min_margin:
-        return None, ranked
-    return (best_name, best_score), ranked
 
 
 def backfill_scoring_names(probes, names_to_rebuild, request_all=False):
@@ -7136,7 +7669,12 @@ def main():
     def _claimmap_act(payload, m):
         a, b = payload
         cm = analyze_claim_pair(f"{a} || {b}", model=m)
-        alpha = tuner.get("claimmap_alpha", 0.0)
+        alpha = field_governed_knob_value(
+            "claimmap_alpha",
+            tuner,
+            probes,
+            default=tuner.get("claimmap_alpha", 0.0),
+        )
         sweep_layers = None
         if alpha > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
             _cls, _cdrifts, _cvar = _sweep_layers_for("claimmap", cm.steer_delta)
@@ -7613,6 +8151,14 @@ def main():
                 json.dump(macro_aliases, af, indent=2)
         except Exception as e:
             print(Fore.RED + f"[Error] Could not save macro aliases: {e}" + Style.RESET_ALL)
+
+    watch_groups = load_watch_groups()
+
+    def _save_watch_groups():
+        try:
+            save_watch_groups(watch_groups)
+        except Exception as e:
+            print(Fore.RED + f"[Error] Could not save groups: {e}" + Style.RESET_ALL)
     MAX_AUTOREAD = 20           # per :doc read command; reading stays a deliberate act
     sandbox_enabled = False     # deliberate opt-in, like every intervention here
     joined_agents = []
@@ -8912,7 +9458,8 @@ def main():
 
                 because_ctx = ""
                 if command_because:
-                    because_ctx = f"The operator provided the following underlying reason/rationale for this modification:\n{command_because}\nMake sure your updated macro strongly reflects this rationale.\n\n"
+                    # Inline, never at column 0 -- see macro_safe_block.
+                    because_ctx = f"The operator provided the following underlying reason/rationale for this modification: {command_because}\nMake sure your updated macro strongly reflects this rationale.\n\n"
                     print(Fore.CYAN + "[Fix] Passing your 'because' rationale to the model." + Style.RESET_ALL)
 
                 fix_prompt = (
@@ -8924,7 +9471,9 @@ def main():
                     f"You are modifying the tuning profile for an agent named '{a_name}'.\n"
                     "Here is the existing profile:\n"
                     "```\n"
-                    f"{existing_macro.strip()}\n"
+                    # Quoted: the old profile is mostly ':' lines -- unquoted,
+                    # queueing this prompt would EXECUTE the entire profile.
+                    f"{macro_safe_block(existing_macro.strip())}\n"
                     "```\n"
                     f"{because_ctx}"
                     f"The operator has provided the following instruction to fix or improve it: \"{instructions}\"\n"
@@ -9169,19 +9718,27 @@ def main():
                 # Legacy create form: :macro <file> <cmd1> ; <cmd2> ; ...
                 parts = mtail.split(maxsplit=1)
                 if len(parts) < 2:
-                    print(Fore.YELLOW + "[System] Usage: :macro <file> <c1> ; <c2> ...  |  :macro name <alias> <file>  |  :macro strip <alias|file>  |  :macro drop <alias>" + Style.RESET_ALL)
+                    print(Fore.YELLOW + "[System] Usage: :macro <file> <c1> ; <c2> ...  |  :macro <file> @source  |  :macro name <alias> <file>  |  :macro strip <alias|file>  |  :macro drop <alias>" + Style.RESET_ALL)
                 else:
                     raw_file = parts[0]
                     if _hidden_overwrite_blocked(raw_file, "System"):
                         continue
                     mac_file = macro_aliases.get(raw_file, raw_file)
-                    mac_cmds = _split_macro_commands(parts[1])
+                    try:
+                        mac_cmds, macro_source = macro_create_lines(parts[1], macro_aliases)
+                    except FileNotFoundError as exc:
+                        print(Fore.YELLOW + f"[System] Macro source not found after @: {exc}" + Style.RESET_ALL)
+                        continue
+                    except ValueError as exc:
+                        print(Fore.YELLOW + f"[System] {exc}." + Style.RESET_ALL)
+                        continue
                     try:
                         os.makedirs(os.path.dirname(mac_file) or ".", exist_ok=True)
                         with open(mac_file, "w", encoding="utf-8") as wf:
                             for c in mac_cmds:
                                 wf.write(c + "\n")
-                        print(Fore.GREEN + f"[System] Wrote {len(mac_cmds)} command(s) to macro '{raw_file}' ({mac_file}). Execute with: :run {raw_file}" + Style.RESET_ALL)
+                        source_note = f" from {macro_source}" if macro_source else ""
+                        print(Fore.GREEN + f"[System] Wrote {len(mac_cmds)} command(s){source_note} to macro '{raw_file}' ({mac_file}). Execute with: :run {raw_file}" + Style.RESET_ALL)
                     except Exception as e:
                         print(Fore.RED + f"[Error] Could not write macro file: {e}" + Style.RESET_ALL)
                 continue
@@ -9405,14 +9962,17 @@ def main():
                         _ctx = _ctx[:2000] + " ...[truncated]"
                     staged_ctx = (
                         "The operator staged this context for you; let it shape the macro:\n"
-                        + _ctx + "\n\n"
+                        # Quoted: recalled memory logs command lines; unquoted
+                        # they would queue as live commands, not context.
+                        + macro_safe_block(_ctx) + "\n\n"
                     )
                     pending_memory_tool_result = None
                     print(Fore.CYAN + "[Solve] Folding in the memory you staged with :memory use." + Style.RESET_ALL)
                     
                 because_ctx = ""
                 if command_because:
-                    because_ctx = f"The operator provided the following underlying reason/rationale for this macro:\n{command_because}\nMake sure your generated macro commands strongly reflect this rationale.\n\n"
+                    # Inline, never at column 0 -- see macro_safe_block.
+                    because_ctx = f"The operator provided the following underlying reason/rationale for this macro: {command_because}\nMake sure your generated macro commands strongly reflect this rationale.\n\n"
                     print(Fore.CYAN + "[Solve] Passing your 'because' rationale to the model." + Style.RESET_ALL)
                 default_solve_prompt = (
                     "# SOLVE_MACRO_V3_NO_PROBE_MUTATION\n"
@@ -9656,6 +10216,21 @@ def main():
                     if lanes:
                         records, desc, ranked = _memory_select_records("probe " + tail[len("use probe"):].strip(), lanes)
                         _stage_memory_records(records, desc, ranked=ranked)
+                elif tail.split()[0].lower() in ("all", "both") and (
+                    len(tail.split()) == 1
+                    or tail.split()[1].lower() in ("on", "enable", "enabled", "off", "disable", "disabled", "status")
+                ):
+                    # :memory all on|off|status -- drive/report BOTH lanes at once.
+                    action = tail.split()[1].lower() if len(tail.split()) >= 2 else "status"
+                    if action in ("on", "enable", "enabled"):
+                        for lane in memory_lanes_enabled:
+                            memory_lanes_enabled[lane] = True
+                    elif action in ("off", "disable", "disabled"):
+                        for lane in memory_lanes_enabled:
+                            memory_lanes_enabled[lane] = False
+                    state = ", ".join(f"{k} {'ON' if v else 'OFF'}" for k, v in memory_lanes_enabled.items())
+                    color = Fore.GREEN if action in ("on", "enable", "enabled") else (Fore.CYAN if action == "status" else Fore.YELLOW)
+                    print(color + f"[Memory] {state}." + Style.RESET_ALL)
                 elif tail.startswith("all use"):
                     records = memory.records[-10:]
                     if not records:
@@ -9723,7 +10298,7 @@ def main():
                 else:
                     print(
                         Fore.YELLOW
-                        + "[Memory] Commands: :memory act|talk on|off|status|use [sentence [+probe -probe]]|search [sentence [+probe -probe]], :memory use/search [optional args] (enabled lanes; empty reflects via :prioritize), :memory all use, :memory choice [query|probe <name>], :memory boundary"
+                        + "[Memory] Commands: :memory all|act|talk on|off|status, :memory act|talk use [sentence [+probe -probe]]|search [sentence [+probe -probe]], :memory use/search [optional args] (enabled lanes; empty reflects via :prioritize), :memory all use, :memory choice [query|probe <name>], :memory boundary"
                         + Style.RESET_ALL
                     )
                 continue
@@ -10128,7 +10703,9 @@ def main():
                         reason=reason,
                         out_path=out_path
                     ) + (
-                        f"{original_text}\n=== ORIGINAL DOCUMENT END ===\n"
+                        # Quoted: a document's own ':'/'#' column-0 lines are
+                        # content to rewrite, not commands/comments to run/drop.
+                        f"{macro_safe_block(original_text)}\n=== ORIGINAL DOCUMENT END ===\n"
                         ":steer doc_rewriter 0\n"
                         ":probe release doc_rewriter"
                     )
@@ -10231,6 +10808,89 @@ def main():
                                 + "Nothing staged; ':doc read' would find nothing new."
                                 + Style.RESET_ALL
                             )
+                continue
+            _cmdword = user_input.strip().split()[0].lower() if user_input.strip() else ""
+            if _cmdword in (":group", ":list"):
+                raw = user_input.strip()[len(_cmdword):].strip()
+                parts = raw.split()
+                if not parts:
+                    if not watch_groups:
+                        print(Fore.CYAN + "[Group] No watch groups yet. Example: :group core set self_model prioritize_alpha status:ram status:util status:time" + Style.RESET_ALL)
+                    else:
+                        for line in watch_group_lines(watch_groups, probes, tuner, turn_log):
+                            print(Fore.CYAN + line + Style.RESET_ALL)
+                    continue
+                if parts[0].lower() in ("names", "groups", "ls"):
+                    if watch_groups:
+                        print(Fore.CYAN + "[Group] " + ", ".join(sorted(watch_groups)) + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + "[Group] No watch groups saved." + Style.RESET_ALL)
+                    continue
+                if parts[0].lower() in ("all", "show"):
+                    for line in watch_group_lines(watch_groups, probes, tuner, turn_log):
+                        print(Fore.CYAN + line + Style.RESET_ALL)
+                    continue
+                gname = watch_group_name(parts[0])
+                if not gname:
+                    print(Fore.YELLOW + "[Group] Name must contain at least one letter/number/underscore." + Style.RESET_ALL)
+                    continue
+                action = parts[1].lower() if len(parts) >= 2 else "show"
+                if action in ("show", "view", "status"):
+                    for line in watch_group_lines(watch_groups, probes, tuner, turn_log, names=[gname]):
+                        print(Fore.CYAN + line + Style.RESET_ALL)
+                    continue
+                if action in ("drop", "delete", "clear"):
+                    if watch_groups.pop(gname, None) is not None:
+                        _save_watch_groups()
+                        print(Fore.GREEN + f"[Group] Dropped '{gname}'." + Style.RESET_ALL)
+                    else:
+                        print(Fore.YELLOW + f"[Group] No group named '{gname}'." + Style.RESET_ALL)
+                    continue
+                if action in ("set", "=", "add", "+", "remove", "rm", "-"):
+                    item_tokens = parts[2:]
+                else:
+                    # Shorthand: :group core ram util time self_model
+                    action = "set"
+                    item_tokens = parts[1:]
+                if not item_tokens:
+                    print(Fore.YELLOW + f"[Group] Usage: {_cmdword} {gname} set|add|remove <probe|knob|status:...|choose> ..." + Style.RESET_ALL)
+                    continue
+                resolved, errors = [], []
+                for tok in item_tokens:
+                    if tok.lower() in ("choose", "choice", "auto"):
+                        picked = resolve_probe_choice(
+                            tok, watch_choose_pool(probes, tuner),
+                            model=model, config=config, action_name="watch group",
+                        )
+                        if not picked:
+                            errors.append(f"'{tok}' resolved to no probe/knob")
+                            continue
+                        tok = picked
+                    item, err = normalize_watch_item(tok, probes, tuner)
+                    if err:
+                        errors.append(err)
+                    else:
+                        resolved.append(item)
+                if errors:
+                    print(Fore.YELLOW + "[Group] Could not resolve: " + "; ".join(errors[:4]) + Style.RESET_ALL)
+                    if len(errors) > 4:
+                        print(Fore.YELLOW + f"[Group] ...and {len(errors) - 4} more." + Style.RESET_ALL)
+                    continue
+                if action in ("set", "="):
+                    watch_groups[gname] = add_watch_items([], resolved)
+                    verb = "Set"
+                elif action in ("add", "+"):
+                    watch_groups[gname] = add_watch_items(watch_groups.get(gname, []), resolved)
+                    verb = "Added to"
+                else:
+                    watch_groups[gname] = remove_watch_items(watch_groups.get(gname, []), resolved)
+                    if not watch_groups[gname]:
+                        watch_groups.pop(gname, None)
+                    verb = "Removed from"
+                _save_watch_groups()
+                print(Fore.GREEN + f"[Group] {verb} '{gname}'." + Style.RESET_ALL)
+                for line in watch_group_lines(watch_groups, probes, tuner, turn_log, names=[gname]):
+                    print(Fore.CYAN + line + Style.RESET_ALL)
                 continue
             if user_input.startswith(":impact"):
                 trigger = tuner.triggers.get("words_had_impact")
@@ -10660,7 +11320,6 @@ def main():
                 print(Fore.YELLOW + "[System] (Macro files are re-read on every :run, so edits to them need no refresh.)" + Style.RESET_ALL)
                 continue
 
-            _cmdword = user_input.strip().split()[0].lower() if user_input.strip() else ""
             if _cmdword == ":help":
                 harg = user_input.strip()[len(":help"):].strip().lower()
                 if harg.startswith("expose"):
@@ -11362,14 +12021,14 @@ def main():
                         print(
                             (Fore.GREEN if existed else Fore.YELLOW)
                             + (f"[Steer] quality:{qname} dropped; set laws that name it are now inert."
-                               if existed else f"[Steer] no quality named '{qname}'.")
+                               if existed else f"[Steer] no quality named '{qname}'.{did_you_mean(qname, qualities)}")
                             + Style.RESET_ALL
                         )
                         continue
                     if action == "status":
                         qcfg = qualities.get(qname)
                         if not qcfg:
-                            print(Fore.YELLOW + f"[Steer] no quality named '{qname}'." + Style.RESET_ALL)
+                            print(Fore.YELLOW + f"[Steer] no quality named '{qname}'.{did_you_mean(qname, qualities)}" + Style.RESET_ALL)
                         else:
                             print(Fore.CYAN + f"[Steer] quality:{qname}: formula={qcfg.get('formula', QUALITY_FORMULA_DEFAULT)}, strength={format_field_source(qcfg.get('strength'))}" + Style.RESET_ALL)
                         continue
@@ -11434,9 +12093,15 @@ def main():
                         )
                         continue
                     if action == "quality" and len(sargs) >= 4:
-                        qname = sargs[3].lower()
+                        # choose/auto lets the model pick among defined qualities.
+                        qname = resolve_probe_choice(
+                            sargs[3].lower(), bodies["qualities"],
+                            model=model, config=config, action_name="set quality")
+                        if not qname:
+                            continue
+                        qname = str(qname).lower()
                         if qname not in bodies["qualities"]:
-                            print(Fore.YELLOW + f"[Steer] no quality named '{qname}'. Define it first with :steer quality." + Style.RESET_ALL)
+                            print(Fore.YELLOW + f"[Steer] no quality named '{qname}'.{did_you_mean(qname, bodies['qualities'])} Define it first with :steer quality." + Style.RESET_ALL)
                             continue
                         sets.setdefault(lname, {"members": {}, "excluded": []})["quality"] = qname
                         save_steer_bodies()
@@ -11444,13 +12109,20 @@ def main():
                         continue
                     if action in ("add", "exclude", "include", "remove") and len(sargs) >= 4:
                         if lname not in sets:
-                            print(Fore.YELLOW + f"[Steer] no set law named '{lname}'. Define its quality first." + Style.RESET_ALL)
+                            print(Fore.YELLOW + f"[Steer] no set law named '{lname}'.{did_you_mean(lname, sets)} Define its quality first." + Style.RESET_ALL)
+                            continue
+                        # choose/auto lets the model pick a probe as the member;
+                        # concrete probes/@anchors/layer:N pass through untouched.
+                        member_raw = resolve_probe_choice(
+                            sargs[3], probes,
+                            model=model, config=config, action_name=f"set {action}")
+                        if not member_raw:
                             continue
                         node = canonical_field_node(
-                            sargs[3], probes, bodies["anchors"], bodies["g_families"]
+                            member_raw, probes, bodies["anchors"], bodies["g_families"], tuner
                         )
                         if not node or node.startswith("family:"):
-                            print(Fore.YELLOW + f"[Steer] unknown set member '{sargs[3]}'; use a probe, @anchor, or layer:N." + Style.RESET_ALL)
+                            print(Fore.YELLOW + f"[Steer] unknown set member '{member_raw}'; use a probe, knob:name, @anchor, or layer:N." + Style.RESET_ALL)
                             continue
                         law = sets[lname]
                         exclusions = set(law.get("excluded") or [])
@@ -11532,7 +12204,7 @@ def main():
                     if action == "status":
                         law = sets.get(lname)
                         if not law:
-                            print(Fore.YELLOW + f"[Steer] no set law named '{lname}'." + Style.RESET_ALL)
+                            print(Fore.YELLOW + f"[Steer] no set law named '{lname}'.{did_you_mean(lname, sets)}" + Style.RESET_ALL)
                         else:
                             print(Fore.CYAN + f"[Steer] set:{lname} quality={law.get('quality', '(unset)')}." + Style.RESET_ALL)
                             for node, member in sorted((law.get("members") or {}).items()):
@@ -11544,7 +12216,7 @@ def main():
                             for node in excluded_only:
                                 print(Fore.CYAN + f"  {node}: EXCLUDED (not otherwise a member)" + Style.RESET_ALL)
                         continue
-                    print(Fore.YELLOW + "[Steer] Usage: :steer set <law> quality <quality> | add <node> [compliance <source> [scale [offset]]] [time <v1,v2,...>] | exclude|include|remove <node> | drop" + Style.RESET_ALL)
+                    print(Fore.YELLOW + "[Steer] Usage: :steer set <law> quality <quality|choose> | add <node|choose> [compliance <source> [scale [offset]]] [time <v1,v2,...>] | exclude|include|remove <node|choose> | drop" + Style.RESET_ALL)
                     continue
                 # Whole-field exclusion: unlike zero compliance in one set,
                 # this prevents the node from participating in any field law.
@@ -11556,7 +12228,7 @@ def main():
                         )
                         print(Fore.CYAN + f"[Steer] whole-field exclusions: {', '.join(excluded) or '(none)'}" + Style.RESET_ALL)
                         continue
-                    node, cfg = field_target_config(sargs[1], probes, create=True)
+                    node, cfg = field_target_config(sargs[1], probes, create=True, tuner=tuner)
                     if not node or cfg is None or node.startswith("family:"):
                         print(Fore.YELLOW + f"[Steer] unknown field node '{sargs[1]}'." + Style.RESET_ALL)
                         continue
@@ -11620,9 +12292,9 @@ def main():
                         if fname not in families:
                             print(Fore.YELLOW + f"[Steer] no family named '{fname}'. Define its G first." + Style.RESET_ALL)
                             continue
-                        node, cfg = field_target_config(sargs[3], probes, create=True)
+                        node, cfg = field_target_config(sargs[3], probes, create=True, tuner=tuner)
                         if not node or node.startswith("family:"):
-                            print(Fore.YELLOW + f"[Steer] unknown field node '{sargs[3]}'; use a probe, @anchor, or layer:N." + Style.RESET_ALL)
+                            print(Fore.YELLOW + f"[Steer] unknown field node '{sargs[3]}'; use a probe, knob:name, @anchor, or layer:N." + Style.RESET_ALL)
                             continue
                         if action == "add":
                             cfg["family"] = fname
@@ -11648,7 +12320,7 @@ def main():
                         continue
                     source = parse_field_source(sargs[2], scale, offset)
                     if not source:
-                        print(Fore.YELLOW + "[Steer] G source must be a number, global, probe:<name>, knob:<name>, status:ram, or family:<name>." + Style.RESET_ALL)
+                        print(Fore.YELLOW + "[Steer] G source must be a number, global, or a probe/knob/status/family name (qualify with probe:/knob:/status:/family: only on a collision; ~fam #N ^lift *outcome also work)." + Style.RESET_ALL)
                         continue
                     source_error = field_source_error(source, probes, tuner, families)
                     if source_error:
@@ -11676,9 +12348,9 @@ def main():
                         continue
                     if g_ns.source is None:
                         STEER_G_SPEC.fail("need a source (or off)")
-                    node, cfg = field_target_config(g_ns.node, probes, create=True)
+                    node, cfg = field_target_config(g_ns.node, probes, create=True, tuner=tuner)
                     if not node or cfg is None:
-                        print(Fore.YELLOW + f"[Steer] unknown field node '{g_ns.node}'. Define a family first, or use a probe, @anchor, or layer:N." + Style.RESET_ALL)
+                        print(Fore.YELLOW + f"[Steer] unknown field node '{g_ns.node}'. Define a family first, or use a probe, knob:name, @anchor, or layer:N." + Style.RESET_ALL)
                         continue
                     if g_ns.source.lower() in ("off", "auto", "global"):
                         cfg.pop("g", None)
@@ -11691,7 +12363,7 @@ def main():
                     scale, offset = g_ns.scale, g_ns.offset
                     source = parse_field_source(g_ns.source, scale, offset)
                     if not source:
-                        STEER_G_SPEC.fail("G source must be a number, probe:<name>, knob:<name>, status:ram, lift:<trigger>, outcome:<trigger>, family:<name>, or global")
+                        STEER_G_SPEC.fail("G source must be a number, global, or a bare probe/knob/status/family name (qualify only on a collision; ~fam #N ^lift *outcome sigils also work)")
                     source_error = field_source_error(source, probes, tuner, steer_bodies()["g_families"])
                     if source_error:
                         print(Fore.YELLOW + f"[Steer] {source_error}." + Style.RESET_ALL)
@@ -11709,19 +12381,32 @@ def main():
                     else:
                         cfg["g"] = source
                     save_steer_bodies()
-                    value = field_entry_config(
-                        node.split(":", 1)[1] if node.startswith("probe:") else f"@{node.split(':', 1)[1]}",
-                        int(node.split(":", 1)[1]) if node.startswith("layer:") else 0,
-                        probes, tuner,
-                    )["g"] if not node.startswith("family:") else resolve_field_source(
-                        source, probes, tuner, steer_bodies()["g_families"], steer_bodies()["fields"]
-                    )
+                    if node.startswith("family:"):
+                        value = resolve_field_source(
+                            source, probes, tuner, steer_bodies()["g_families"], steer_bodies()["fields"]
+                        )
+                    elif node.startswith("knob:"):
+                        value = field_governed_knob_value(
+                            node.split(":", 1)[1], tuner, probes,
+                            default=tuner.get(node.split(":", 1)[1], 0.0),
+                        )
+                    elif node.startswith("layer:"):
+                        value = resolve_field_source(
+                            cfg.get("g"), probes, tuner,
+                            steer_bodies()["g_families"], steer_bodies()["fields"],
+                        )
+                    else:
+                        value = field_entry_config(
+                            node.split(":", 1)[1] if node.startswith("probe:") else f"@{node.split(':', 1)[1]}",
+                            0,
+                            probes, tuner,
+                        )["g"]
                     print(Fore.GREEN + f"[Steer] {node} G <- {format_field_source(source)} (resolved now {value:+g})." + Style.RESET_ALL)
                     continue
                 # :steer time <node> <source> -- local clock alignment.
                 if sargs and sargs[0].lower() in ("time", "clock", "align-time", "align_time"):
                     time_ns = STEER_TIME_SPEC.parse(" ".join(sargs[1:]))
-                    node, cfg = field_target_config(time_ns.node, probes, create=True)
+                    node, cfg = field_target_config(time_ns.node, probes, create=True, tuner=tuner)
                     if not node or cfg is None:
                         print(Fore.YELLOW + f"[Steer] unknown field node '{time_ns.node}'." + Style.RESET_ALL)
                         continue
@@ -11733,7 +12418,7 @@ def main():
                     scale, offset = time_ns.scale, time_ns.offset
                     source = parse_field_source(time_ns.source, scale, offset)
                     if not source:
-                        STEER_TIME_SPEC.fail("time source must be a number, probe:<name>, knob:<name>, status:ram, lift:<trigger>, outcome:<trigger>, family:<name>, or layer:N")
+                        STEER_TIME_SPEC.fail("time source must be a number or a bare probe/knob/status/family name (qualify only on a collision; ~fam #N ^lift *outcome sigils also work)")
                     source_error = field_source_error(source, probes, tuner, steer_bodies()["g_families"])
                     if source_error:
                         print(Fore.YELLOW + f"[Steer] {source_error}." + Style.RESET_ALL)
@@ -11750,9 +12435,9 @@ def main():
                 # hollow shells. Families of several nodes compose odd holoids.
                 if sargs and sargs[0].lower() in ("shape", "field-shape", "field_shape"):
                     if len(sargs) < 3:
-                        print(Fore.YELLOW + "[Steer] Usage: :steer shape <probe|@anchor|layer:N|family:name> point|gaussian <width>|shell <radius> <width>|plateau <radius> <edge>|off" + Style.RESET_ALL)
+                        print(Fore.YELLOW + "[Steer] Usage: :steer shape <probe|knob:name|@anchor|layer:N|family:name> point|gaussian <width>|shell <radius> <width>|plateau <radius> <edge>|off" + Style.RESET_ALL)
                         continue
-                    node, cfg = field_target_config(sargs[1], probes, create=True)
+                    node, cfg = field_target_config(sargs[1], probes, create=True, tuner=tuner)
                     if not node or cfg is None:
                         print(Fore.YELLOW + f"[Steer] unknown field node '{sargs[1]}'." + Style.RESET_ALL)
                         continue
@@ -11871,8 +12556,13 @@ def main():
                     continue
                 # :steer law [<famA> <famB> <k|off>] -- selective couplings.
                 if sargs and sargs[0].lower() in ("law", "laws"):
-                    law_ns = STEER_LAW_SPEC.parse(" ".join(sargs[1:]))
                     bodies = steer_bodies()
+                    law_ns = STEER_LAW_SPEC.parse(
+                        " ".join(sargs[1:]),
+                        choice_resolver=lambda tok: resolve_probe_choice(
+                            tok, known_pole_families(bodies),
+                            model=model, config=config, action_name="steer law"),
+                    )
                     if law_ns.famA is None:
                         if not bodies["laws"]:
                             print(Fore.CYAN + "[Steer] no laws. ':steer law <famA> <famB> <k>' -- k>0: like poles repel, unlike attract; k<0 flips; unlisted pairs never interact." + Style.RESET_ALL)
@@ -11976,7 +12666,13 @@ def main():
                     field_ns = STEER_FIELD_SPEC.parse(" ".join(sargs[1:]))
                     sub = field_ns.action
                     init_summary = None
-                    if sub in ("init", "full", "flex", "flexible"):
+                    if sub == "off":
+                        tuner.set("prioritize_gravity", 0.0)
+                        if field_ns.G is not None:
+                            tuner.set("prioritize_alpha", field_ns.G)
+                    elif sub != "status":
+                        # on/start/initialize (and the legacy init/full/flex/flexible
+                        # aliases) all load+migrate every field surface and enable it.
                         init_summary = initialize_field_system(tuner, field_ns.G)
                         print(
                             Fore.GREEN + Style.BRIGHT
@@ -11985,10 +12681,6 @@ def main():
                             + ". Existing definitions/exclusions were preserved; no laws were invented and no bodies were unfrozen."
                             + Style.RESET_ALL
                         )
-                    elif sub in ("on", "off"):
-                        tuner.set("prioritize_gravity", 1.0 if sub == "on" else 0.0)
-                        if field_ns.G is not None:
-                            tuner.set("prioritize_alpha", field_ns.G)
                     g_on = tuner.get("prioritize_gravity", 0.0) > 0
                     g_now = tuner.get("prioritize_alpha", 0.0)
                     masses = gravity_field_masses(probes, tuner)
@@ -12035,17 +12727,20 @@ def main():
                     if pname not in probes:
                         print(Fore.YELLOW + f"[Steer] '{pname}' is not an active probe.{did_you_mean(pname, probes)}" + Style.RESET_ALL)
                         continue
-                    if mass_ns.m.lower() in ("auto", "lift", "none"):
+                    if mass_ns.source.lower() in ("auto", "lift", "none"):
                         set_probe_field(probes, pname, "mass", None)
                         print(Fore.GREEN + f"[Steer] {pname} mass -> auto (its signed evidence lift each turn)." + Style.RESET_ALL)
                     else:
-                        try:
-                            mval = float(mass_ns.m)
-                        except ValueError:
-                            STEER_MASS_SPEC.fail(f"m must be a number or auto, got '{mass_ns.m}'")
-                        set_probe_field(probes, pname, "mass", mval)
-                        kind = "repulsor" if mval < 0 else "attractor"
-                        print(Fore.GREEN + f"[Steer] {pname} mass = {mval:+g} ({kind}); normalized against the other masses when the field applies." + Style.RESET_ALL)
+                        src = parse_field_source(mass_ns.source, mass_ns.scale or 1.0, mass_ns.offset or 0.0)
+                        if not src:
+                            STEER_MASS_SPEC.fail(f"Invalid live source: '{mass_ns.source}'")
+                        set_probe_field(probes, pname, "mass", src)
+                        if src.get("kind") == "constant":
+                            mval = float(src.get("value", 0.0))
+                            kind = "repulsor" if mval < 0 else "attractor"
+                            print(Fore.GREEN + f"[Steer] {pname} explicit mass = {mval:g} ({kind}); normalized against the other masses when the field applies." + Style.RESET_ALL)
+                        else:
+                            print(Fore.GREEN + f"[Steer] {pname} mass bound to live source {format_field_source(src)}." + Style.RESET_ALL)
                     continue
                 # :steer freeze <probe> [off] -- inertial coefficient: the mass
                 # keeps pulling but its own rolling baseline stops moving.
@@ -12519,7 +13214,7 @@ def main():
                                 + (f"[Probe] alpha chosen from the live calibrated G (prioritize_alpha = {ping_alpha:g})."
                                    if _live_g > 0 else
                                    "[Probe] no calibrated G yet (prioritize_alpha <= 0); alpha defaults to 1. "
-                                   "Set one with :tune prioritize_alpha <v> or :steer field init <G>.")
+                                   "Set one with :tune prioritize_alpha <v> or :steer field <G>.")
                                 + Style.RESET_ALL
                             )
                         else:
@@ -12676,7 +13371,7 @@ def main():
                 if pargs.lower().startswith("expose "):
                     eargs = pargs[7:].split()
                     ename_raw = eargs[0].lower() if eargs else ""
-                    ename_resolved = resolve_probe_choice(ename_raw, probes)
+                    ename_resolved = resolve_probe_choice(ename_raw, probes, model=model, config=config, action_name="probe expose")
                     if not ename_resolved:
                         continue
                     ename = re.sub(r"[^a-z0-9_]", "_", ename_resolved)[:40]
@@ -12877,7 +13572,7 @@ def main():
                     bf_names_to_rebuild = []
                     if bf_name_raw == "all":
                         bf_names_to_rebuild = list(probes.keys())
-                    elif bf_name_raw == "choose":
+                    elif bf_name_raw in ("choose", "choice", "auto"):
                         candidates = []
                         for p in probes:
                             tr = tuner.triggers.get(f"probe_{p}")
@@ -13189,7 +13884,7 @@ def main():
             if user_input.startswith(":place "):
                 pargs = user_input[len(":place "):].strip().split()
                 if len(pargs) >= 2:
-                    pname = resolve_probe_choice(pargs[0], probes)
+                    pname = resolve_probe_choice(pargs[0], probes, model=model, config=config, action_name="place")
                     if not pname:
                         continue
                     if pname in probes:
@@ -13347,10 +14042,74 @@ def main():
                         summary = item.get("summary") or ""
                         suffix = f"  -- {summary}" if summary else ""
                         print(Fore.GREEN + f"      -> {item['command']}" + Fore.CYAN + f"  [{prefix}]{suffix}" + Style.RESET_ALL)
+
+                def _queue_goal_command_suggestion(goal_text, prefix_cmd=""):
+                    goal_text = (goal_text or "").strip()
+                    prefix_cmd = (prefix_cmd or "").strip()
+                    if not goal_text:
+                        print(
+                            Fore.YELLOW
+                            + "[Suggest] Say what you want after ':suggest', "
+                              "or add a because-clause."
+                            + Style.RESET_ALL
+                        )
+                        return
+                    active_probes = ", ".join(probes.keys()) if probes else "None"
+                    active_steers = ", ".join(
+                        f"{k}={tuner.get(k, 0.0):g}"
+                        for k in tuner.triggers.keys()
+                        if k.startswith("steer_") or "_alpha" in k
+                    )
+                    if prefix_cmd:
+                        command_reference = build_command_autocomplete_reference(
+                            prefix_cmd,
+                            hidden_commands=hidden_commands,
+                        )
+                        reference_label = "live command reference"
+                        start_rule = f"starting with '{prefix_cmd}'"
+                    else:
+                        command_reference = build_goal_command_reference(
+                            hidden_commands=hidden_commands,
+                            macro_aliases=macro_aliases,
+                            solve_macros=list_solve_macros(),
+                        )
+                        reference_label = "live command catalog"
+                        start_rule = "starting with ':'"
+                    default_goal_prompt = (
+                        ":expect autocomplete $prefix_cmd\n"
+                        "You are choosing exactly ONE runnable operator command for an interactive agent shell.\n"
+                        "Goal: $goal_text\n\n"
+                        "Use the AUTHORITATIVE $reference_label below. It is generated from the same shell "
+                        "implementation that will parse your answer, so it outranks prior conversation, memory, "
+                        "and examples. Do not invent syntax that is absent from it.\n"
+                        "--- $reference_label ---\n"
+                        "$command_reference\n"
+                        "--- end $reference_label ---\n"
+                        "Currently active probes: $active_probes\n"
+                        "Active steers: $active_steers\n\n"
+                        "Output exactly one runnable command line $start_rule. "
+                        "Replace placeholders with concrete values when the goal gives enough information. "
+                        "If the goal lacks a required value, choose the safest listing/status/help command "
+                        "that advances the goal without guessing."
+                    )
+                    prompt = load_prompt(
+                        "suggest_command_goal",
+                        default_goal_prompt,
+                        required_substring="$command_reference",
+                        prefix_cmd=prefix_cmd,
+                        goal_text=goal_text,
+                        reference_label=reference_label,
+                        command_reference=command_reference,
+                        active_probes=active_probes,
+                        active_steers=active_steers,
+                        start_rule=start_rule,
+                    )
+                    suffix = f" ({prefix_cmd})" if prefix_cmd else ""
+                    print(Fore.CYAN + f"[Suggest] Queuing one command{suffix} toward: {goal_text}" + Style.RESET_ALL)
+                    queue_macro_text(prompt, input_queue)
                 
-                target_probe = None
                 if len(sargs) > 1 and sargs[1].lower() not in ("apply", "suggestions"):
-                    if sargs[1].lower() in ("command", "commands", "help", "all", "catalog", "launcher"):
+                    if sargs[1].lower() in ("commands", "help", "all", "catalog", "launcher"):
                         _print_user_facing_command_launcher(" ".join(sargs[2:]).strip() or None)
                         continue
                     if sargs[1].lower() in ("gravity", "field", "physics", "steer"):
@@ -13379,7 +14138,9 @@ def main():
 
                         because_ctx = ""
                         if command_because:
-                            because_ctx = f"\nThe user provided this rationale for the command they are trying to type:\n{command_because}\nEnsure your suggested completion perfectly aligns with this rationale."
+                            # Rationale stays inline (never at column 0): a
+                            # ':'-leading reason must not queue as a command.
+                            because_ctx = f"\nThe user provided this rationale for the command they are trying to type: {command_because}\nEnsure your suggested completion perfectly aligns with this rationale."
                             print(Fore.CYAN + "[Suggest] Passing your 'because' rationale to the model." + Style.RESET_ALL)
 
                         default_suggest_prompt = (
@@ -13414,99 +14175,17 @@ def main():
                         print(Fore.CYAN + f"[Suggest] Queuing documentation-grounded completion for '{prefix_cmd}'..." + Style.RESET_ALL)
                         queue_macro_text(prompt, input_queue)
                         continue
-                        
-                    target_probe = re.sub(r"[^a-z0-9_]", "_", sargs[1].lower())[:40]
-                    if target_probe in probes:
-                        print(Fore.CYAN + f"[Suggest] Scanning for specific moves for probe '{target_probe}'..." + Style.RESET_ALL)
-                        all_sugg = suggest_actions(tuner, list(turn_log), probes=probes, archive_size=_arch)
-                        sugg = [(cat, line, cmd) for cat, line, cmd in all_sugg if target_probe in line or target_probe in cmd]
-                        if not sugg:
-                            print(Fore.YELLOW + f"[Suggest] No specific data-backed moves ready for '{target_probe}' yet." + Style.RESET_ALL)
-                            print(Fore.CYAN + f"  -> To generate evidence: :probe backfill {target_probe}" + Style.RESET_ALL)
-                            print(Fore.CYAN + f"  -> To steer blindly:     :tune probe_{target_probe}_alpha 0.5" + Style.RESET_ALL)
-                            continue
-                    else:
-                        print(Fore.CYAN + f"[Suggest] Probe '{target_probe}' not active. Mint it first with :probe {target_probe} <positive> || <negative>" + Style.RESET_ALL)
-                        continue
+
+                    free_goal = user_input.strip()[len(":suggest"):].strip()
+                    if sargs[1].lower() in ("command", "cmd"):
+                        free_goal = " ".join(sargs[2:]).strip()
+                    goal_text, prefix_cmd = parse_suggest_goal_request(free_goal)
+                    _queue_goal_command_suggestion(goal_text or command_because, prefix_cmd)
+                    continue
                 elif len(sargs) == 1 and command_because:
-                    # Internally compute the similarity of the because string to all active probes
-                    if not probes:
-                        print(Fore.YELLOW + "[Suggest] No active probes to match against your reason. Mint some first!" + Style.RESET_ALL)
-                        continue
-                        
-                    print(Fore.CYAN + f"[Suggest] Projecting your reason into the model's representation space to find the best matching probes..." + Style.RESET_ALL)
-                    from invariants.engine import _inputs, _hidden_states
-                    
-                    ids = _inputs(model, command_because[:600])
-                    hs = _hidden_states(model, ids["input_ids"], ids.get("attention_mask"))
-                    
-                    probe_scores = {}
-                    for pname, pdata in probes.items():
-                        probe_dir = pdata["direction"]
-                        sim_sum = 0.0
-                        layers_counted = 0
-                        for L in list(probe_dir.keys()):
-                            L_int = int(L)
-                            if 0 <= L_int < hs.size(0):
-                                mean_hs = hs[L_int].mean(dim=0).to(model.device).reshape(-1)
-                                if mean_hs.norm().item() > 0:
-                                    mean_hs = mean_hs / mean_hs.norm()
-                                    p_dir = probe_dir[L].to(model.device).reshape(-1)
-                                    sim = torch.nn.functional.cosine_similarity(mean_hs.unsqueeze(0), p_dir.unsqueeze(0)).item()
-                                    sim_sum += sim
-                                    layers_counted += 1
-                        if layers_counted > 0:
-                            probe_scores[pname] = sim_sum / layers_counted
-                            
-                    if not probe_scores:
-                        print(Fore.YELLOW + "[Suggest] Could not compute similarities." + Style.RESET_ALL)
-                        continue
-                        
-                    confident_match, sorted_probes = confident_probe_match(probe_scores)
-                    top_probe, top_score = sorted_probes[0]
-
-                    if confident_match is None:
-                        runner_score = sorted_probes[1][1] if len(sorted_probes) > 1 else 0.0
-                        print(
-                            Fore.YELLOW
-                            + f"[Suggest] No confident probe match for that reason. Best was '{top_probe}' "
-                            + f"({top_score:+.3f}; runner-up {runner_score:+.3f}), below the confidence floor "
-                            + "or too close to distinguish. I will not turn that weak winner into a probe-specific action."
-                            + Style.RESET_ALL
-                        )
-                        sugg = suggest_actions(
-                            tuner,
-                            list(turn_log),
-                            probes=probes,
-                            archive_size=_arch,
-                        )
-                        if not sugg:
-                            print(
-                                Fore.CYAN
-                                + "  -> Ask for a command completion with "
-                                + f":suggest :<command> because {command_because}"
-                                + Style.RESET_ALL
-                            )
-                        # Continue into the ordinary state-wide suggestion
-                        # renderer. Crucially, do not recommend backfilling the
-                        # arbitrary highest probe.
-                        target_probe = None
-                    else:
-                        top_probe, top_score = confident_match
-                        print(Fore.GREEN + Style.BRIGHT + f"[Suggest] Confident internal representation match: '{top_probe}' (similarity: {top_score:+.3f})" + Style.RESET_ALL)
-                    if len(sorted_probes) > 1:
-                        runners_up = ", ".join(f"{p} ({s:+.3f})" for p, s in sorted_probes[1:3])
-                        print(Fore.CYAN + f"          Runners up: {runners_up}" + Style.RESET_ALL)
-
-                    if confident_match is not None:
-                        all_sugg = suggest_actions(tuner, list(turn_log), probes=probes, archive_size=_arch)
-                        sugg = [(cat, line, cmd) for cat, line, cmd in all_sugg if top_probe in line or top_probe in cmd]
-
-                        if not sugg:
-                            print(Fore.YELLOW + f"[Suggest] No specific data-backed moves ready for '{top_probe}' yet." + Style.RESET_ALL)
-                            print(Fore.CYAN + f"  -> To generate evidence: :probe backfill {top_probe}" + Style.RESET_ALL)
-                            print(Fore.CYAN + f"  -> To steer blindly:     :tune probe_{top_probe}_alpha 0.5" + Style.RESET_ALL)
-                            continue
+                    goal_text, prefix_cmd = parse_suggest_goal_request(command_because)
+                    _queue_goal_command_suggestion(goal_text, prefix_cmd)
+                    continue
                 else:
                     sugg = suggest_actions(tuner, list(turn_log), probes=probes, archive_size=_arch)
 
@@ -13555,7 +14234,7 @@ def main():
                     print(Fore.CYAN + "[Label] Usage: :label <probe|stream> pos|neg -- mark the last turn on that axis." + Style.RESET_ALL)
                     continue
                 lname_raw = largs[0]
-                lname = resolve_probe_choice(lname_raw, probes)
+                lname = resolve_probe_choice(lname_raw, calibratable_names(tuner), model=model, config=config, action_name="label")
                 if not lname:
                     continue
                 verdict = largs[1].lower()
@@ -14672,7 +15351,15 @@ def main():
             _refresh_tot_committee_from_live_state()
             claimmap_alpha_used = (
                 0.0 if utility_expect_turn
-                else (tuner.get("claimmap_alpha", 0.0) if claimmap_steer_delta else 0.0)
+                else (
+                    field_governed_knob_value(
+                        "claimmap_alpha",
+                        tuner,
+                        probes,
+                        default=tuner.get("claimmap_alpha", 0.0),
+                    )
+                    if claimmap_steer_delta else 0.0
+                )
             )
             turn_sweep_layers = None
             if (not utility_expect_turn) and claimmap_steer_delta and claimmap_alpha_used > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
@@ -15174,7 +15861,12 @@ def main():
                     session_context=session_context if session_context_enabled else None,
                 )
                 print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                tag_alpha = tuner.get("claimmap_alpha", 0.0)
+                tag_alpha = field_governed_knob_value(
+                    "claimmap_alpha",
+                    tuner,
+                    probes,
+                    default=tuner.get("claimmap_alpha", 0.0),
+                )
                 tag_sweep_layers = None
                 if model_claimmap_steer and tag_alpha > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
                     _tls, _tds, _tvar = _sweep_layers_for("claimmap", model_claimmap_steer)
