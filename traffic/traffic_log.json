@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-07-14T14:00:02+00:00",
+ "updated_at": "2026-07-15T14:00:01+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -85,6 +85,10 @@
   "2026-07-13": {
    "count": 13,
    "uniques": 8
+  },
+  "2026-07-14": {
+   "count": 160,
+   "uniques": 20
   }
  },
  "views_by_day": {
@@ -171,24 +175,28 @@
   "2026-07-13": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-07-14": {
+   "count": 10,
+   "uniques": 1
   }
  },
  "last_window": {
-  "fetched_at": "2026-07-14T14:00:02+00:00",
-  "clones_total": 1494,
-  "clones_uniques": 411,
-  "views_total": 436,
-  "views_uniques": 11
+  "fetched_at": "2026-07-15T14:00:01+00:00",
+  "clones_total": 1486,
+  "clones_uniques": 385,
+  "views_total": 388,
+  "views_uniques": 10
  },
  "latest_referrers": [
   {
    "referrer": "github.com",
-   "count": 50,
+   "count": 42,
    "uniques": 3
   },
   {
    "referrer": "lesswrong.com",
-   "count": 12,
+   "count": 13,
    "uniques": 1
   },
   {
@@ -201,25 +209,25 @@
   {
    "path": "/ghvhn/state-output-decoupling",
    "title": "Overview",
-   "count": 128,
-   "uniques": 6
+   "count": 102,
+   "uniques": 5
   },
   {
    "path": "/ghvhn/state-output-decoupling/graphs/traffic",
    "title": "/graphs/traffic",
-   "count": 48,
+   "count": 43,
    "uniques": 1
   },
   {
    "path": "/ghvhn/state-output-decoupling/commits/main",
    "title": "/commits/main",
-   "count": 28,
+   "count": 30,
    "uniques": 1
   },
   {
    "path": "/ghvhn/state-output-decoupling/pulse",
    "title": "/pulse",
-   "count": 28,
+   "count": 25,
    "uniques": 1
   },
   {
@@ -237,7 +245,7 @@
   {
    "path": "/ghvhn/state-output-decoupling/tree/main",
    "title": "/tree/main",
-   "count": 11,
+   "count": 10,
    "uniques": 3
   },
   {
@@ -253,8 +261,8 @@
    "uniques": 1
   },
   {
-   "path": "/ghvhn/state-output-decoupling/blob/main/run_benchmark.cmd",
-   "title": "/blob/main/run_benchmark.cmd",
+   "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/x7_traffic.png",
+   "title": "/blob/main/docs/figures/x7_traffic.png",
    "count": 5,
    "uniques": 2
   }
