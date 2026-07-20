@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-07-19T14:00:02+00:00",
+ "updated_at": "2026-07-20T14:00:02+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -104,6 +104,10 @@
   },
   "2026-07-18": {
    "count": 4,
+   "uniques": 3
+  },
+  "2026-07-19": {
+   "count": 3,
    "uniques": 3
   }
  },
@@ -211,20 +215,24 @@
   "2026-07-18": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-07-19": {
+   "count": 0,
+   "uniques": 0
   }
  },
  "last_window": {
-  "fetched_at": "2026-07-19T14:00:02+00:00",
-  "clones_total": 1196,
-  "clones_uniques": 307,
-  "views_total": 319,
-  "views_uniques": 10
+  "fetched_at": "2026-07-20T14:00:02+00:00",
+  "clones_total": 863,
+  "clones_uniques": 206,
+  "views_total": 291,
+  "views_uniques": 9
  },
  "latest_referrers": [
   {
    "referrer": "github.com",
-   "count": 33,
-   "uniques": 3
+   "count": 20,
+   "uniques": 2
   },
   {
    "referrer": "lesswrong.com",
@@ -241,8 +249,8 @@
   {
    "path": "/ghvhn/state-output-decoupling",
    "title": "Overview",
-   "count": 68,
-   "uniques": 5
+   "count": 63,
+   "uniques": 4
   },
   {
    "path": "/ghvhn/state-output-decoupling/commits/main",
@@ -253,7 +261,7 @@
   {
    "path": "/ghvhn/state-output-decoupling/graphs/traffic",
    "title": "/graphs/traffic",
-   "count": 31,
+   "count": 30,
    "uniques": 1
   },
   {
@@ -265,7 +273,7 @@
   {
    "path": "/ghvhn/state-output-decoupling/pulse",
    "title": "/pulse",
-   "count": 16,
+   "count": 14,
    "uniques": 1
   },
   {
@@ -273,12 +281,6 @@
    "title": "/blob/main/docs/ARCHITECTURAL_REALITY.md",
    "count": 12,
    "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/tree/main",
-   "title": "/tree/main",
-   "count": 6,
-   "uniques": 3
   },
   {
    "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/x7_traffic.png",
@@ -293,9 +295,15 @@
    "uniques": 1
   },
   {
-   "path": "/ghvhn/state-output-decoupling/tree/main/scripts",
-   "title": "/tree/main/scripts",
-   "count": 5,
+   "path": "/ghvhn/state-output-decoupling/blob/main/FINDINGS.json",
+   "title": "/blob/main/FINDINGS.json",
+   "count": 4,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/security",
+   "title": "/security",
+   "count": 4,
    "uniques": 1
   }
  ]
