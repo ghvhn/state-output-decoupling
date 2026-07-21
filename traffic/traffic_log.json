@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-07-20T14:00:02+00:00",
+ "updated_at": "2026-07-21T14:00:02+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -109,6 +109,10 @@
   "2026-07-19": {
    "count": 3,
    "uniques": 3
+  },
+  "2026-07-20": {
+   "count": 4,
+   "uniques": 4
   }
  },
  "views_by_day": {
@@ -219,61 +223,53 @@
   "2026-07-19": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-07-20": {
+   "count": 0,
+   "uniques": 0
   }
  },
  "last_window": {
-  "fetched_at": "2026-07-20T14:00:02+00:00",
-  "clones_total": 863,
-  "clones_uniques": 206,
-  "views_total": 291,
-  "views_uniques": 9
+  "fetched_at": "2026-07-21T14:00:02+00:00",
+  "clones_total": 320,
+  "clones_uniques": 87,
+  "views_total": 221,
+  "views_uniques": 8
  },
  "latest_referrers": [
-  {
-   "referrer": "github.com",
-   "count": 20,
-   "uniques": 2
-  },
   {
    "referrer": "lesswrong.com",
    "count": 13,
    "uniques": 1
   },
   {
-   "referrer": "linkedin.com",
-   "count": 3,
+   "referrer": "github.com",
+   "count": 4,
    "uniques": 2
+  },
+  {
+   "referrer": "linkedin.com",
+   "count": 2,
+   "uniques": 1
   }
  ],
  "latest_paths": [
   {
    "path": "/ghvhn/state-output-decoupling",
    "title": "Overview",
-   "count": 63,
+   "count": 40,
    "uniques": 4
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/commits/main",
-   "title": "/commits/main",
-   "count": 31,
-   "uniques": 1
   },
   {
    "path": "/ghvhn/state-output-decoupling/graphs/traffic",
    "title": "/graphs/traffic",
-   "count": 30,
+   "count": 26,
    "uniques": 1
   },
   {
-   "path": "/ghvhn/state-output-decoupling/blob/main/PUBLIC_ANNOUNCEMENT.md",
-   "title": "/blob/main/PUBLIC_ANNOUNCEMENT.md",
+   "path": "/ghvhn/state-output-decoupling/commits/main",
+   "title": "/commits/main",
    "count": 20,
-   "uniques": 7
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/pulse",
-   "title": "/pulse",
-   "count": 14,
    "uniques": 1
   },
   {
@@ -281,6 +277,18 @@
    "title": "/blob/main/docs/ARCHITECTURAL_REALITY.md",
    "count": 12,
    "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/pulse",
+   "title": "/pulse",
+   "count": 11,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/blob/main/PUBLIC_ANNOUNCEMENT.md",
+   "title": "/blob/main/PUBLIC_ANNOUNCEMENT.md",
+   "count": 9,
+   "uniques": 5
   },
   {
    "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/x7_traffic.png",
