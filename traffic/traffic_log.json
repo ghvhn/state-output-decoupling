@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-07-21T14:00:02+00:00",
+ "updated_at": "2026-07-22T14:00:02+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -111,6 +111,10 @@
    "uniques": 3
   },
   "2026-07-20": {
+   "count": 4,
+   "uniques": 4
+  },
+  "2026-07-21": {
    "count": 4,
    "uniques": 4
   }
@@ -227,29 +231,33 @@
   "2026-07-20": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-07-21": {
+   "count": 0,
+   "uniques": 0
   }
  },
  "last_window": {
-  "fetched_at": "2026-07-21T14:00:02+00:00",
-  "clones_total": 320,
-  "clones_uniques": 87,
-  "views_total": 221,
-  "views_uniques": 8
+  "fetched_at": "2026-07-22T14:00:02+00:00",
+  "clones_total": 295,
+  "clones_uniques": 77,
+  "views_total": 141,
+  "views_uniques": 6
  },
  "latest_referrers": [
   {
    "referrer": "lesswrong.com",
-   "count": 13,
+   "count": 5,
    "uniques": 1
-  },
-  {
-   "referrer": "github.com",
-   "count": 4,
-   "uniques": 2
   },
   {
    "referrer": "linkedin.com",
    "count": 2,
+   "uniques": 1
+  },
+  {
+   "referrer": "github.com",
+   "count": 1,
    "uniques": 1
   }
  ],
@@ -257,38 +265,26 @@
   {
    "path": "/ghvhn/state-output-decoupling",
    "title": "Overview",
-   "count": 40,
+   "count": 30,
    "uniques": 4
   },
   {
    "path": "/ghvhn/state-output-decoupling/graphs/traffic",
    "title": "/graphs/traffic",
-   "count": 26,
+   "count": 16,
    "uniques": 1
   },
   {
    "path": "/ghvhn/state-output-decoupling/commits/main",
    "title": "/commits/main",
-   "count": 20,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/blob/main/docs/ARCHITECTURAL_REALITY.md",
-   "title": "/blob/main/docs/ARCHITECTURAL_REALITY.md",
-   "count": 12,
+   "count": 10,
    "uniques": 1
   },
   {
    "path": "/ghvhn/state-output-decoupling/pulse",
    "title": "/pulse",
-   "count": 11,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/blob/main/PUBLIC_ANNOUNCEMENT.md",
-   "title": "/blob/main/PUBLIC_ANNOUNCEMENT.md",
    "count": 9,
-   "uniques": 5
+   "uniques": 1
   },
   {
    "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/x7_traffic.png",
@@ -297,21 +293,33 @@
    "uniques": 2
   },
   {
-   "path": "/ghvhn/state-output-decoupling/blob/0d1eaadf43166460dad84600f704b4a85c445c66/invariants/out/surgery_belief_l31.json",
-   "title": "/blob/0d1eaadf43166460dad84600f704b4a85c445c66/invariants/out/surgery_belief_l31.json",
-   "count": 5,
+   "path": "/ghvhn/state-output-decoupling/blob/main/PUBLIC_ANNOUNCEMENT.md",
+   "title": "/blob/main/PUBLIC_ANNOUNCEMENT.md",
+   "count": 3,
+   "uniques": 2
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/blob/main/docs/ARCHITECTURAL_REALITY.md",
+   "title": "/blob/main/docs/ARCHITECTURAL_REALITY.md",
+   "count": 3,
    "uniques": 1
   },
   {
-   "path": "/ghvhn/state-output-decoupling/blob/main/FINDINGS.json",
-   "title": "/blob/main/FINDINGS.json",
-   "count": 4,
+   "path": "/ghvhn/state-output-decoupling/network/dependencies",
+   "title": "/network/dependencies",
+   "count": 3,
    "uniques": 1
   },
   {
-   "path": "/ghvhn/state-output-decoupling/security",
-   "title": "/security",
-   "count": 4,
+   "path": "/ghvhn/state-output-decoupling/tree/main/docs",
+   "title": "/tree/main/docs",
+   "count": 3,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/actions/metrics/performance",
+   "title": "/actions/metrics/performance",
+   "count": 2,
    "uniques": 1
   }
  ]
