@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-07-28T14:00:02+00:00",
+ "updated_at": "2026-07-29T14:00:02+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -141,6 +141,10 @@
   "2026-07-27": {
    "count": 5,
    "uniques": 4
+  },
+  "2026-07-28": {
+   "count": 5,
+   "uniques": 5
   }
  },
  "views_by_day": {
@@ -283,33 +287,25 @@
   "2026-07-27": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-07-28": {
+   "count": 0,
+   "uniques": 0
   }
  },
  "last_window": {
-  "fetched_at": "2026-07-28T14:00:02+00:00",
-  "clones_total": 242,
-  "clones_uniques": 53,
-  "views_total": 37,
+  "fetched_at": "2026-07-29T14:00:02+00:00",
+  "clones_total": 87,
+  "clones_uniques": 39,
+  "views_total": 27,
   "views_uniques": 1
  },
- "latest_referrers": [
-  {
-   "referrer": "lesswrong.com",
-   "count": 1,
-   "uniques": 1
-  }
- ],
+ "latest_referrers": [],
  "latest_paths": [
   {
    "path": "/ghvhn/state-output-decoupling",
    "title": "Overview",
-   "count": 7,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/commits/main",
-   "title": "/commits/main",
-   "count": 3,
+   "count": 4,
    "uniques": 1
   },
   {
@@ -321,12 +317,6 @@
   {
    "path": "/ghvhn/state-output-decoupling/pulse",
    "title": "/pulse",
-   "count": 3,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/x7_traffic.png",
-   "title": "/blob/main/docs/figures/x7_traffic.png",
    "count": 2,
    "uniques": 1
   },
@@ -357,6 +347,18 @@
   {
    "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/fig3_pre_position_and_control.png",
    "title": "/blob/main/docs/figures/fig3_pre_position_and_control.png",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/fig4_cot_trajectory.png",
+   "title": "/blob/main/docs/figures/fig4_cot_trajectory.png",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/fig5_origin_2x2.png",
+   "title": "/blob/main/docs/figures/fig5_origin_2x2.png",
    "count": 1,
    "uniques": 1
   }
