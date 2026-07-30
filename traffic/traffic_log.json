@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-07-29T14:00:02+00:00",
+ "updated_at": "2026-07-30T14:00:01+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -145,6 +145,10 @@
   "2026-07-28": {
    "count": 5,
    "uniques": 5
+  },
+  "2026-07-29": {
+   "count": 4,
+   "uniques": 4
   }
  },
  "views_by_day": {
@@ -291,74 +295,48 @@
   "2026-07-28": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-07-29": {
+   "count": 0,
+   "uniques": 0
   }
  },
  "last_window": {
-  "fetched_at": "2026-07-29T14:00:02+00:00",
-  "clones_total": 87,
-  "clones_uniques": 39,
-  "views_total": 27,
+  "fetched_at": "2026-07-30T14:00:01+00:00",
+  "clones_total": 70,
+  "clones_uniques": 35,
+  "views_total": 6,
   "views_uniques": 1
  },
  "latest_referrers": [],
  "latest_paths": [
   {
-   "path": "/ghvhn/state-output-decoupling",
-   "title": "Overview",
-   "count": 4,
+   "path": "/ghvhn/state-output-decoupling/graphs/traffic",
+   "title": "/graphs/traffic",
+   "count": 2,
    "uniques": 1
   },
   {
-   "path": "/ghvhn/state-output-decoupling/graphs/traffic",
-   "title": "/graphs/traffic",
-   "count": 3,
+   "path": "/ghvhn/state-output-decoupling",
+   "title": "Overview",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/commits/main",
+   "title": "/commits/main",
+   "count": 1,
    "uniques": 1
   },
   {
    "path": "/ghvhn/state-output-decoupling/pulse",
    "title": "/pulse",
-   "count": 2,
+   "count": 1,
    "uniques": 1
   },
   {
    "path": "/ghvhn/state-output-decoupling/tree/main/docs",
    "title": "/tree/main/docs",
-   "count": 2,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/CAPTIONS.md",
-   "title": "/blob/main/docs/figures/CAPTIONS.md",
-   "count": 1,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/fig1_bottleneck_schematic.png",
-   "title": "/blob/main/docs/figures/fig1_bottleneck_schematic.png",
-   "count": 1,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/fig2_render_u.png",
-   "title": "/blob/main/docs/figures/fig2_render_u.png",
-   "count": 1,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/fig3_pre_position_and_control.png",
-   "title": "/blob/main/docs/figures/fig3_pre_position_and_control.png",
-   "count": 1,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/fig4_cot_trajectory.png",
-   "title": "/blob/main/docs/figures/fig4_cot_trajectory.png",
-   "count": 1,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/blob/main/docs/figures/fig5_origin_2x2.png",
-   "title": "/blob/main/docs/figures/fig5_origin_2x2.png",
    "count": 1,
    "uniques": 1
   }
