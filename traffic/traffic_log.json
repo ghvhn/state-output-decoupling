@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-07-30T14:00:01+00:00",
+ "updated_at": "2026-07-31T14:00:01+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -149,6 +149,10 @@
   "2026-07-29": {
    "count": 4,
    "uniques": 4
+  },
+  "2026-07-30": {
+   "count": 3,
+   "uniques": 3
   }
  },
  "views_by_day": {
@@ -299,46 +303,19 @@
   "2026-07-29": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-07-30": {
+   "count": 0,
+   "uniques": 0
   }
  },
  "last_window": {
-  "fetched_at": "2026-07-30T14:00:01+00:00",
+  "fetched_at": "2026-07-31T14:00:01+00:00",
   "clones_total": 70,
-  "clones_uniques": 35,
-  "views_total": 6,
-  "views_uniques": 1
+  "clones_uniques": 34,
+  "views_total": 0,
+  "views_uniques": 0
  },
  "latest_referrers": [],
- "latest_paths": [
-  {
-   "path": "/ghvhn/state-output-decoupling/graphs/traffic",
-   "title": "/graphs/traffic",
-   "count": 2,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling",
-   "title": "Overview",
-   "count": 1,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/commits/main",
-   "title": "/commits/main",
-   "count": 1,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/pulse",
-   "title": "/pulse",
-   "count": 1,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/tree/main/docs",
-   "title": "/tree/main/docs",
-   "count": 1,
-   "uniques": 1
-  }
- ]
+ "latest_paths": []
 }
