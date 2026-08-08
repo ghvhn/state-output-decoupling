@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-08-07T14:00:02+00:00",
+ "updated_at": "2026-08-08T14:00:02+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -181,6 +181,10 @@
   "2026-08-06": {
    "count": 13,
    "uniques": 8
+  },
+  "2026-08-07": {
+   "count": 6,
+   "uniques": 5
   }
  },
  "views_by_day": {
@@ -363,17 +367,33 @@
   "2026-08-06": {
    "count": 1,
    "uniques": 1
+  },
+  "2026-08-07": {
+   "count": 2,
+   "uniques": 2
   }
  },
  "last_window": {
-  "fetched_at": "2026-08-07T14:00:02+00:00",
-  "clones_total": 95,
-  "clones_uniques": 47,
-  "views_total": 1,
-  "views_uniques": 1
+  "fetched_at": "2026-08-08T14:00:02+00:00",
+  "clones_total": 98,
+  "clones_uniques": 49,
+  "views_total": 3,
+  "views_uniques": 3
  },
- "latest_referrers": [],
+ "latest_referrers": [
+  {
+   "referrer": "github.com",
+   "count": 1,
+   "uniques": 1
+  }
+ ],
  "latest_paths": [
+  {
+   "path": "/ghvhn/state-output-decoupling",
+   "title": "Overview",
+   "count": 2,
+   "uniques": 2
+  },
   {
    "path": "/ghvhn/state-output-decoupling/issues",
    "title": "/issues",
