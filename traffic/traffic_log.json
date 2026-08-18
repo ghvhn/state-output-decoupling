@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-08-17T14:00:02+00:00",
+ "updated_at": "2026-08-18T14:00:02+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -217,6 +217,14 @@
   "2026-08-15": {
    "count": 13,
    "uniques": 7
+  },
+  "2026-08-16": {
+   "count": 3,
+   "uniques": 3
+  },
+  "2026-08-17": {
+   "count": 8,
+   "uniques": 4
   }
  },
  "views_by_day": {
@@ -435,16 +443,29 @@
   "2026-08-15": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-08-16": {
+   "count": 0,
+   "uniques": 0
+  },
+  "2026-08-17": {
+   "count": 26,
+   "uniques": 2
   }
  },
  "last_window": {
-  "fetched_at": "2026-08-17T14:00:02+00:00",
-  "clones_total": 190,
-  "clones_uniques": 145,
-  "views_total": 3,
-  "views_uniques": 3
+  "fetched_at": "2026-08-18T14:00:02+00:00",
+  "clones_total": 195,
+  "clones_uniques": 148,
+  "views_total": 29,
+  "views_uniques": 5
  },
  "latest_referrers": [
+  {
+   "referrer": "Google",
+   "count": 15,
+   "uniques": 1
+  },
   {
    "referrer": "github.com",
    "count": 1,
@@ -455,8 +476,56 @@
   {
    "path": "/ghvhn/state-output-decoupling",
    "title": "Overview",
-   "count": 2,
+   "count": 9,
+   "uniques": 4
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/pulse",
+   "title": "/pulse",
+   "count": 6,
    "uniques": 2
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/commits/main",
+   "title": "/commits/main",
+   "count": 3,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/graphs/traffic",
+   "title": "/graphs/traffic",
+   "count": 3,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/branches",
+   "title": "/branches",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/commit/4fcd7901d98de97a3340f1f852d9c2b06a378f04",
+   "title": "/commit/4fcd7901d98de97a3340f1f852d9c2b06a378f04",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/commit/b533cc6df49a216ad93a9e11ff4f57099004b362",
+   "title": "/commit/b533cc6df49a216ad93a9e11ff4f57099004b362",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/graphs/commit-activity",
+   "title": "/graphs/commit-activity",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/graphs/contributors",
+   "title": "/graphs/contributors",
+   "count": 1,
+   "uniques": 1
   },
   {
    "path": "/ghvhn/state-output-decoupling/issues",
