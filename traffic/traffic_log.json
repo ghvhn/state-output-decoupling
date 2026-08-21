@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-08-20T14:00:02+00:00",
+ "updated_at": "2026-08-21T14:00:02+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -233,6 +233,10 @@
   "2026-08-19": {
    "count": 3,
    "uniques": 3
+  },
+  "2026-08-20": {
+   "count": 1,
+   "uniques": 1
   }
  },
  "views_by_day": {
@@ -467,14 +471,18 @@
   "2026-08-19": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-08-20": {
+   "count": 0,
+   "uniques": 0
   }
  },
  "last_window": {
-  "fetched_at": "2026-08-20T14:00:02+00:00",
-  "clones_total": 188,
-  "clones_uniques": 144,
-  "views_total": 29,
-  "views_uniques": 5
+  "fetched_at": "2026-08-21T14:00:02+00:00",
+  "clones_total": 176,
+  "clones_uniques": 138,
+  "views_total": 28,
+  "views_uniques": 4
  },
  "latest_referrers": [
   {
@@ -544,8 +552,8 @@
    "uniques": 1
   },
   {
-   "path": "/ghvhn/state-output-decoupling/issues",
-   "title": "/issues",
+   "path": "/ghvhn/state-output-decoupling/projects",
+   "title": "/projects",
    "count": 1,
    "uniques": 1
   }
