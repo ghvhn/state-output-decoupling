@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-08-21T14:00:02+00:00",
+ "updated_at": "2026-08-26T14:00:01+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -235,6 +235,26 @@
    "uniques": 3
   },
   "2026-08-20": {
+   "count": 1,
+   "uniques": 1
+  },
+  "2026-08-21": {
+   "count": 15,
+   "uniques": 9
+  },
+  "2026-08-22": {
+   "count": 1,
+   "uniques": 1
+  },
+  "2026-08-23": {
+   "count": 4,
+   "uniques": 4
+  },
+  "2026-08-24": {
+   "count": 1,
+   "uniques": 1
+  },
+  "2026-08-25": {
    "count": 1,
    "uniques": 1
   }
@@ -475,24 +495,39 @@
   "2026-08-20": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-08-21": {
+   "count": 0,
+   "uniques": 0
+  },
+  "2026-08-22": {
+   "count": 0,
+   "uniques": 0
+  },
+  "2026-08-23": {
+   "count": 0,
+   "uniques": 0
+  },
+  "2026-08-24": {
+   "count": 1,
+   "uniques": 1
+  },
+  "2026-08-25": {
+   "count": 0,
+   "uniques": 0
   }
  },
  "last_window": {
-  "fetched_at": "2026-08-21T14:00:02+00:00",
-  "clones_total": 176,
-  "clones_uniques": 138,
-  "views_total": 28,
-  "views_uniques": 4
+  "fetched_at": "2026-08-26T14:00:01+00:00",
+  "clones_total": 184,
+  "clones_uniques": 145,
+  "views_total": 27,
+  "views_uniques": 3
  },
  "latest_referrers": [
   {
    "referrer": "Google",
    "count": 15,
-   "uniques": 1
-  },
-  {
-   "referrer": "github.com",
-   "count": 1,
    "uniques": 1
   }
  ],
@@ -500,8 +535,8 @@
   {
    "path": "/ghvhn/state-output-decoupling",
    "title": "Overview",
-   "count": 9,
-   "uniques": 4
+   "count": 7,
+   "uniques": 2
   },
   {
    "path": "/ghvhn/state-output-decoupling/pulse",
@@ -540,6 +575,12 @@
    "uniques": 1
   },
   {
+   "path": "/ghvhn/state-output-decoupling/discussions",
+   "title": "/discussions",
+   "count": 1,
+   "uniques": 1
+  },
+  {
    "path": "/ghvhn/state-output-decoupling/graphs/commit-activity",
    "title": "/graphs/commit-activity",
    "count": 1,
@@ -548,12 +589,6 @@
   {
    "path": "/ghvhn/state-output-decoupling/graphs/contributors",
    "title": "/graphs/contributors",
-   "count": 1,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/projects",
-   "title": "/projects",
    "count": 1,
    "uniques": 1
   }
