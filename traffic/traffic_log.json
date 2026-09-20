@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-09-19T14:00:01+00:00",
+ "updated_at": "2026-09-20T14:00:02+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -353,6 +353,10 @@
   "2026-09-18": {
    "count": 3,
    "uniques": 3
+  },
+  "2026-09-19": {
+   "count": 3,
+   "uniques": 2
   }
  },
  "views_by_day": {
@@ -707,20 +711,24 @@
   "2026-09-18": {
    "count": 1,
    "uniques": 1
+  },
+  "2026-09-19": {
+   "count": 0,
+   "uniques": 0
   }
  },
  "last_window": {
-  "fetched_at": "2026-09-19T14:00:01+00:00",
-  "clones_total": 111,
-  "clones_uniques": 39,
-  "views_total": 27,
+  "fetched_at": "2026-09-20T14:00:02+00:00",
+  "clones_total": 84,
+  "clones_uniques": 32,
+  "views_total": 11,
   "views_uniques": 4
  },
  "latest_referrers": [
   {
    "referrer": "github.com",
-   "count": 9,
-   "uniques": 2
+   "count": 2,
+   "uniques": 1
   },
   {
    "referrer": "Google",
@@ -732,26 +740,8 @@
   {
    "path": "/ghvhn/state-output-decoupling",
    "title": "Overview",
-   "count": 10,
+   "count": 6,
    "uniques": 3
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/pulse",
-   "title": "/pulse",
-   "count": 3,
-   "uniques": 2
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/tree/main/traffic",
-   "title": "/tree/main/traffic",
-   "count": 3,
-   "uniques": 2
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/blob/main/traffic/traffic_log.json",
-   "title": "/blob/main/traffic/traffic_log.json",
-   "count": 2,
-   "uniques": 2
   },
   {
    "path": "/ghvhn/state-output-decoupling/blob/main/COMMANDS.md",
@@ -772,20 +762,14 @@
    "uniques": 1
   },
   {
-   "path": "/ghvhn/state-output-decoupling/blob/main/traffic/snapshots.jsonl",
-   "title": "/blob/main/traffic/snapshots.jsonl",
+   "path": "/ghvhn/state-output-decoupling/pulse",
+   "title": "/pulse",
    "count": 1,
    "uniques": 1
   },
   {
-   "path": "/ghvhn/state-output-decoupling/forks",
-   "title": "/forks",
-   "count": 1,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/graphs/traffic",
-   "title": "/graphs/traffic",
+   "path": "/ghvhn/state-output-decoupling/tree/main/scripts",
+   "title": "/tree/main/scripts",
    "count": 1,
    "uniques": 1
   }
