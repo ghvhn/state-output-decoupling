@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-10-04T14:00:02+00:00",
+ "updated_at": "2026-10-05T14:00:02+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -413,6 +413,10 @@
   "2026-10-03": {
    "count": 16,
    "uniques": 9
+  },
+  "2026-10-04": {
+   "count": 8,
+   "uniques": 5
   }
  },
  "views_by_day": {
@@ -827,14 +831,18 @@
   "2026-10-03": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-10-04": {
+   "count": 0,
+   "uniques": 0
   }
  },
  "last_window": {
-  "fetched_at": "2026-10-04T14:00:02+00:00",
-  "clones_total": 162,
-  "clones_uniques": 71,
-  "views_total": 21,
-  "views_uniques": 6
+  "fetched_at": "2026-10-05T14:00:02+00:00",
+  "clones_total": 147,
+  "clones_uniques": 63,
+  "views_total": 18,
+  "views_uniques": 4
  },
  "latest_referrers": [
   {
@@ -847,8 +855,8 @@
   {
    "path": "/ghvhn/state-output-decoupling",
    "title": "Overview",
-   "count": 7,
-   "uniques": 6
+   "count": 5,
+   "uniques": 4
   },
   {
    "path": "/ghvhn/state-output-decoupling/pulse",
@@ -889,12 +897,6 @@
   {
    "path": "/ghvhn/state-output-decoupling/pulls",
    "title": "/pulls",
-   "count": 1,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/tree/main/games",
-   "title": "/tree/main/games",
    "count": 1,
    "uniques": 1
   }
