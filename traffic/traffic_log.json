@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-10-05T14:00:02+00:00",
+ "updated_at": "2026-10-06T14:00:02+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -417,6 +417,10 @@
   "2026-10-04": {
    "count": 8,
    "uniques": 5
+  },
+  "2026-10-05": {
+   "count": 5,
+   "uniques": 3
   }
  },
  "views_by_day": {
@@ -835,18 +839,27 @@
   "2026-10-04": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-10-05": {
+   "count": 3,
+   "uniques": 1
   }
  },
  "last_window": {
-  "fetched_at": "2026-10-05T14:00:02+00:00",
-  "clones_total": 147,
-  "clones_uniques": 63,
-  "views_total": 18,
-  "views_uniques": 4
+  "fetched_at": "2026-10-06T14:00:02+00:00",
+  "clones_total": 140,
+  "clones_uniques": 58,
+  "views_total": 21,
+  "views_uniques": 5
  },
  "latest_referrers": [
   {
    "referrer": "Google",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "referrer": "github.com",
    "count": 1,
    "uniques": 1
   }
@@ -855,13 +868,25 @@
   {
    "path": "/ghvhn/state-output-decoupling",
    "title": "Overview",
-   "count": 5,
-   "uniques": 4
+   "count": 6,
+   "uniques": 5
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/commit/ee6e562c5a2ce283d420cd2455b61736985cca8d",
+   "title": "/commit/ee6e562c5a2ce283d420cd2455b61736985cca8d",
+   "count": 3,
+   "uniques": 2
   },
   {
    "path": "/ghvhn/state-output-decoupling/pulse",
    "title": "/pulse",
    "count": 3,
+   "uniques": 2
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/commits/main",
+   "title": "/commits/main",
+   "count": 2,
    "uniques": 2
   },
   {
@@ -877,21 +902,9 @@
    "uniques": 2
   },
   {
-   "path": "/ghvhn/state-output-decoupling/commit/ee6e562c5a2ce283d420cd2455b61736985cca8d",
-   "title": "/commit/ee6e562c5a2ce283d420cd2455b61736985cca8d",
-   "count": 2,
-   "uniques": 1
-  },
-  {
    "path": "/ghvhn/state-output-decoupling/graphs/traffic",
    "title": "/graphs/traffic",
    "count": 2,
-   "uniques": 1
-  },
-  {
-   "path": "/ghvhn/state-output-decoupling/commits/main",
-   "title": "/commits/main",
-   "count": 1,
    "uniques": 1
   },
   {
