@@ -2,6 +2,7 @@ import time
 import torch
 import torch.nn.functional as F
 from pathlib import Path
+from contextlib import ExitStack
 
 from invariants.engine import (
     _cap_steer,
@@ -12,6 +13,7 @@ from invariants.engine import (
 )
 from invariants.social_hunt import get_steer_vector
 from invariants.cognitive_cache import CognitiveCache
+from invariants.memory_attention import auxiliary_encoding
 
 class NeedsDisambiguationError(Exception):
     pass
@@ -379,6 +381,8 @@ def get_agentic_handles(
 
     if config is None:
         config = AgenticConfig()
+    if getattr(config, 'base_model_only', False):
+        return [], {"steer_channels": {}}
     if vecs is None:
         vecs = _global_registry.get_vecs(M) if getattr(config, "use_expert_vectors", True) else {}
     if getattr(config, "committee", None) is None:
@@ -555,7 +559,8 @@ def get_agentic_handles(
                                 if torch.is_tensor(value) and value.shape[0] == 1 and h_parallel.shape[0] != 1:
                                     layer_kwargs[key] = value.repeat(h_parallel.shape[0], *([1] * (value.ndim - 1)))
                             
-                            layer_out = M.model.model.layers[i](h_parallel, *args[1:], **layer_kwargs)
+                            with auxiliary_encoding():
+                                layer_out = M.model.model.layers[i](h_parallel, *args[1:], **layer_kwargs)
                             h_parallel = layer_out[0] if isinstance(layer_out, tuple) else layer_out
                         
                         # 4. Evaluate Entropy of Branches
@@ -714,7 +719,8 @@ def get_agentic_handles(
                                                 if "position_ids" in layer_kwargs and layer_kwargs["position_ids"].shape[1] > 1:
                                                     layer_kwargs["position_ids"] = layer_kwargs["position_ids"][:, -1:]
                                                 
-                                            layer_out = M.model.model.layers[j](h_curr, *args[1:], **layer_kwargs)
+                                            with auxiliary_encoding():
+                                                layer_out = M.model.model.layers[j](h_curr, *args[1:], **layer_kwargs)
                                             h_curr = layer_out[0] if isinstance(layer_out, tuple) else layer_out
                                     
                                     h_31_last = h_curr[:, -1:, :]
@@ -1103,8 +1109,16 @@ def generate_agentic_text(
     mid_chunk_hook=None,
     return_telemetry=False,
     system_prompt=None,
+    generation_channel="speech",
+    generation_probes=None,
+    generation_state_sink=None,
     **legacy_overrides,
 ):
+    if generation_channel not in ('speech', 'reader'):
+        raise ValueError("generation_channel must be 'speech' or 'reader'")
+    if generation_state_sink is not None and not callable(generation_state_sink):
+        raise TypeError('generation_state_sink must be callable')
+    reader_channel = generation_channel == 'reader'
     call = GenerationCall(
         positional=positional,
         instruction=instruction,
@@ -1113,7 +1127,7 @@ def generate_agentic_text(
         legacy_overrides=legacy_overrides,
         max_new_tokens=max_new_tokens,
         max_tool_calls=max_tool_calls,
-        chatty_log=chatty_log,
+        chatty_log=False if reader_channel else chatty_log,
         max_time=max_time,
     )
     config = call.config
@@ -1127,9 +1141,32 @@ def generate_agentic_text(
     # longer leak deadline/chatty state into the next generation.
     call.apply()
     handles = []
+    activation_context = ExitStack()
+    activation_session = None
+    activation_owner = None
+    probe_capture = None
+    lookahead_processor = getattr(config, 'lookahead_processor', None)
     try:
         inputs = _inputs(M, instruction, pre_formatted=pre_formatted, system_prompt=system_prompt)
         original_plen = inputs["input_ids"].shape[1]
+        if lookahead_processor is not None and hasattr(lookahead_processor, 'begin_generation'):
+            lookahead_processor.begin_generation(inputs['input_ids'])
+        if getattr(config, 'activation_memory_enabled', True) and not getattr(config, 'base_model_only', False):
+            from invariants.synaptic_memory import SynapticMemoryEngine
+            activation_owner = SynapticMemoryEngine.current_for_model(M)
+            if activation_owner is not None:
+                activation_session = activation_context.enter_context(activation_owner.activation_generation(
+                    strength=config.activation_memory_strength,
+                    write_enabled=config.activation_memory_write_enabled,
+                    hops=config.activation_memory_hops, threshold=config.activation_memory_threshold,
+                    navigation_gain=config.activation_memory_navigation_gain,
+                    max_norm_ratio=config.activation_memory_max_norm_ratio,
+                    absolute_budget=config.activation_memory_absolute_budget,
+                    max_writes_per_forward=config.activation_memory_max_writes_per_forward,
+                    capacity=config.activation_memory_capacity,
+                    episode_binding=config.activation_memory_episode_binding,
+                    link_gain=config.activation_memory_link_gain, top_k=config.activation_memory_top_k,
+                ))
         handles, state = get_agentic_handles(
             M,
             vecs=vecs,
@@ -1142,6 +1179,12 @@ def generate_agentic_text(
         # One channel accumulator per GENERATION, surviving mid-run hook
         # re-registration, so the emitted stats cover the whole call.
         steer_channels = state["steer_channels"]
+        if generation_probes or generation_state_sink is not None:
+            from invariants.generation_probe_capture import GenerationProbeCapture
+            probe_capture = GenerationProbeCapture(
+                M, generation_probes, state, capture_states=generation_state_sink is not None,
+                prompt_input_ids=inputs['input_ids'], generation_channel=generation_channel,
+            )
 
         from transformers import StoppingCriteriaList, LogitsProcessorList, LogitsProcessor
         from invariants.tool_utils import (
@@ -1157,6 +1200,8 @@ def generate_agentic_text(
         class ContextTracker(LogitsProcessor):
             def __call__(self, input_ids, scores):
                 state["current_input_ids"] = input_ids
+                if probe_capture is not None:
+                    probe_capture.commit_prediction(input_ids)
                 return scores
                 
         class EotProbabilityTracker(LogitsProcessor):
@@ -1198,7 +1243,7 @@ def generate_agentic_text(
                     break
             chunk_tokens = min(max_new_tokens - tokens_generated, 24)
             start_length = current_inputs["input_ids"].shape[1]
-            stopping_criteria = [ToolStoppingCriteria(M.tok, start_length=start_length), MemoryStoppingCriteria()]
+            stopping_criteria = [] if reader_channel else [ToolStoppingCriteria(M.tok, start_length=start_length), MemoryStoppingCriteria()]
             if stop_after_final_answer:
                 stopping_criteria.append(FinalAnswerStoppingCriteria(M.tok, start_length=start_length))
             if stop_after_verifier_answer:
@@ -1209,6 +1254,8 @@ def generate_agentic_text(
             processors = LogitsProcessorList(
                 [ContextTracker(), eot_tracker] if eot_tracker is not None else [ContextTracker()]
             )
+            if lookahead_processor is not None:
+                processors.append(lookahead_processor)
             
             try:
                 generate_kwargs = {
@@ -1223,7 +1270,25 @@ def generate_agentic_text(
                 }
                 if remaining_time is not None:
                     generate_kwargs["max_time"] = remaining_time
-                out = M.model.generate(**generate_kwargs)
+                if lookahead_processor is not None and hasattr(lookahead_processor, 'begin_chunk'):
+                    lookahead_processor.begin_chunk(current_inputs['input_ids'])
+                if activation_session is not None:
+                    activation_session.begin_segment(start_length)
+                if probe_capture is not None:
+                    probe_capture.replay_state = state
+                    probe_capture.attach()
+                    probe_capture.start_chunk()
+                try:
+                    out = M.model.generate(**generate_kwargs)
+                finally:
+                    if probe_capture is not None:
+                        probe_capture.close()
+                    if activation_session is not None:
+                        activation_session.end_segment()
+                if activation_session is not None:
+                    activation_session.mark_generated(start_length, out.shape[1])
+                if lookahead_processor is not None and hasattr(lookahead_processor, 'finish_chunk'):
+                    lookahead_processor.finish_chunk(out)
             except GenerationBudgetExceeded:
                 print("    [Agentic ToT] Generation budget reached; returning partial output.", flush=True)
                 full = current_inputs["input_ids"]
@@ -1233,6 +1298,8 @@ def generate_agentic_text(
                 full = current_inputs["input_ids"]
                 break
             except NeedsDisambiguationError as e:
+                if reader_channel:
+                    raise
                 err_msg = str(e)
                 print(f"\n    [Interlocutor] Cognitive Probe Matched: {err_msg} Formulating resolving question...")
                 
@@ -1298,6 +1365,8 @@ def generate_agentic_text(
                 
             plen = current_inputs["input_ids"].shape[1]
             new_tokens = out[0][plen:]
+            if probe_capture is not None:
+                probe_capture.commit_chunk(len(new_tokens))
             if new_tokens.numel() == 0:
                 full = out
                 break
@@ -1313,7 +1382,7 @@ def generate_agentic_text(
             # Mid-thought tool seam: any tool can be called whenever its state
             # trigger crosses -- checked between chunks on the text so far. A tool
             # that fires registers steering that bends the REMAINING chunks.
-            if mid_chunk_hook is not None:
+            if mid_chunk_hook is not None and not reader_channel:
                 try:
                     # Pass the live activation state (phenomenality/time-awareness
                     # scores the engine surfaced) so tools fire from STATE, not from
@@ -1323,12 +1392,14 @@ def generate_agentic_text(
                         inj_str = mid_chunk_hook.injected_text
                         mid_chunk_hook.injected_text = ""
                         inj_ids = M.tok.encode(inj_str, add_special_tokens=False, return_tensors="pt").to(out.device)
+                        if lookahead_processor is not None and hasattr(lookahead_processor, 'ingest_external'):
+                            lookahead_processor.ingest_external(inj_ids)
                         out = torch.cat([out, inj_ids], dim=1)
                         current_inputs = {"input_ids": out, "attention_mask": torch.ones(out.shape, dtype=torch.long, device=out.device)}
                         generated_text = M.tok.decode(out[0, original_plen:], skip_special_tokens=True)
                 except Exception as _hook_exc:
                     print(f"    [ToolSense] mid-chunk hook error: {_hook_exc}", flush=True)
-            tool_call = next(
+            tool_call = None if reader_channel else next(
                 (
                     (end, expr)
                     for _, end, expr in iter_tool_calls(generated_text)
@@ -1347,6 +1418,8 @@ def generate_agentic_text(
                 result = evaluate_python_expression(expr)
                 result_str = f" = {result}\n"
                 result_ids = M.tok.encode(result_str, add_special_tokens=False, return_tensors="pt").to(out.device)
+                if lookahead_processor is not None and hasattr(lookahead_processor, 'ingest_external'):
+                    lookahead_processor.ingest_external(result_ids)
                 new_input_ids = torch.cat([out, result_ids], dim=1)
                 new_attn_mask = torch.ones(new_input_ids.shape, dtype=torch.long, device=out.device)
                 current_inputs = {"input_ids": new_input_ids, "attention_mask": new_attn_mask}
@@ -1367,11 +1440,25 @@ def generate_agentic_text(
             # Note: We continue the loop and will run M.model.generate again with the new context!
             # The hooks in `handles` are still active and will intercept this new generation pass!
     finally:
+        activation_context.close()
+        if probe_capture is not None:
+            probe_capture.close()
+            probe_capture.abort_chunk()
+        if lookahead_processor is not None and hasattr(lookahead_processor, 'finish_generation'):
+            lookahead_processor.finish_generation()
         for h in handles:
             h.remove()
-        if mid_chunk_hook is not None and hasattr(mid_chunk_hook, "cleanup"):
+        if not reader_channel and mid_chunk_hook is not None and hasattr(mid_chunk_hook, "cleanup"):
             mid_chunk_hook.cleanup()
         call.restore()
+
+    if probe_capture is not None and generation_state_sink is not None:
+        last_states = probe_capture.last_hidden_states()
+        if last_states is not None:
+            generation_state_sink(last_states)
+
+    if activation_session is not None and activation_session.stats['writes'] and getattr(config, 'activation_memory_autosave', True):
+        activation_owner.save_synaptic_weights()
 
     if synthesis_recorder is not None:
         # Emitted EVERY generation, even all-zero, so labeled runs carry the
@@ -1389,6 +1476,7 @@ def generate_agentic_text(
                     "time_awareness_gated_urgency": bool(getattr(config, "time_awareness_gated_urgency", False)),
                     "steer_fraction": _sane_fraction(getattr(config, "steer_fraction", 0.25), 0.25),
                     "disabled_steer_channels": sorted(getattr(config, "disabled_steer_channels", None) or ()),
+                    "generation_channel": generation_channel,
                 },
             }
         )
@@ -1397,5 +1485,9 @@ def generate_agentic_text(
         return generated_text, {
             "eot_probs": eot_tracker.probs if eot_tracker is not None else [],
             "tokens_generated": tokens_generated,
+            "activation_memory": dict(activation_session.stats) if activation_session is not None else {},
+            "generation_channel": generation_channel,
+            "generation_probe_readings": probe_capture.summary() if probe_capture is not None else {},
+            "generation_probe_capture": probe_capture.metadata() if probe_capture is not None else {},
         }
     return generated_text

@@ -156,11 +156,13 @@ class TriggerTuner:
     def __init__(self, path=DEFAULT_PATH):
         self.path = Path(path)
         self.triggers: dict[str, Trigger] = {}
+        self.defaults = {}  # Code defaults, distinct from learned/persisted values.
         self.load()
 
     def register(self, name, default, kind="threshold", comparator=">="):
         """Register a trigger if absent. A persisted value wins over the default,
         so live tuning is never clobbered by a code default on restart."""
+        self.defaults.setdefault(name, (default, kind, comparator))
         if name not in self.triggers:
             self.triggers[name] = Trigger(name, default, kind, comparator)
         return self.triggers[name]

@@ -12,9 +12,9 @@ Ingestion is deterministic and auditable:
   - every chunk lands in the MemoryEngine with provenance
     (source, sha256, chunk k/n, the operator's stated why)
   - re-ingesting identical content is a no-op (sha256 dedupe)
-Chunks persist in long-term memory, so the state-triggered memory tool can
-retrieve them in later sessions — that is the "learning from documents" path:
-read once in conversation, recall by need forever after.
+Chunks persist in long-term memory for later retrieval. Reading coverage is
+tracked separately for each pass, so a document can be revisited as the
+conversation changes without erasing earlier reading history.
 
 Pure stdlib — no torch, no model.
 """
@@ -22,7 +22,10 @@ Pure stdlib — no torch, no model.
 from __future__ import annotations
 
 import hashlib
+import json
+import math
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -49,6 +52,11 @@ def _tokens(text: str) -> set[str]:
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+
+
+def document_layout_sha256(chunks: list[str]) -> str:
+    """Identify the exact ordered chunk boundaries, not only the source text."""
+    return sha256_text(json.dumps(chunks, ensure_ascii=False, separators=(",", ":")))
 
 
 def chunk_document(text: str, max_chars: int = DEFAULT_MAX_CHARS) -> list[str]:
@@ -113,10 +121,77 @@ def find_ingested_sha(memory, sha: str) -> bool:
     return False
 
 
-def record_chunk_read(memory, session: dict[str, Any], index: int) -> None:
-    """Persist that chunk `index` of this document was actually presented.
-    This is what makes resume real across sessions: progress lives in the
-    memory record (sha-keyed), not in the process."""
+def _latest_reading_pass(memory, sha: str, layout_sha256: Optional[str] = None):
+    for record in reversed(getattr(memory, "records", [])):
+        if record.kind != "event" or "document_reading_pass_started" not in (record.tags or []):
+            continue
+        provenance = record.provenance or {}
+        if provenance.get("sha256") != sha:
+            continue
+        if layout_sha256 is not None and provenance.get("layout_sha256") != layout_sha256:
+            continue
+        if provenance.get("reading_pass_id"):
+            return provenance
+    return None
+
+
+def begin_reading_pass(memory, session: dict[str, Any], context: str = "", restart: bool = False) -> dict[str, Any]:
+    """Resume a matching pass, or explicitly start a fresh reading of the text.
+
+    A completed pass stays completed until ``restart=True``. Old unscoped read
+    events remain history: they recorded presentation before generation, so
+    they are not proof of successful processing in a new pass.
+    """
+    chunks = session.get("chunks") or []
+    if not chunks or len(chunks) != int(session.get("chunk_count", 0)):
+        raise ValueError("A reading pass requires a nonempty, consistent chunk layout.")
+    layout = document_layout_sha256(chunks)
+    existing = None if restart else _latest_reading_pass(memory, session["sha256"], layout)
+    if existing is not None:
+        read = restore_read_progress(
+            memory, session["sha256"], len(chunks),
+            reading_pass_id=existing["reading_pass_id"], layout_sha256=layout,
+        )
+        session.update(
+            reading_pass_id=existing["reading_pass_id"], layout_sha256=layout,
+            reading_context=existing.get("context", ""), read=read,
+            cursor=max(read) if read else 0,
+        )
+        return session
+    pass_id = uuid.uuid4().hex
+    context = str(context or session.get("why", "")).strip()
+    memory.append_event(
+        "document_reading_pass_started",
+        text=f"Reading {session['source_name']} in a new context",
+        tags=["document_read"],
+        provenance={
+            "sha256": session["sha256"], "layout_sha256": layout,
+            "reading_pass_id": pass_id, "source_name": session["source_name"],
+            "chunk_count": len(chunks), "context": context,
+        },
+    )
+    session.update(
+        reading_pass_id=pass_id, layout_sha256=layout, reading_context=context,
+        read=set(), cursor=0,
+    )
+    return session
+
+
+def record_chunk_read(memory, session: dict[str, Any], index: int) -> bool:
+    """Commit successful processing once per chunk and reading pass.
+
+    Call only after a successful model response. Staging is not a read. The
+    durable event is appended before the in-memory coverage changes; an
+    exception leaves the chunk eligible for retry.
+    """
+    count = int(session.get("chunk_count", 0))
+    if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < count:
+        raise ValueError(f"Invalid document chunk index: {index!r}")
+    layout = document_layout_sha256(session.get("chunks") or [])
+    if not session.get("reading_pass_id") or session.get("layout_sha256") != layout:
+        begin_reading_pass(memory, session)
+    if index in session.get("read", set()):
+        return False
     memory.append_event(
         "document_chunk_read",
         text=f"{session['source_name']} part {int(index) + 1}/{session['chunk_count']}",
@@ -125,13 +200,33 @@ def record_chunk_read(memory, session: dict[str, Any], index: int) -> None:
             "sha256": session["sha256"],
             "chunk_index": int(index),
             "source_name": session["source_name"],
+            "layout_sha256": session["layout_sha256"],
+            "reading_pass_id": session["reading_pass_id"],
+            "processing": "successful",
         },
     )
+    session.setdefault("read", set()).add(index)
+    session["cursor"] = index
+    return True
 
 
-def restore_read_progress(memory, sha: str, chunk_count: int) -> set[int]:
-    """Rebuild the read-set for a document from its document_chunk_read events.
-    Deterministic: same memory record, same progress."""
+def restore_read_progress(
+    memory, sha: str, chunk_count: int, *,
+    reading_pass_id: Optional[str] = None, layout_sha256: Optional[str] = None,
+) -> set[int]:
+    """Restore a selected or latest pass; preserve the legacy three-arg API.
+
+    Unscoped historic events are returned only when no pass exists and no
+    layout was requested. Once a pass exists, older coverage cannot suppress
+    a new reading. Ingestion always requests an exact layout.
+    """
+    if reading_pass_id is None:
+        latest = _latest_reading_pass(memory, sha, layout_sha256)
+        if latest is not None:
+            reading_pass_id = latest["reading_pass_id"]
+            layout_sha256 = latest.get("layout_sha256")
+        elif layout_sha256 is not None or _latest_reading_pass(memory, sha) is not None:
+            return set()
     read: set[int] = set()
     for record in getattr(memory, "records", []):
         if record.kind != "event" or "document_chunk_read" not in (record.tags or []):
@@ -139,8 +234,12 @@ def restore_read_progress(memory, sha: str, chunk_count: int) -> set[int]:
         prov = record.provenance or {}
         if prov.get("sha256") != sha:
             continue
+        if prov.get("reading_pass_id") != reading_pass_id:
+            continue
+        if layout_sha256 is not None and prov.get("layout_sha256") != layout_sha256:
+            continue
         index = prov.get("chunk_index")
-        if isinstance(index, int) and 0 <= index < chunk_count:
+        if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < chunk_count:
             read.add(index)
     return read
 
@@ -186,10 +285,9 @@ def ingest_document(
                     "bytes": size,
                 },
             )
-    # Resume is real: prior reading of this exact content (sha-keyed) is
-    # restored from the memory record, so re-ingesting after a restart picks
-    # up where the reading stopped instead of starting over.
-    read = restore_read_progress(memory, sha, len(chunks))
+    layout = document_layout_sha256(chunks)
+    latest_pass = _latest_reading_pass(memory, sha, layout)
+    read = restore_read_progress(memory, sha, len(chunks), layout_sha256=layout)
     return {
         "source_name": path.name,
         "source_path": str(path.resolve()),
@@ -199,6 +297,9 @@ def ingest_document(
         "chunk_count": len(chunks),
         "cursor": max(read) if read else 0,
         "read": read,
+        "layout_sha256": layout,
+        "reading_pass_id": latest_pass["reading_pass_id"] if latest_pass else None,
+        "reading_context": latest_pass.get("context", "") if latest_pass else "",
         "mtime": path.stat().st_mtime,  # for chronological ("updated") reading order
         "already_ingested": already,
     }
@@ -236,29 +337,30 @@ def select_next_chunk(
     earlier_thoughts: str = "",
     probe_scores: Optional[dict[tuple[int, int], float]] = None,
     probe_terms: Optional[list[tuple[int, str]]] = None,
+    state_scores: Optional[dict[tuple[int, int], float]] = None,
 ) -> Optional[dict[str, Any]]:
     """Pick the next unread chunk across every ingested document — the
     presentation that REPLIES to the model's thought stream.
 
-    The chunks are not actual replies — no author is answering — so the
-    selection is NOT required to track the model's output, and mostly should
-    not: a text that advances on its own course is non-adapting reality the
-    model's thoughts must reconcile with (patterns, not projections), where
-    overlap-following feeds it more of whatever it just said. The dialogic
-    FORM (it replies to each part) is therefore decoupled from selection.
+    Reply mode follows the latest visible questions and conclusions to find
+    relevant evidence in the document. Selection changes the order, never
+    the source text or coverage: only unread chunks in the current pass are
+    candidates, and the fallback keeps a finite pass moving toward completion.
+    Lexical overlap is a relevance signal, not a guarantee that a passage
+    answers the question or agrees with the model.
 
     Modes (all deterministic; ties break to earliest document, earliest
     chunk — same inputs, same pick):
+      - "state": rank by supplied live-state affinity; no state -> file order.
       - "order": strict reading order (document ingestion order, then chunk
         order within each document). The document stays itself.
       - "interleave": inter-ordering across the library — the least-read
         document speaks next (ties -> earliest), lowest unread chunk first,
         so multiple documents weave deterministically.
-      - "reply": the optional echo-following mode — scored against the
+      - "reply": scored against the
         reflection stream (last reply counts double, earlier reading replies
         once; a pick grounded only in earlier replies is flagged
-        "reply_thread"). Kept for deliberate use, with its caveat: it follows
-        the output, so it can chase the model's own tail. No overlap
+        "reply_thread"). No overlap
         anywhere -> falls back to order and says so.
 
     Returns {session_index, chunk_index, mode, overlap} or None when the
@@ -294,6 +396,18 @@ def select_next_chunk(
                 "probe_score": score,
                 "probe_terms": list(probe_terms or []),
             }
+    if mode == "state":
+        ranked = [
+            (float(state_scores[pair]), -order, pair)
+            for order, pair in enumerate(unread)
+            if state_scores and pair in state_scores and math.isfinite(float(state_scores[pair]))
+        ]
+        if ranked:
+            score, _, (si, ci) = max(ranked)
+            return {"session_index": si, "chunk_index": ci, "mode": "state",
+                    "overlap": [], "state_score": score}
+        si, ci = unread[0]
+        return {"session_index": si, "chunk_index": ci, "mode": "state_fallback", "overlap": []}
     if mode == "interleave":
         si, ci = min(
             unread,

@@ -4,9 +4,10 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 
 - `:help [model]` -- this list + your solve-macros; ':help model' shows what the MODEL can run on its own; ':help expose [off]' lets it call <<HELP>>
 - `:context, :context on, :context off, :context clear`
-- `:memory, :memory all|act|talk on|off|status, :memory act|talk use [sentence [+probe -probe]]` -- :memory use/search [optional args] uses enabled lanes; empty reflects via :prioritize/farthest-from-0; :expose off memory hides model access; model-made definitions persist with linked accept/reject/label/place feedback
+- `:memory, :memory all|act|talk on|off|status, :memory shift, :memory act|talk use [sentence [+probe -probe]]` -- :memory use/search [optional args] uses enabled lanes; empty reflects via :prioritize/farthest-from-0; :expose off memory hides model access; model-made definitions persist with linked accept/reject/label/place feedback
+- `:remember [thoughts|<text>], :remember stage <text>, :remember list [n]` -- record a fact, or snapshot and consolidate the model's recent thoughts and friction trajectories via CEN/DMN into episodic memory and plastic synaptic weights
 - `:methodmap <query>`
-- `:claimmap <first text> || <second text>`
+- `:claimmap <first text> || <second text>, :claimmap auto on|off, :claimmap clear, :claimmap status`
 - `:consider <trigger_metric> <tool_name> <positive text> || <negative text>` -- mint a custom activation-triggered steering tool from a contrastive pair; set <tool_name>_alpha with :tune before it can steer
 - `:steermap`
 - `:slice [time A..B] [probe <name>] [scope <s>] [reason <r>] [layers <lo> <hi>] [steps A..B] [index A..B] [drop|export <path>]` -- slice what the cognitive cache carries by any axis it records; entries are timestamped at store (stored_at) or time-bounded via the synthesis- trace join; listing always shows first; drop excises the slice AFTER writing a backup and refuses to run without an axis; export saves the slice to a .pt without touching the cache; bare :slice = summary
@@ -39,31 +40,39 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:probe expose <name> [off]` -- let the MODEL consult this sensor itself: <<PROBE: name>> reads its last turn, <<PROBE: name || words>> scores candidate words. Reading only -- minting/calibrating stay operator acts
 - `:probe release <name> [off]` -- released probes remain visible, scored, queryable, and saved, but are excluded from generation vectors, automatic priority/ToT routing, and exposed-probe output steering
 - `:probe backfill <name> [n]` -- retro-score up to n archived replies in order: a name scores/rebuilds only that probe; 'all' explicitly scores every active probe into joint rows; both rebuild credit and seed rolling history
+- `:probe recalc [all|<name>]` -- recalculate probes from their creation definitions: minted re-runs forward passes on wordings; composed re-evaluates recipes dynamically over constituent probes; adopted re-links to targets
 - `:probe values [name|all] [n]` -- show the latest centered probe readings; aliases: :probe recent, :probe last
 - `:probe show|hide talk|act|all` -- toggle whether probe readings print during main conversation, background actions, or both
-- `:probe define <name>` -- share its initial breakdown -- the WITH/WITHOUT framings it was minted from; name accepts choose/auto
-- `:probe explain <name> [alpha|choose] [prompt]` -- default = activation ping sanity check: briefly steer along the probe's direction, envelope-capped, baseline frozen, and print what the nudge evokes -- it may be generic/off-target. Add 'prompt' for the stored WITH/WITHOUT definition-grounded explanation; :probe define shows that saved definition directly. name accepts choose/auto
+- `:probe define <name> | :probe <name> define` -- show the original stored definition and contrastive framings; resolves adopted and composed root sources
+- `:probe define-experiment <name>` -- run the activation-only definition experiment selected by probe_define_process; requires observed examples
+- `:probe defining [show|on|off]` -- inspect the owning tuner's saved defining profile; toggle reuse of settings and learned activation changes; tracking stays on
+- `:probe define2 <name or opaque alias> [align|watch [N]|off]` -- inspect per-layer vocabulary and paired behavior without generation; watch updates a separate lexical conception ledger every N fresh samples
+- `:probe explain <name> [activation|logits|evidence|prompt|ping [alpha]] | :probe <name> explain` -- activation explanation candidate by default: blank native continuation, no request or prefix; independent subject/operation/reference gains; evidence uses measured examples; accepts [p_...] IDs; candidate meaning is unverified; logits measures directional next-token distance at the blank native assistant decision without generation; predictive geometry does not establish a definition
 - `:probe match <probe> <knob> | auto | drive [mult] | validate | check | off` -- tie a probe to its same-concept knob: drive = servo the knob from the probe each turn; validate = correlate knob value vs reading (check to read it); auto pairs every same-named probe+knob
 - `:calibrate <name> [pct|intent|<anchor>|<a>+<b>|band args]` -- data-calibrate any knob BY NAME; anchors join with '+' = fired only when EVERY stream fired; the system evaluates the request and refuses unsafe ones -- circular strength knobs, binary streams, vacuous p100 caps
 - `:queue [calibrate <name> ...|:<command>]` -- retry calibrations until enough evidence; defer other known commands once, preserving a trailing because-purpose
 - `:relations [active|all|bindings|calibrations|queue|exposure|priority|fields|release|macros]` -- read-only map of defined relationships: dynamic bindings, probe-match links, calibrated knobs, queued retries, exposures, priority targets, gravity/quality/time/shape links and hard exclusions, release decouplings, and optionally macro aliases
 - `:clean [queue|bindings|priority|all] [apply]` -- preview/apply a non-destructive cleanup of queued retries, dynamic tuner bindings, probe-match drive/validate modes, and priority targets; never deletes probes, histories, labels, docs, memories, or learned evidence
 - `:label <probe|stream> pos|neg` -- judge the MOST RECENT turn on that axis: credits its last signal with a human outcome -- supervised evidence alongside the automatic sense credit, so lift can reflect your judgment
-- `:suggest` -- scan the accrued state for ready moves, then show a one-line launcher of ALL visible user-facing commands; computed, never applied. :suggest apply auto-queues only the safe measurement/calibration ones
-- `:suggest [what you want] [:prefix]` -- with words after it, ask for exactly one runnable command toward a free-form goal; optional :prefix constrains the command family; stages it for :accept using the live command reference
+- `:suggest [domain|entity|goal] [...]` -- scan the accrued state and suggest concrete, runnable commands to run; arguments narrow the scope progressively (e.g. :suggest steer, :suggest steer band, :suggest steer band <node>, :suggest calibrate <name>, :suggest probe <name>, :suggest <entity>); free-form goals ask the model for a command toward that goal and stage it for :accept. Computed, never applied. :suggest apply auto-queues safe calibrations
 - `:suggest commands [filter]` -- show the full one-line launcher for every visible user-facing command/macro; optional filter narrows by command text
-- `:suggest gravity|field|physics` -- shortcut launcher for the whole steer/field command family: Gs, families, clocks, shapes, qualities, sets, exclusions
 - `:suggest :<command prefix>` -- complete one operator command from the live command reference; isolated from conversation history and cognitive cache
 - `:suggest because <reason>` -- same goal-directed command suggestion, with the reason supplied through the normal because-clause
 - `:tune, :tune <name> <value>, :tune <name> auto [percentile]`
+- `:tune probe_explain_subject <0..1> | :tune probe_explain_operation <-1..1> | :tune probe_explain_reference <-1..1>` -- independent activation explanation gains; defaults .02/.12/.04; 0 disables a channel; operation and reference accept signed subtraction
+- `:tune probe_explain_map <0|1> | :tune probe_explain_map_tokens <3..64>` -- sustained operation as a current-state map; default off; calibration tokens per trajectory default 24
+- `:tune probe_explain_logits_epsilon <positive value <=0.1>` -- directional logit measurement step, default .01; set deliberately, no automatic calibration
 - `:tune <knob|probe> dynamic <signed mix> [mult]` -- each turn set the target to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a probe-only target drives its own firing threshold; a name that is both a knob and a probe steers the KNOB -- name probe_<x> for the threshold
 - `:tune steer_cap_fraction auto [pct]` -- calibrate cap from observed pushes
 - `:tune steer_band auto [min_events] [gold|conversation|any] [synthesis|layersteer]` -- derive band from outcomes; conversations count as evidence
 - `:tune steer_layer_sweep 1` -- isolate steers by layer: each steer pushes ONE least-tested band layer; per-layer outcomes accrue, transfer-free
-- `:doc <path> [because <why>]` -- share a document into the conversation
+- `:tune routing_depth <N>` -- maximum sequential ToT branch/select stages per routing event; 0 disables routing, default 1 preserves one stage; continue while selected entropy exceeds routing_entropy
+- `:tune routing_layer_span <N>` -- replay the last N layers of the detected plateau-to-boundary region, clamped to that region; default 0 replays it all
+- `:doc <path> [because <why>]` -- load and read a full pass for the current questions
 - `:doc <path> rewrite [new_name] [because <why>]` -- rewrite a text file better and save a sibling in the same folder; omitted name uses *_rewritten
-- `:doc next | :doc status` -- stage the next chunk / show progress
-- `:doc read [n] [order|interleave|reply|updated] [satisfied|<stop_probe>]` -- [+probe -probe ...]  (signed probes rank up to 160 unread candidates: toward + probes and away from - probes, using a bounded 600-char read; scores are read-only and cached. A bare probe name is instead an early-stop threshold; reading as dialogue: the document speaks each turn, the model replies. order/interleave/updated advance on the documents' own course -- updated = by file mtime, newest first; reply follows overlap. 'satisfied' stops early once sense settles)
+- `:doc next | :doc status` -- read one unread passage / show current-pass progress
+- `:doc read [n] [state|order|interleave|reply|updated] [satisfied|<stop_probe>]` -- [+probe -probe ...]  (signed probes rank up to 160 unread candidates: toward + probes and away from - probes, using a bounded 600-char read; scores are read-only and cached. A bare probe name is instead an early-stop threshold; default: full pass in state mode; internal reader thoughts; explicit n caps at 20)
+- `:doc reread [modifiers]` -- fresh pass for changed context; keeps reading history
 - `:doc inject` -- stage the whole library for one turn, budget-bounded
 - `:doc stop` -- interrupt auto-read
 - `:sandbox on|off|status` -- run the model's ```python blocks for real
@@ -77,6 +86,15 @@ _Auto-generated from `scripts/interactive_phenomenality.py` (its in-shell help b
 - `:impact` -- consequence trail: what its words caused, and whether experienced impact tracks better deliberation
 - `:clock` -- last turn's generation time + tok/s and memory; VRAM on GPU, process RAM on CPU-only, both sensed every turn as generation_seconds / vram_gb streams
 - `:timestamps on|off|status` -- toggle timestamps on the prompt and resumed history
+- `:lookahead status|on [alpha]|off` -- context-local future predictions; off pauses steering only
+- `:lookahead k <n>` -- positive future horizon, scaled by degree horizon
+- `:lookahead degree diff|horizon|direction|distance|logits|factor <value>`
+- `:lookahead combine linear|sinusoidal` -- sum corrections or compose their sine phases
+- `:lookahead claimmap [detach]` -- inspect or detach the active tension axis
+- `:lookahead init / :trajectory (run init_lookahead.txt; resets travel settings)`
+- `:startup list|on|off|run` -- explicit startup/*.txt macros; sorted before initial prompt
+- `:startup add <path.txt> / :startup remove <filename>` -- paths with spaces are supported
+- `:cen status|on|off` -- background executive networks; default off
 - `:history` -- legacy pointer: use :context for session transcript controls and :memory for long-term memory
 - `:prioritize [choose|auto|<probe> [alpha]|pin <probe> [alpha]|mix <p...> [alpha]]` -- rank probes by evidence-weighted lift; <probe> sets a landscape target, pin duplicates direct :steer, mix moves a chosen field; alpha maps to prioritize_alpha and is off at 0
 - `:release <tool> [prob]` -- decouple a tool's firing from its signal for that fraction of turns -- separates causality so credit lift can be trusted
@@ -111,6 +129,20 @@ described: violations print the usage line instead of executing.
   - e.g. `:calibrate accuracy`
   - e.g. `:calibrate fun self_intent`
   - e.g. `:calibrate accuracy:timestamps on`
+- `:field [on|off|status] [G]` -- Alias for :steer field. Inspect or control the gravity field status, masses, and G.
+  - `[on|off|status]` (word, optional) -- on/start brings the field up and enables it; off disables; status reports
+  - `[G]` (float, optional) -- default global G (prioritize_alpha) to set alongside on
+  - e.g. `:field`
+  - e.g. `:field on 0.1`
+  - e.g. `:field off`
+  - e.g. `:field status`
+- `:other [referent]` -- Select the referent for @ in observational relational probes; self selects the owning agent; clear leaves it unassociated.
+  - `[referent]` (text, optional)
+  - e.g. `:other`
+  - e.g. `:other self`
+  - e.g. `:other user`
+  - e.g. `:other Gavin`
+  - e.g. `:other clear`
 - `:probe adopt <dim ...> [band <lo> <hi>]` -- Adopt stored dimension vector(s) as live probes.
   - `<dim ...>` (name) -- stored vector name(s): invariants/<dim>_vector.pt, <dim>.pt, or the saved-probe dir
   - `[band <lo> <hi>]` (trailing option) -- explicit reading depth: inclusive layer indices lo..hi
@@ -124,20 +156,64 @@ described: violations print the usage line instead of executing.
   - `<mix>` (text) -- signed mix over probe names, e.g. ambiguity + disagreement - validated_flow
   - `[band <lo> <hi>]` (trailing option) -- explicit reading depth: inclusive layer indices lo..hi
   - e.g. `:probe compose memory_need ambiguity + disagreement - validated_flow - warranted_confidence`
-- `:probe explain <name> [alpha|choose] [prompt]` -- Default = activation ping: briefly steer along the probe's own direction (envelope-capped, baseline frozen so it cannot habituate) and print what the nudge evokes. This is a qualitative sanity check and can be generic or off-target. Append 'prompt' for the stored-definition explanation grounded in the probe's WITH/WITHOUT framings.
-  - `<name>` (word) -- probe to ping; choose/auto lets the model pick the probe
-  - `[alpha|choose]` (word, optional) -- ping strength (signed float; negative pings away; default 1); 'choose' adopts the live calibrated G (prioritize_alpha) when one exists
-  - `[prompt]` (word, optional) -- ask for the stored-definition explanation instead of the activation ping
+- `:probe define <name>` -- Show the probe's original stored definition and contrastive framings, resolving adopted and composed root sources, layers, and replay commands.
+  - `<name>` (word) -- probe to inspect; accepts [p_...] IDs
+  - e.g. `:probe define illeism`
+  - e.g. `:probe solipsism define`
+  - e.g. `:probe define neutral`
+- `:probe explain <name> [activation|logits|evidence|prompt|ping|alpha] [alpha]` -- Generate an activation-based explanation candidate from a blank native assistant continuation, with separate subject, explanation-operation, and self-reference gains. Set ':tune probe_explain_map 1' for a sustained operation computed from each current activation; ':tune probe_explain_map_tokens <3..64>' bounds its calibration trajectory. Append 'logits' to measure directional distance in next-token logits at the blank native assistant decision, without generating an explanation. Its signed token effects describe predictive geometry; they do not establish a definition. The current-state map is an actuator, not this distance measurement. ':tune probe_explain_logits_epsilon <positive value <=0.1>' sets the measurement step (default .01). No written request or answer prefix is supplied. Append 'evidence' for a definition inferred from measured examples, 'ping' (with optional alpha) for an activation nudge sanity check, or 'prompt' for an explicit activation-definition request. Output form is checked; greetings and truncated replies remain unqualified. Candidate meaning is unverified. Owner-specific operator traces are saved separately. Use ':probe define' to view the original stored definition.
+  - `<name>` (word) -- probe to explain; accepts [p_...] IDs; choose/auto lets the model pick
+  - `[activation|logits|evidence|prompt|ping|alpha]` (word, optional) -- activation by default; 'evidence' uses measured examples; 'prompt' explicitly asks about the activation direction; 'logits' measures directional next-token distance without generation and requires a named probe; 'ping' [alpha] pings activation
+  - `[alpha]` (word, optional) -- ping strength when pinging (signed float; default 1; or 'choose')
   - e.g. `:probe explain neutral`
-  - e.g. `:probe explain neutral 2.5`
-  - e.g. `:probe explain neutral choose`
+  - e.g. `:probe self_model explain`
+  - e.g. `:probe illeism explain logits`
+  - e.g. `:probe explain illeism logits`
+  - e.g. `:probe self_model explain evidence`
+  - e.g. `:probe explain neutral ping`
+  - e.g. `:probe explain neutral ping 2.5`
   - e.g. `:probe explain self_model prompt`
+- `:probe recalc [name|all] [band <lo> <hi>]` -- Recalculate probes from their creation definitions across full model depth (or explicit band).
+  - `[name|all]` (word, optional) -- probe to recalculate; 'all' (default) recalculates all active/disk probes
+  - `[band <lo> <hi>]` (trailing option) -- explicit reading depth: inclusive layer indices lo..hi
+  - e.g. `:probe recalc`
+  - e.g. `:probe recalc all`
+  - e.g. `:probe recalc accuracy`
+  - e.g. `:probe recalc all band 21 30`
+- `:relate [args]` -- Observe probe relationships, route multiple targets indirectly, or investigate helper effects on archived contexts; optional via restricts helpers.
+  - `[args]` (text, optional)
+  - e.g. `:relate target accuracy maximize curiosity uncertainty`
+  - e.g. `:relate indirect minimize lying hallucination maximize truthfulness`
+  - e.g. `:relate indirect minimize lying hallucination maximize truthfulness via +empathy_d4096 +epistemic_humility`
+  - e.g. `:relate indirect lying minimize +empathy_d4096 +epistemic_humility`
+  - e.g. `:relate indirect investigate limit 3 helpers 2 tokens 48`
+  - e.g. `:relate indirect continue on stride 8 horizon 12`
+  - e.g. `:relate indirect continue status`
+  - e.g. `:relate indirect continue off`
+  - e.g. `:relate indirect continue stride 8 horizon 12 -- Explain your reasoning.`
+  - e.g. `:relate indirect import invariants/out/replay_investigation/pilot`
+  - e.g. `:relate indirect roles`
+  - e.g. `:relate status`
+  - e.g. `:relate trial`
+  - e.g. `:relate observe`
+  - e.g. `:relate off`
 - `:slice [filters]` -- Slice what the cognitive cache carries, by any axis it records: time (stored_at when stamped, trace-join bounds otherwise), probe/expert, scope, reason, layers, steps, or raw index. Bare :slice summarizes the cache. The listing is always shown first; 'drop' excises the slice (backup written first, refuses to run without an axis), 'export' saves the slice to a .pt without touching the cache.
   - `[filters]` (text, optional) -- axis pairs: time <from>..<to> | probe|expert <name> | scope <s> | reason <r> | layers <lo> <hi> | steps <a>..<b> | index <a>..<b>; range ends may be empty; final token may be an action: drop | export <path>
   - e.g. `:slice time 2026-07-09T13:54..2026-07-09T14:02`
   - e.g. `:slice probe reliability steps 40..`
   - e.g. `:slice index 470..472 drop`
   - e.g. `:slice scope interactive_phenomenality export invariants/out/shell_slice.pt`
+- `:steer band [name] [pull|push|spring|drop] [node] [rest <r>] [give <g>] [strength <source> <scale>] [when <source> below|above]` -- A one-sided Hooke tether: pull exerts restoring force toward a node only when stretched beyond rest (slack inside costs zero); push pushes away only when compressed inside rest; spring is two-sided. when gates the band on a live sensor threshold. drop removes a band. Bare :steer band lists active bands.
+  - `[name]` (word, optional) -- name of the band
+  - `[pull|push|spring|drop]` (word, optional) -- mode or action
+  - `[node]` (word, optional) -- target probe or anchor to tether
+  - `[rest <r>]` (trailing option) -- rest distance
+  - `[give <g>]` (trailing option) -- tether compliance
+  - `[strength <source> <scale>]` (trailing option) -- source and scale
+  - `[when <source> below|above]` (trailing option) -- when <source> below|above
+  - e.g. `:steer band confusion_to_inquiry pull probe:inquisitive rest 0.6 give 0.3 strength 0.25 when probe:confusion above 0.04`
+  - e.g. `:steer band accuracy_slingshot drop`
+  - e.g. `:steer band`
 - `:steer field [on|off|status] [G]` -- The field master switch (alias :steer gravity). on (or start) loads/migrates every field surface and switches the field on -- while on, the field REPLACES pin/mix steering -- without inventing laws or unfreezing bodies; off disables it; status shows G, masses (normalized, signed), overrides, and quality members. A bare number is shorthand for 'on <G>', so ':steer field 0.1' brings the field up with global G = 0.1.
   - `[on|off|status]` (word, optional) -- on/start brings the field up and enables it; off disables; status reports
   - `[G]` (float, optional) -- default global G (prioritize_alpha) to set alongside on
@@ -157,6 +233,9 @@ described: violations print the usage line instead of executing.
   - e.g. `:steer g ambiguity knob:prioritize_alpha 0.5`
   - e.g. `:steer g layer:18 status:ram`
   - e.g. `:steer g fun off`
+- `:steer impulse [args]` -- A decaying pull/push independent of body mass.
+  - `[args]` (text, optional)
+  - e.g. `:steer impulse focus pull .care speed 0.25 decay 0.85 duration 6`
 - `:steer law [famA|choose] [famB|choose] [k|off]` -- Couple two pole families: k>0 like poles repel / unlike attract, k<0 flips, off removes; unlisted pairs are INERT. ':tune gravity_law_step' integrates the forces -- only unfrozen anchors move, probes never do. Bare :steer law lists the laws and the step.
   - `[famA|choose]` (choice, optional) -- first pole family; choose = the model picks among known families
   - `[famB|choose]` (choice, optional) -- second pole family; choose = the model picks among known families
@@ -178,6 +257,13 @@ described: violations print the usage line instead of executing.
   - `[off]` (word, optional) -- remove this pole from the body
   - e.g. `:steer pole honesty integrity+`
   - e.g. `:steer pole @pin integrity off`
+- `:steer rotate [args]` -- Transport state through the plane between two bodies, subject to the shared steering cap.
+  - `[args]` (text, optional)
+  - e.g. `:steer rotate focus .care .accuracy angle 0.05`
+- `:steer space [args]` -- Selective expansion/contraction of probes, families or layers; warp changes distance, rate provides persistent drift.
+  - `[args]` (text, optional)
+  - e.g. `:steer space focus contract .care warp 0.5`
+  - e.g. `:steer space focus drop`
 - `:steer time <probe|knob:name|@anchor|layer:N|family:name> <source|off> [scale] [offset]` -- Local clock: align a node's forward-time rate to a live source so its gravity evolves on its own timeline (rate clamped to 0.05..20). off returns the node to the global clock (rate 1).
   - `<probe|knob:name|@anchor|layer:N|family:name>` (word) -- a body (probe or @anchor), one knob's field-governed scalar, one layer's clock/gate, or a whole family
   - `<source|off>` (word) -- live source: a number, a bare probe/knob/status/family name (resolved to whichever single namespace owns it; a collision asks for the qualified probe:<name>/knob:<name> form), ~<family>, #<layer>, ^<trigger> (fired-vs-unfired outcome lift), *<trigger> (rolling mean of recent credits), or global; statuses are vitals like ram|vram|cpu|ram_pct|tokens_per_sec; off clears back to inherited

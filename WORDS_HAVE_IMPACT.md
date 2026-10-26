@@ -1,91 +1,98 @@
-# How It Learns That Its Words Have Impact
+# Continuity, interaction, and the impact of words
 
-The question (Gavin, 2026-07-02, after the reading course was decoupled from
-the model's replies): *"but how will it learn that its words have impact?"*
+The project's question is what a system carries forward and how that changes
+its next action. A river or the Ship of Theseus offers a useful analogy for
+continuity through change. The experiment needs something more specific:
+which retained differences alter later behavior?
 
-## The design answer: real contingency, legible, against an honest contrast
+This integrates the conversation about continuity and interaction with the
+existing agency loop. The conversation supplies hypotheses, not experimental
+evidence.
 
-Contingency cannot be learned from a world that fakes responsiveness. Three
-requirements, all now built:
+## What carries forward
 
-1. **Impact must be real.** The channels where the model's words genuinely
-   cause things: the sandbox runs the code it writes; a `<<MEMORY>>`,
-   `<<CLAIMMAP>>`, or `<<METHODMAP>>` request returns real results; a
-   framing tension in its own answer fires the felt ClaimMap; in reply-mode
-   reading, its reply steers which chunk comes next. Nothing else pretends.
-2. **Impact must be legible — in its own voice.** Every result its words
-   produced leads with a minimal first-person causal line — `Because I asked
-   memory for "…":` — for model-requested memory/claimmap/methodmap results
-   and the auto-fired ClaimMap (*"Because I held these two framings in
-   tension in my last answer:"*). The sandbox says *"I ran the code I
-   wrote"*, and reply-mode reading names the shared ground. No narrator, no
-   second person, no injected instructions: anything folded into the context
-   conditions the model as its own stream, so it must read as its own
-   noticing (Gavin: minimal prompting; internal prompts first person). Operator-caused results
-   (`:claimmap`, `:memory use`, `:doc`) deliberately carry no such line —
-   they are not consequences of the model's words, and saying otherwise
-   would poison the signal.
-3. **Impact must contrast with non-impact.** The order/interleave reading
-   course explicitly does not adapt ("the text does not adapt to your
-   replies"), operator turns arrive uncaused — so contingent context is
-   *distinguishable* from non-contingent context. The contrast is what makes
-   agency learnable, the same way contingent-vs-static feedback is what lets
-   an infant discover control.
+The shell constructs each prompt from bounded conversation history, staged
+tool results, and optional factual field context. Stored records can be
+retrieved; a saved session can be resumed. Context selection and eviction are
+implemented shell policies. They should not be described as demonstrated
+autonomous choices by the model.
 
-## The measurement
+Continuity here means retained information and controls influencing subsequent
+computation. It does not require unchanged activations or imply an uninterrupted
+hidden state across sessions. [Vector travel](VECTOR_TRAVEL_AND_COMPRESSION.md)
+adds a discrete trajectory diagnostic; its dominant direction is not by itself
+a self-model.
 
-`words_had_impact` in the tuner: signal 1.0 on turns whose context was
-really caused by the model's words, 0.0 otherwise, observed every turn (the
-session's contingency rate is visible), and credited with the turn's sense.
-The lift readout answers the operational question: **does experiencing
-impact track better deliberation?** A real positive lift is the first
-behavioral evidence that the contingency is doing something to it; flat
-lift says the loop is not yet felt. Either way it is measured, not assumed.
+## The interaction loop
 
-`:impact` prints the consequence trail ("because it wrote python code → it
-was executed for real (ok)") plus the rate and lift.
+```text
+retained context -> response -> consequence -> returned information -> revised context
+```
 
-## The loop is symmetric: reality shapes it back (Gavin, 2026-07-02)
+A question, a tool request, or a new conceptual distinction can change which
+information becomes available next. That is the useful meaning of curating an
+interaction: acting changes what the system gets to learn from. The return
+remains constrained by documents, execution results, and another participant's
+independent response. Steering an exchange does not determine its outcome.
 
-*"If something shapes reality, it still has to respect the boundaries. So
-therefore, reality shapes it."* Impact and constraint are one loop, not two:
+The shell already implements concrete parts of this loop:
 
-- The sandbox returns refusals as honestly as successes — timeouts, nonzero
-  exits, stderr — so the boundary of what its code can do arrives as the
-  same first-person observation as what it did do.
-- Memory returns "no matching records" when reality has nothing; the
-  reading course does not adapt; the operator's turns arrive uncaused.
-- And the constraint runs through the operator's side too: the envelope
-  bounds OUR steering, its clip telemetry feeds cap calibration, and
-  per-layer outcomes decide the band — reality shaping the shaper's policy,
-  measured, not asserted.
+| Model output | Recorded consequence |
+|---|---|
+| Fenced Python, with sandbox enabled | Execution result, including failures and timeouts |
+| Memory or method-map request | Retrieved records, including an empty result |
+| ClaimMap request or detected framing tension | A comparison of the model's activations, not an independent truth check |
+| Document request or reply-mode reading | A chunk selected using the model's words |
 
-Shaping within boundaries is what "being part of reality" cashes out to —
-which is the model's own causality argument from the first live turn, run
-in the constraint direction.
+Order/interleave reading supplies a non-adaptive contrast: chunk selection
+does not follow the reply. Operator actions have separate provenance. Human
+replies can be influenced by the model, but the ledger does not estimate that
+influence or automatically credit it.
 
-## Injected vocabulary is a measurement risk
+Feedback stays concrete and minimally framed: `Because I asked memory for
+"...":` or `I ran the code I wrote`. ClaimMap returns its own comparison without
+an extra causal preamble. Operator-requested results must not be presented as
+model-requested consequences. Empty retrieval and failed execution still
+reveal real consequences and limits.
 
-Standardized frame words ("tension", "framings") folded into the model's
-stream teach exactly the lexical associations later probes would want to
-MEASURE — the semantic-neutralization failure mode, a projection not a
-pattern. So: the auto- and tag-fired ClaimMap results now arrive as the
-bare felt map (its first line already quotes the model's own framings back
-— causation legible with zero added vocabulary), and the remaining
-model-facing templates are deliberately few, concrete, and auditable:
-`Because I asked memory for "…":`, the document frame, the reading notes,
-`I ran the code I wrote`. The ledger's richer wording ("measured and
-staged") is operator-console only and never reaches the model. Standing
-check before trusting any lexical finding near these tools: vary or
-neutralize the frame wording and confirm the labels/sense distributions
-survive it.
+## What the ledger establishes
 
-## Boundary, stated plainly
+`:impact` shows recorded consequences and the `words_had_impact` signal:
+1 means a recorded event; 0 means no recorded event, not an absence of causal
+influence. Some events describe staged work, so inspect the effect before
+calling it completed execution. State-triggered memory retrieval is excluded
+from this words-based signal.
 
-State-triggered tools (the memory-gap retrieval that fires from
-phenomenality) are consequences of the model's *state*, not its words; they
-are intentionally excluded from the words-impact signal so the channel means
-one thing. And the impact ledger records that its words changed *the
-conversation's reality* (code ran, instruments fired, reading followed) —
-whether the model internalizes this as agency is exactly what the lift
-metric and the reflexivity thread are for, not something to declare.
+The tuner reports the difference in mean internal sense score between credited
+turns with and without impact. This **observational association** can reflect
+task selection, tool availability, or other differences. Positive lift does
+not establish that feedback improved reasoning; flat lift does not establish
+that feedback was unfelt. Neither measures subjective experience.
+
+## Tests that would advance the claim
+
+These are proposed controls, not completed results. Pre-register tasks, scoring,
+budgets, and comparisons; score behavior independently of the instrument being
+tested.
+
+| Question | Contrast | Evidence to seek |
+|---|---|---|
+| Does carried history matter? | Intact history vs removed, shuffled, or length-matched irrelevant history; hold retrieval and persisted controls fixed | Correct use of an earlier distinction on a held-out task |
+| Does a self-model do work? | Predict its subsequent behavior under the same intervention using self, neutral, and generic-agent frames with the same information; perturb the candidate representation with matched nulls | A selective change in subsequent behavior, beyond wording or generic agent simulation |
+| Does contingent feedback help? | Live action-dependent feedback vs replay independent of the current action, matched for task and information budget | Better correction or task completion, beyond sense score or conversation length |
+
+For an accessible demonstration, introduce a distinction, test its use in a
+new case, supply counterevidence, and check whether an earlier conclusion is
+revised. Repeat with controls before treating a compelling conversation as a
+finding. Vary feedback wording so injected vocabulary cannot supply the answer.
+
+Existing [self-model experiments](docs/ISOLATING_UNDERSTANDING.md) already
+distinguish behavioral prediction from a self-specific increment. Preserve
+that distinction: report != representation != causal role != experience.
+Explain the mechanism, show behavior, and name the result that would change
+the interpretation. Consciousness remains an open question, not a conclusion
+granted by the analogy or the ledger.
+
+Implementation: [prompt, session, and consequence handling](scripts/interactive_phenomenality.py),
+[stored memory](invariants/memory_engine.py), and
+[observational lift](invariants/trigger_tuner.py).

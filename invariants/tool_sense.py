@@ -41,6 +41,8 @@ class ToolSense:
         self._handles: list = []
         self._fired: set[str] = set()  # fire each tool at most once per generation
         self.injected_text: str = ""
+        # Recalled source material enters context without becoming model speech.
+        self.internal_injected_text: str = ""
         # Optional (text, state) -> str, wired by the shell to drain any lines
         # the operator typed mid-generation. Runs every seam; its return is
         # appended to the live stream (the model then redirects or folds in).
@@ -91,7 +93,10 @@ class ToolSense:
             if decoupled:
                 self.release_total += 1
             if fire:
-                handles = tool.act(payload, self.model) or []
+                try:
+                    handles = tool.act(payload, self.model, tool_sense=self) or []
+                except TypeError:
+                    handles = tool.act(payload, self.model) or []
                 self._handles.extend(handles)
                 self._fired.add(tool.name)
         # Always-ingest operator input: drain last so a fresh interjection lands
@@ -115,3 +120,4 @@ class ToolSense:
         self._handles = []
         self._fired = set()
         self.injected_text = ""
+        self.internal_injected_text = ""

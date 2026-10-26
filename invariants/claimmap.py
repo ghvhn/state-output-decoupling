@@ -171,7 +171,11 @@ def _activation_trace(model: Any, text: str) -> torch.Tensor:
     inputs = _inputs(model, text)
     with torch.no_grad():
         hidden = _hidden_states(model, inputs["input_ids"], inputs.get("attention_mask"))
-    return hidden[:, -1, :].detach().float().cpu()
+        trace = hidden[:, -1, :].detach().float().cpu()
+    del hidden, inputs
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return trace
 
 
 def _coerce_vector_map(obj: Any, n_layers: int, d_model: int) -> dict[int, torch.Tensor]:
@@ -352,11 +356,9 @@ def _format_felt_map(
     rows: list[ConceptAlignment],
 ) -> str:
     """Render the geometry as interior FIRST-person language -- no numbers.
-    Folded context conditions the model as if it were its own stream, so the
-    felt map speaks as the model's own noticing, never a narrator's.
-
-    ClaimMap is a reasoning step, more internal than output. The model should
-    feel the difference between the two framings, not read a spreadsheet back.
+    This rendering is for the operator and log. It speaks in first person so
+    the activation comparison is legible, but it is never folded back into the
+    model's conversational context as another apparent thought.
     """
     n_layers = min(left.shape[0], right.shape[0])
     layer_sims = [_cos(left[layer], right[layer]) for layer in range(n_layers)]
@@ -412,7 +414,7 @@ def _steer_delta(left: torch.Tensor, right: torch.Tensor) -> dict[int, torch.Ten
 
 @dataclass
 class ClaimMapResult:
-    felt: str                       # interior rendering -- the only thing the model sees
+    felt: str                       # operator-facing interior rendering; never folded into model context
     telemetry: str                  # numeric block for logging/debug -- never in the prompt
     steer_delta: dict[int, torch.Tensor]  # {layer: A-B direction} for optional steering
     mean_sim: float
@@ -444,8 +446,26 @@ def analyze_claim_pair(payload: str, model: Any) -> ClaimMapResult:
 
 
 def run_activation_claimmap(payload: str, model: Any) -> str:
-    # Prompt-facing path: the model receives only the felt rendering.
+    # Operator-facing path: the shell displays only the felt rendering.
     return analyze_claim_pair(payload, model).felt
+
+
+def get_unified_tension_vector(
+    claim_result: ClaimMapResult,
+    target_layers: tuple[int, ...] = (14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24),
+) -> Optional[torch.Tensor]:
+    """Extract a single normalized mid-band tension vector across target layers."""
+    if not claim_result or not claim_result.steer_delta:
+        return None
+    deltas = [claim_result.steer_delta[l] for l in target_layers if l in claim_result.steer_delta]
+    if not deltas:
+        deltas = list(claim_result.steer_delta.values())
+    if not deltas:
+        return None
+    avg_vec = torch.stack(deltas).mean(dim=0).float()
+    norm = avg_vec.norm().clamp_min(1e-6)
+    return avg_vec / norm
+
 
 
 def claimmap_steer_handles(

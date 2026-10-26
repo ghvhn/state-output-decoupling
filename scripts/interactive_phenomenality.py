@@ -3,10 +3,14 @@ import datetime
 import glob
 import json
 import os
+import math
 import random
 import re
 import sys
 from collections import deque
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import colorama
@@ -15,6 +19,14 @@ from colorama import Fore, Style
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+
+from invariants.probe_display import console_probe_name, console_probe_lookup, console_format_probe_text
+from invariants.exposure_language import probe_alias
+from invariants.probe_measurement import (
+    LEGACY_PROBE_SOURCE,
+    prepare_probe_measurements,
+)
+from invariants.generation_probe_capture import GENERATION_PROBE_SOURCE
 
 ORGANIC_VECTOR_PATH = os.path.join(ROOT, "invariants", "organic_correction_vector.pt")
 
@@ -85,6 +97,19 @@ def _reset_memory_peak():
         torch.cuda.reset_peak_memory_stats()
     else:
         _CPU_PEAK_BASELINE["gb"] = _cpu_rss_gb()
+
+
+def _flush_process_memory():
+    """Flush Python garbage, PyTorch CUDA allocator cache, and Windows working set."""
+    import gc
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetProcessWorkingSetSize(-1, -1, -1)
+    except Exception:
+        pass
 
 
 def _memory_footprint_gb():
@@ -186,11 +211,18 @@ def _system_memory_status():
     return 0.0, 0.0, 0.0
 
 
-def load_probe_raw_histories(path=PROBE_RAW_HISTORY_PATH):
+def load_probe_raw_histories(path=PROBE_RAW_HISTORY_PATH, measurement_source=None):
     try:
         with open(path, "r", encoding="utf-8") as fh:
             payload = json.load(fh)
-        source = payload.get("probes", payload) if isinstance(payload, dict) else {}
+        if not isinstance(payload, dict):
+            return {}
+        if measurement_source is None:
+            source = payload.get("probes", payload)
+        elif payload.get("measurement_source", LEGACY_PROBE_SOURCE) == measurement_source:
+            source = payload.get("probes", payload)
+        else:
+            source = payload.get("sources", {}).get(measurement_source, {})
         return {
             str(name): [float(value) for value in list(values)[-40:]]
             for name, values in source.items()
@@ -201,12 +233,32 @@ def load_probe_raw_histories(path=PROBE_RAW_HISTORY_PATH):
 
 
 def save_probe_raw_histories(probes, path=PROBE_RAW_HISTORY_PATH):
-    """Persist raw projection baselines once per scoring pass, not per probe."""
+    """Persist source-scoped baselines without overwriting older measurements."""
     try:
         path = os.fspath(path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
+        sources = {}
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                prior = json.load(fh)
+            if isinstance(prior, dict):
+                sources.update(prior.get("sources", {}))
+                old = prior.get("probes", prior)
+                sources.setdefault(prior.get("measurement_source", LEGACY_PROBE_SOURCE), {}).update(
+                    {str(name): values for name, values in old.items() if isinstance(values, list)}
+                )
+        except (OSError, ValueError, TypeError):
+            pass
+        active_sources = {data.get("measurement_source", LEGACY_PROBE_SOURCE) for data in probes.values()}
+        for name, data in probes.items():
+            for basis, archived in data.get("measurement_histories", {}).items():
+                sources.setdefault(basis, {})[str(name)] = list(archived.get("history", []))[-40:]
+            basis = data.get("measurement_source", LEGACY_PROBE_SOURCE)
+            sources.setdefault(basis, {})[str(name)] = list(data.get("history") or [])[-40:]
         payload = {
-            "version": 1,
+            "version": 2,
+            "measurement_source": next(iter(active_sources)) if len(active_sources) == 1 else "mixed",
+            "sources": sources,
             "probes": {
                 str(name): [float(value) for value in list(data.get("history") or [])[-40:]]
                 for name, data in probes.items()
@@ -231,9 +283,12 @@ def centered_probe_observation(pdata, raw):
     baseline itself stops moving -- the inertial half of the gravity split, so
     a heavy mass cannot habituate to the motion it itself induces.
     """
-    hist = pdata["history"]
+    hist = pdata.get("history")
+    if not isinstance(hist, deque):
+        hist = deque(list(hist or ()), maxlen=40)
+        pdata["history"] = hist
     if not hist:
-        if not pdata.get("frozen"):
+        if pdata.pop("_measurement_seed_pending", False) or not pdata.get("frozen"):
             hist.append(float(raw))
         return None
     sig = float(raw) - (sum(hist) / len(hist))
@@ -242,8 +297,155 @@ def centered_probe_observation(pdata, raw):
     return sig
 
 
+def probe_row_matches_source(row, probe):
+    """Legacy reply replays must not appear as a fresh live-generation reading."""
+    source = probe.get("measurement_source") or LEGACY_PROBE_SOURCE
+    return row.get("probe_measurement", {}).get("source", LEGACY_PROBE_SOURCE) == source
+
+
+def score_generation_probes(probes, tuner, telemetry, turn_row=None, turn_sense=None,
+                            label_prefix="Probe Score", display=True):
+    """Consume projections captured during generation; never reconstruct reply text."""
+    tuner._last_probe_readout_source = GENERATION_PROBE_SOURCE
+    prepare_probe_measurements(probes, tuner, GENERATION_PROBE_SOURCE)
+    readings = (telemetry or {}).get("generation_probe_readings", {})
+    metadata = dict((telemetry or {}).get("generation_probe_capture", {}))
+    metadata.setdefault("source", GENERATION_PROBE_SOURCE)
+    observed = {}
+    seeded = []
+    changed = False
+    for name, probe in probes.items():
+        profile = readings.get(name)
+        if not isinstance(profile, dict):
+            continue
+        raw = profile.get("raw_score")
+        if raw is None or not math.isfinite(float(raw)):
+            continue
+        probe["last_profile"] = dict(profile)
+        raw = float(raw)
+        observed[name] = {key: profile[key] for key in (
+            "raw_score", "first_token_score", "last_token_score", "mean_token_score",
+            "by_layer", "by_token", "prediction_positions", "token_count", "decision_position",
+        ) if key in profile}
+        generation_id = metadata.get("generation_id")
+        previous = probe.get("_last_generation_observation", {})
+        repeated = bool(generation_id and previous.get("generation_id") == generation_id)
+        signal = previous.get("centered") if repeated else centered_probe_observation(probe, raw)
+        if not repeated:
+            changed = True
+            previous = {"generation_id": generation_id, "centered": signal, "credited": False}
+            probe["_last_generation_observation"] = previous
+        if signal is None:
+            seeded.append(name)
+            continue
+        if not repeated:
+            tuner.observe(f"probe_{name}", signal)
+        if turn_row is not None:
+            turn_row[f"probe_{name}"] = float(signal)
+        if turn_sense is not None and not previous["credited"]:
+            tuner.credit(f"probe_{name}", signal, turn_sense)
+            previous["credited"] = True
+        if display and probe.get("chatty", True):
+            print(Fore.CYAN + f"  [{label_prefix}] {console_probe_name(name)}: {signal:+.3f}" + Style.RESET_ALL, flush=True)
+    if turn_row is not None:
+        turn_row["probe_measurement"] = metadata
+        turn_row["probe_generation_readings"] = observed
+    if changed:
+        save_probe_raw_histories(probes)
+    if display and seeded:
+        print(Fore.CYAN + f"  [Probe Seed] initialized live baselines for {len(seeded)} probe(s); centered readings begin next generation." + Style.RESET_ALL, flush=True)
+    if display and probes and not observed:
+        print(Fore.YELLOW + "  [Probe] Live generation states unavailable; no reply-text substitute was scored." + Style.RESET_ALL, flush=True)
+    return observed
+
+
+def display_continuation_probe_readings(result, probes, *, display=True, show_all=False):
+    """Display selected raw projections without changing ordinary live baselines."""
+    from invariants.continuation_investigation import SOURCE, FINAL_PREFIX
+    telemetry = result.get('telemetry') or {}
+    metadata = telemetry.get('generation_probe_capture') or {}
+    if (result.get('source') != SOURCE or telemetry.get('source', SOURCE) != SOURCE
+            or metadata.get('source', SOURCE) != SOURCE):
+        return {}
+    readings = telemetry.get('generation_probe_readings') or {}
+    unavailable = metadata.get('unavailable_probes') or {}
+    observed = {}
+    for name, probe in probes.items():
+        if name.startswith(FINAL_PREFIX):
+            continue
+        profile = readings.get(name)
+        visible = display and (show_all or probe.get('chatty', True))
+        valid = isinstance(profile, dict) and profile.get('measurement', SOURCE) == SOURCE
+        if valid:
+            try:
+                mean, last = float(profile['mean_token_score']), float(profile['last_token_score'])
+                count = int(profile['token_count'])
+                valid = math.isfinite(mean) and math.isfinite(last) and count > 0
+            except (KeyError, TypeError, ValueError, OverflowError):
+                valid = False
+        if not valid:
+            if visible:
+                reason = unavailable.get(name, 'no valid selected-token reading')
+                print(Fore.YELLOW + f'  [Continuation Probe] {console_probe_name(name)}: unavailable ({reason})' + Style.RESET_ALL, flush=True)
+            continue
+        record = dict(profile)
+        final = readings.get(FINAL_PREFIX + name) or {}
+        try:
+            final_mean = float(final['mean_token_score'])
+            final_layers = [int(layer) for layer in final.get('by_layer', {})]
+            if math.isfinite(final_mean) and len(final_layers) == 1:
+                record['target_final_mean'] = final_mean
+                record['target_final_layer'] = final_layers[0]
+        except (KeyError, TypeError, ValueError, OverflowError):
+            pass
+        observed[name] = record
+        if visible:
+            detail = f'raw mean={mean:+.6f}, last={last:+.6f}, n={count}'
+            if 'target_final_mean' in record:
+                detail += f", final_L{record['target_final_layer']}_mean={record['target_final_mean']:+.6f}"
+            print(Fore.CYAN + f'  [Continuation Probe] {console_probe_name(name)}: {detail}' + Style.RESET_ALL, flush=True)
+    return observed
+
+
+def present_continuation_result(result, probes, tuner=None):
+    """Render the chosen answer and cache a separate operator-only readout."""
+    from invariants.continuation_investigation import SOURCE
+    print(Fore.GREEN + Style.BRIGHT + '\nMe: ' + Style.RESET_ALL
+          + console_format_probe_text(result['response'], probes, color=Fore.GREEN))
+    observed = display_continuation_probe_readings(result, probes)
+    print(f"[Continuation] Selected {result['telemetry']['tokens_generated']} tokens; artifacts: {result['output_dir']}")
+    if tuner is not None and result.get('source') == SOURCE:
+        history = getattr(tuner, '_continuation_probe_readouts', None)
+        if history is None:
+            history = tuner._continuation_probe_readouts = deque(maxlen=20)
+        telemetry = result['telemetry']
+        history.append({'source': SOURCE, 'output_dir': result['output_dir'], 'telemetry': {
+            'source': SOURCE, 'tokens_generated': telemetry['tokens_generated'],
+            'generation_probe_readings': telemetry.get('generation_probe_readings', {}),
+            'generation_probe_capture': telemetry.get('generation_probe_capture', {})}})
+        tuner._last_probe_readout_source = SOURCE
+    return observed
+
+
+def print_cached_continuation_probe_values(tuner, probes, selected=None, limit=1):
+    """Return whether :probe values was served from the continuation UI cache."""
+    from invariants.continuation_investigation import SOURCE
+    history = getattr(tuner, '_continuation_probe_readouts', ())
+    if getattr(tuner, '_last_probe_readout_source', None) != SOURCE or not history:
+        return False
+    names = list(probes) if selected is None else selected
+    subset = {name: probes[name] for name in names if name in probes}
+    recent = list(history)[-max(1, min(20, int(limit))):][::-1]
+    print(Fore.CYAN + f'[Probe Values] {len(recent)} selected continuation(s); raw scores, source={SOURCE}:' + Style.RESET_ALL)
+    for result in recent:
+        print(Fore.CYAN + f"  artifacts: {result['output_dir']}" + Style.RESET_ALL)
+        display_continuation_probe_readings(result, subset, show_all=True)
+    return True
+
+
 def probe_is_released(pdata):
-    return bool((pdata or {}).get("released", False))
+    from invariants.other_probes import is_other_probe
+    return bool((pdata or {}).get("released", False)) or is_other_probe(pdata or {})
 
 
 def set_probe_released(probes, name, released=True, probe_dir=None):
@@ -280,6 +482,20 @@ def set_probe_field(probes, name, key, value, probe_dir=None):
     return True
 
 
+def steering_probe_view(probes, tuner=None, controller=None):
+    """Suspend indirect targets for actuation while retaining real readouts.
+
+    The returned view never changes the live probes or their measurements.
+    Perception/thinking/execution roles describe a probe; none is immutable.
+    """
+    controller = controller or getattr(tuner, 'indirect_controller', None)
+    if controller is None:
+        return probes
+    blocked = controller.blocked_probes(probes)
+    return {name: dict(data, released=True) if name in blocked else data
+            for name, data in probes.items()}
+
+
 # --- gravity prioritize: probes as masses in latent space -------------------
 # Instead of pinning one direction and shoving with constant alpha, every
 # probe becomes a mass sitting at its unit direction on the residual sphere.
@@ -294,16 +510,11 @@ GRAVITY_EPS = 0.05            # capture radius in (1 - cos); force fades smoothl
 GRAVITY_NORM_FRACTION = 0.05  # saturated field strength per unit G, as a fraction of each token's residual norm
 
 
-def gravity_field_masses(probes, tuner):
-    """Resolve each probe to a signed mass: an explicit ':steer mass' override
-    wins; otherwise the probe's evidence-weighted lift (negative lift = a
-    repulsor). Masses are normalized so total |mass| = 1; global, personal,
-    family, and layer G then carry magnitude while the field remains stable as
-    probes accumulate."""
-    ranked = None
-    masses = []
+def gravity_field_mass_details(probes, tuner):
+    """Compute detailed mass table keeping raw source values and normalized masses separate."""
     configured = steer_bodies()["fields"]
     set_laws = steer_bodies()["sets"]
+    g_families = steer_bodies().get("g_families", {})
     quality_layer_member = any(
         node.startswith("layer:")
         and node not in set(law.get("excluded") or [])
@@ -314,21 +525,29 @@ def gravity_field_masses(probes, tuner):
         node.startswith("layer:") and cfg.get("g") is not None
         for node, cfg in configured.items()
     )
+    ranked = None
+    items = []
+    # 1. Probes
     for name, pdata in probes.items():
         dirs = pdata.get("direction") or {}
         node_key = f"probe:{name}"
         if not dirs or probe_is_released(pdata) or (configured.get(node_key) or {}).get("excluded"):
             continue  # released probes are observational-only: no force
-        m = pdata.get("mass")
-        if isinstance(m, dict):
-            m = resolve_field_source(m, probes, tuner, steer_bodies().get("families", {}))
-        if m is None:
+        m_spec = pdata.get("mass")
+        src_label = "constant"
+        if isinstance(m_spec, dict):
+            m = resolve_field_source(m_spec, probes, tuner, g_families, configured)
+            if m_spec.get("kind") == "constant":
+                src_label = f"{float(m_spec.get('value', 0.0)):g}"
+            else:
+                src_label = format_field_source(m_spec)
+        elif m_spec is not None:
+            m = float(m_spec)
+            src_label = "constant"
+        else:
             if ranked is None:
                 ranked = {r["name"]: r for r in rank_probes(probes, tuner)}
             lift = (ranked.get(name) or {}).get("lift")
-            # A personal/family G is an explicit request for this probe to be a
-            # field body. Before it has enough credited outcomes for a live
-            # lift, give it neutral unit mass rather than silently omitting it.
             personal = configured.get(node_key) or {}
             quality_member = any(
                 node_key in (law.get("members") or {})
@@ -340,25 +559,92 @@ def gravity_field_masses(probes, tuner):
                 or layer_g_configured or quality_member or quality_layer_member
                 else 0.0
             )
-        m = float(m)
+            src_label = "lift" if lift is not None else "default"
+        m = float(m or 0.0)
         if abs(m) < 1e-9:
             continue
-        masses.append((name, m, dirs))
-    for name, body in steer_bodies()["anchors"].items():
+        items.append({
+            "name": name,
+            "raw": m,
+            "source": src_label,
+            "dirs": dirs,
+        })
+    # 2. Anchors
+    for name, body in steer_bodies().get("anchors", {}).items():
         if (configured.get(f"anchor:{name}") or {}).get("excluded"):
             continue
-        m = body.get("mass", 1.0)
-        if isinstance(m, dict):
-            m = resolve_field_source(m, probes, tuner, steer_bodies().get("families", {}))
+        m_spec = body.get("mass", 1.0)
+        src_label = "constant"
+        if isinstance(m_spec, dict):
+            m = resolve_field_source(m_spec, probes, tuner, g_families, configured)
+            if m_spec.get("kind") == "constant":
+                src_label = f"{float(m_spec.get('value', 0.0)):g}"
+            else:
+                src_label = format_field_source(m_spec)
+        elif m_spec is not None:
+            m = float(m_spec)
+            src_label = "constant"
+        else:
+            m = 1.0
+            src_label = "default"
         m = float(m or 0.0)
         dirs = body.get("dirs") or {}
         if abs(m) < 1e-9 or not dirs:
             continue
-        masses.append((f"@{name}", m, dirs))
-    total = sum(abs(m) for _n, m, _d in masses)
+        items.append({
+            "name": f"@{name}",
+            "raw": m,
+            "source": src_label,
+            "dirs": dirs,
+        })
+    # 3. Trigger bodies
+    for tname, tbody in steer_bodies().get("trigger_bodies", {}).items():
+        if tbody.get("n", 0) < tbody.get("min_evidence", 2):
+            continue
+        dirs = tbody.get("dirs") or {}
+        if not dirs:
+            continue
+        m_spec = tbody.get("mass")
+        if m_spec is not None:
+            if isinstance(m_spec, dict):
+                m = resolve_field_source(m_spec, probes, tuner, g_families, configured)
+                src_label = format_field_source(m_spec)
+            else:
+                m = float(m_spec)
+                src_label = "constant"
+        else:
+            m = trigger_outcome_value("lift", tname, tuner)
+            src_label = "lift"
+        m = float(m or 0.0)
+        if abs(m) < 1e-9:
+            continue
+        items.append({
+            "name": f"trigger:{tname}",
+            "raw": m,
+            "source": src_label,
+            "dirs": dirs,
+        })
+    total = sum(abs(item["raw"]) for item in items)
     if total <= 0:
         return []
-    return [(n, m / total, d) for n, m, d in masses]
+    for item in items:
+        item["mass"] = item["raw"] / total
+    return items
+
+
+def gravity_field_masses(probes, tuner):
+    """Resolve each probe, anchor, and trigger body to signed normalized mass."""
+    details = gravity_field_mass_details(probes, tuner)
+    return [(item["name"], item["mass"], item["dirs"]) for item in details]
+
+
+def format_mass_detail(detail):
+    raw = detail.get("raw", 0.0)
+    mass = detail.get("mass", 0.0)
+    name = detail.get("name", "")
+    src = detail.get("source", "")
+    sign = "+" if raw > 0 else ""
+    return f"{name}: {mass:+.3f} (raw {sign}{raw:g}, {src})"
 
 
 # --- typed bodies: anchors, poles, and interaction laws ----------------------
@@ -379,6 +665,12 @@ _STEER_BODIES = {
     "g_families": {},
     "qualities": {},
     "sets": {},
+    "bands": {},
+    "spaces": {},
+    "rotations": {},
+    "law_gates": {},
+    "trigger_bodies": {},
+    "impulses": {},
 }
 
 
@@ -402,9 +694,18 @@ def steer_bodies():
                 _STEER_BODIES["g_families"] = payload.get("g_families", {}) or {}
                 _STEER_BODIES["qualities"] = payload.get("qualities", {}) or {}
                 _STEER_BODIES["sets"] = payload.get("sets", {}) or {}
+                _STEER_BODIES["bands"] = payload.get("bands", {}) or {}
+                _STEER_BODIES["spaces"] = payload.get("spaces", {}) or {}
+                _STEER_BODIES["rotations"] = payload.get("rotations", {}) or {}
+                _STEER_BODIES["law_gates"] = {
+                    tuple(k.split("|", 1)): v
+                    for k, v in (payload.get("law_gates", {}) or {}).items()
+                }
+                _STEER_BODIES["trigger_bodies"] = payload.get("trigger_bodies", {}) or {}
+                _STEER_BODIES["impulses"] = payload.get("impulses", {}) or {}
         except Exception:
             pass
-    for key in ("anchors", "probe_poles", "laws", "fields", "g_families", "qualities", "sets"):
+    for key in ("anchors", "probe_poles", "laws", "fields", "g_families", "qualities", "sets", "bands", "spaces", "rotations", "law_gates", "trigger_bodies", "impulses"):
         _STEER_BODIES.setdefault(key, {})
     return _STEER_BODIES
 
@@ -421,6 +722,12 @@ def save_steer_bodies():
             "g_families": state["g_families"],
             "qualities": state["qualities"],
             "sets": state["sets"],
+            "bands": state.get("bands", {}),
+            "spaces": state.get("spaces", {}),
+            "rotations": state.get("rotations", {}),
+            "law_gates": {"|".join(k): v for k, v in state.get("law_gates", {}).items()},
+            "trigger_bodies": state.get("trigger_bodies", {}),
+            "impulses": state.get("impulses", {}),
         }, STEER_BODIES_PATH)
     except Exception:
         pass
@@ -493,10 +800,24 @@ def known_pole_families(bodies=None):
 # Structurally distinct reference kinds carry an optional one-mark sigil:
 # layers are addresses (#16), lift/outcome are a trigger's two credit
 # channels (^name / *name), families are containers (~name). Scalar streams
-# (probes, knobs, statuses) are structurally identical and stay BARE -- a
-# bare name resolves to whichever single namespace owns it, and only a real
-# collision needs the spelled-out probe:/knob:/status: qualifier.
-FIELD_SOURCE_SIGILS = {"#": "layer", "^": "lift", "*": "outcome", "~": "family", ".": "probe", "=": "status", "%": "knob"}
+# use dedicated punctuation sigils:
+#   ! -> knob (e.g. !claimmap_alpha)
+#   % -> status (e.g. %cpu_pct, %ram_pct)
+#   ? -> probe (e.g. ?care, ?accuracy)
+# Leading + and - indicate positive and negative correlation or polarity.
+FIELD_SOURCE_SIGILS = {
+    "#": "layer",
+    "^": "lift",
+    "*": "outcome",
+    "~": "family",
+    "?": "probe",
+    "!": "knob",
+    "%": "status",
+    "$": "anchor",
+    "@": "anchor",
+    ".": "probe",
+    "=": "status",
+}
 
 FIELD_STATUS_NAMES = {
     "ram", "vram", "memory", "memory_live",
@@ -515,18 +836,21 @@ def parse_field_source(raw, scale=1.0, offset=0.0):
     """Parse a live coefficient source used by personal G and local clocks.
 
     Sources are deliberately small and inspectable: a constant, the global G,
-    a probe's latest centered reading, a tuner knob, a process status, a named
-    G family, or a trigger's OUTCOME channel (lift:<trigger> = fired-vs-unfired
+    a probe's latest centered reading (?name), a tuner knob (!name), a process status (%name),
+    a named G family (~name), or a trigger's OUTCOME channel (lift:<trigger> = fired-vs-unfired
     outcome lift; outcome:<trigger> = rolling mean of recent credited
     outcomes) -- outcomes exert force, not just appear on maps. Scale and
     offset let unlike units be aligned explicitly.
 
+    Sigils mark the kinds: !knob, %status, ?probe, #N layer, ^trigger lift, *trigger outcome, ~family.
+    Leading '+' or '-' applies positive/negative correlation or polarity (+1.0 or -1.0 scale).
     A bare name parses as kind 'auto': field_source_error resolves it to the
     single namespace that owns it (probe/knob/status/family) and demands a
-    qualifier only on a real collision. Sigils mark the structurally
-    different kinds: #N layer, ^trigger lift, *trigger outcome, ~family.
+    qualifier only on a real collision.
     """
     text = str(raw or "").strip()
+    if not text:
+        return None
     try:
         return {
             "kind": "constant",
@@ -537,16 +861,38 @@ def parse_field_source(raw, scale=1.0, offset=0.0):
     except ValueError:
         pass
     low = text.lower()
+    # Handle leading +/- polarity
+    if low.startswith("+"):
+        scale = float(scale) * 1.0
+        low = low[1:].strip()
+        text = text[1:].strip()
+    elif low.startswith("-"):
+        scale = float(scale) * -1.0
+        low = low[1:].strip()
+        text = text[1:].strip()
+    if not low:
+        return None
+
     if low in ("global", "g", "prioritize_alpha"):
         kind, name = "global", "prioritize_alpha"
+    elif re.match(r"^l\d+$", low):
+        kind, name = "layer", low[1:]
     elif low[0] in FIELD_SOURCE_SIGILS:
-        kind, name = FIELD_SOURCE_SIGILS[low[0]], low[1:].strip()
+        kind = FIELD_SOURCE_SIGILS[low[0]]
+        name = low[1:].strip()
     elif ":" in low:
         kind, name = low.split(":", 1)
+        kind = kind.strip()
+        name = name.strip()
         kind = {"gfamily": "family", "memory": "status"}.get(kind, kind)
     else:
         kind, name = "auto", low
-    if kind not in ("probe", "knob", "status", "family", "layer", "lift", "outcome", "auto") or not name:
+    valid_kinds = (
+        "probe", "knob", "status", "family", "layer", "lift", "outcome", "anchor", "auto",
+        "pos", "position", "dist", "distance", "vel", "velocity", "dpos", "speed", "accel", "acceleration",
+        "mass",
+    )
+    if kind not in valid_kinds or not name:
         return None
     return {
         "kind": kind,
@@ -607,6 +953,40 @@ def field_source_error(spec, probes=None, tuner=None, families=None):
         return f"no credited trigger named '{name}' ({kind}: reads its outcome channel)"
     if kind == "family" and name not in (families or {}):
         return f"no G family named '{name}'"
+    if kind == "anchor":
+        anchors = steer_bodies().get("anchors") or {}
+        aname = re.sub(r"[^a-z0-9_]", "_", name.lower()).strip("_")
+        if aname not in anchors:
+            return f"no anchor named '{name}'"
+    if kind in ("pos", "position", "dist", "distance", "vel", "velocity", "dpos", "speed", "accel", "acceleration"):
+        node = str(name).strip()
+        clean_node = node
+        if clean_node.startswith("probe:"):
+            clean_node = clean_node[len("probe:"):]
+        elif clean_node.startswith("anchor:"):
+            clean_node = "@" + clean_node[len("anchor:"):]
+
+        in_telemetry = any(
+            clean_node in (_GRAVITY_STATE.get(k) or {}) or node in (_GRAVITY_STATE.get(k) or {})
+            for k in ("position", "distance", "velocity", "acceleration")
+        )
+        if in_telemetry:
+            return None
+
+        bodies = steer_bodies()
+        anchors = bodies.get("anchors") or {}
+        spaces = bodies.get("spaces") or {}
+        bands = bodies.get("bands") or {}
+        if (
+            clean_node in (probes or {})
+            or clean_node.lstrip("@") in anchors
+            or clean_node in spaces
+            or clean_node.split(":")[-1] in spaces
+            or clean_node in bands
+            or clean_node.split(":")[-1] in bands
+        ):
+            return None
+        return f"no field object or recent position telemetry named '{name}'"
     if kind == "status" and name not in FIELD_STATUS_NAMES:
         return f"unknown status '{name}'"
     if kind == "layer":
@@ -690,6 +1070,17 @@ def resolve_field_source(
         base = float(tuner.get(spec.get("name"), 0.0)) if tuner is not None else 0.0
     elif kind == "status":
         base = field_status_value(spec.get("name"))
+    elif kind == "mass":
+        node = str(spec.get("name") or "").strip()
+        table = _GRAVITY_STATE.get("mass") or {}
+        val = table.get(node)
+        if val is None and node.startswith("probe:"):
+            val = table.get(node[len("probe:"):])
+        if val is None and node.startswith("@"):
+            val = table.get(f"anchor:{node[1:]}")
+        if val is None and node.startswith("anchor:"):
+            val = table.get(f"@{node[len('anchor:'):]}")
+        base = float(val) if val is not None else 0.0
     elif kind in ("lift", "outcome"):
         base = trigger_outcome_value(kind, spec.get("name"), tuner)
     elif kind == "layer":
@@ -720,6 +1111,34 @@ def resolve_field_source(
             inherited, probes, tuner, families=families, fields=fields,
             _seen=seen, channel=channel,
         )
+    elif kind == "anchor":
+        anchors = steer_bodies().get("anchors") or {}
+        aname = re.sub(r"[^a-z0-9_]", "_", str(spec.get("name") or "").lower()).strip("_")
+        base = float((anchors.get(aname) or {}).get("mass", 1.0))
+    elif kind in ("pos", "position", "dist", "distance", "vel", "velocity", "dpos", "speed", "accel", "acceleration"):
+        node = str(spec.get("name") or "").strip()
+        clean_node = node
+        if clean_node.startswith("probe:"):
+            clean_node = clean_node[len("probe:"):]
+        elif clean_node.startswith("anchor:"):
+            clean_node = "@" + clean_node[len("anchor:"):]
+
+        k_table = {
+            "pos": "position", "position": "position",
+            "dist": "distance", "distance": "distance",
+            "vel": "velocity", "velocity": "velocity", "dpos": "velocity",
+            "speed": "velocity",
+            "accel": "acceleration", "acceleration": "acceleration",
+        }[kind]
+
+        table = _GRAVITY_STATE.get(k_table) or {}
+        val = table.get(clean_node)
+        if val is None:
+            val = table.get(node)
+        if val is None:
+            base = 0.0
+        else:
+            base = abs(float(val)) if kind == "speed" else float(val)
     elif kind == "auto":
         # Defensive: a bare-name spec that skipped field_source_error's
         # in-place resolution. Same owner order; scale/offset apply once
@@ -746,11 +1165,39 @@ def resolve_field_source(
 def canonical_field_node(raw, probes=None, anchors=None, families=None, tuner=None):
     """Return the persisted node key for a probe, anchor, layer, family, or knob."""
     text = str(raw or "").strip()
+    if not text:
+        return None
     low = text.lower()
+    if low.startswith(("+", "-")):
+        low = low[1:].strip()
+        text = text[1:].strip()
+    if not low:
+        return None
+
     probes = probes or {}
     anchors = anchors or {}
     families = families or {}
     knobs = {str(k).lower() for k in (getattr(tuner, "triggers", {}) or {})}
+
+    if low.startswith("!"):
+        name = low[1:].strip()
+        return f"knob:{name}" if (not knobs or name in knobs) else None
+    if low.startswith(("?", ".")):
+        name = text[1:].strip()
+        return f"probe:{name}" if (not probes or name in probes) else None
+    if low.startswith("~"):
+        name = low[1:].strip()
+        return f"family:{name}" if (not families or name in families) else None
+    if low.startswith("#") or re.match(r"^l\d+$", low):
+        try:
+            layer = int(low[1:].strip())
+            return f"layer:{layer}" if layer >= 0 else None
+        except ValueError:
+            return None
+    if low.startswith(("$", "@")):
+        aname = re.sub(r"[^a-z0-9_]", "_", low[1:]).strip("_")
+        return f"anchor:{aname}" if (not anchors or aname in anchors) else None
+
     if ":" not in low:
         owners = [k for k, has in (
             ("probe", text in probes),
@@ -772,11 +1219,9 @@ def canonical_field_node(raw, probes=None, anchors=None, families=None, tuner=No
     if low.startswith(("knob:", "stream:")):
         name = low.split(":", 1)[1]
         return f"knob:{name}" if (not knobs or name in knobs) else None
-    aname = re.sub(r"[^a-z0-9_]", "_", text.lstrip("@").lower()).strip("_")
-    if text.startswith("@") and aname in anchors:
-        return f"anchor:{aname}"
-    if low.startswith("anchor:") and aname.split("_", 1)[-1] in anchors:
-        return f"anchor:{aname.split('_', 1)[-1]}"
+    if low.startswith("anchor:"):
+        aname = re.sub(r"[^a-z0-9_]", "_", low.split(":", 1)[1]).strip("_")
+        return f"anchor:{aname}" if aname and (not anchors or aname in anchors) else None
     if low.startswith("layer:"):
         try:
             layer = int(low.split(":", 1)[1])
@@ -992,7 +1437,7 @@ def field_entry_config(body_name, layer, probes=None, tuner=None):
     fields = bodies["fields"]
     families = bodies["g_families"]
     body_key = (
-        f"anchor:{body_name[1:]}" if str(body_name).startswith("@")
+        f"anchor:{body_name[1:]}" if str(body_name).startswith(("@", "$"))
         else f"probe:{body_name}"
     )
     own = fields.get(body_key) or {}
@@ -1094,29 +1539,56 @@ def law_coupling(poles_i, poles_j, laws):
 
 
 def apply_body_laws(tuner, probes=None, eps=GRAVITY_EPS):
-    """One Euler step of the typed inter-body forces, moving only UNFROZEN
-    anchors (per-layer, on the unit sphere; same inverse-square kernel as the
-    field). Step size = the gravity_law_step knob; 0 = statics only."""
+    """One Euler step of the typed inter-body forces, moving UNFROZEN anchors
+    and UNFROZEN typed probes (per-layer, on the unit sphere; same inverse-square
+    kernel as the field, plus latent-position translation when a probe carries
+    a midpoint/scale). Step size = the gravity_law_step knob; 0 = statics only."""
     step = float(tuner.get("gravity_law_step", 0.0)) if tuner is not None else 0.0
     if step <= 0:
         return 0
     bodies = steer_bodies()
     anchors = bodies["anchors"]
-    laws = bodies["laws"]
-    if not anchors or not laws:
+    laws = dict(bodies["laws"])
+    for pair, conditions in bodies.get('law_gates', {}).items():
+        factor = 1.
+        token_conditions = [c for c in conditions if Gate(c).tempo() == 'token']
+        duty = _GRAVITY_STATE.get('gate_duty', {}).get('|'.join(pair))
+        if token_conditions and duty is not None:
+            factor *= max(0., min(1., float(duty)))
+        for condition in conditions:
+            if Gate(condition).tempo() == 'turn' or duty is None:
+                factor *= float(Gate(condition).evaluate(probes, tuner)[0])
+        laws[pair] = laws.get(pair, 0.) * factor
+    if (not anchors and not bodies.get("probe_poles")) or not laws:
         return 0
-    # sources: every anchor, plus typed probes as immobile sources
+    # Snapshot sources at the start of the Euler step: every anchor and typed probe
     sources = []
     for name, a in anchors.items():
-        sources.append((f"@{name}", a.get("poles") or {}, float(a.get("mass", 1.0) or 0.0), a.get("dirs") or {}))
+        sources.append((
+            f"@{name}",
+            dict(a.get("poles") or {}),
+            float(a.get("mass", 1.0) or 0.0),
+            {L: (v.clone() if torch.is_tensor(v) else torch.as_tensor(v).clone()) for L, v in (a.get("dirs") or {}).items()},
+        ))
     for pname, ppoles in bodies["probe_poles"].items():
         pdata = (probes or {}).get(pname)
-        if not pdata or not ppoles:
+        if not pdata or not ppoles or probe_is_released(pdata):
             continue
         pm = pdata.get("mass")
-        sources.append((pname, ppoles, float(pm) if pm is not None else 1.0,
-                        pdata.get("direction") or {}))
+        if isinstance(pm, dict):
+            pm_val = resolve_field_source(pm, probes, tuner, bodies.get("g_families"), bodies.get("fields"))
+        elif pm is not None:
+            pm_val = float(pm)
+        else:
+            pm_val = 1.0
+        sources.append((
+            pname,
+            dict(ppoles),
+            float(pm_val),
+            {L: (v.clone() if torch.is_tensor(v) else torch.as_tensor(v).clone()) for L, v in (pdata.get("direction") or {}).items()},
+        ))
     moved = 0
+    anchor_moved = False
     for name, a in anchors.items():
         if a.get("frozen", True):
             continue
@@ -1138,7 +1610,7 @@ def apply_body_laws(tuner, probes=None, eps=GRAVITY_EPS):
                 v = jdirs.get(L)
                 if v is None:
                     continue
-                vt = (v if torch.is_tensor(v) else torch.as_tensor(v)).detach().float()
+                vt = (v if torch.is_tensor(v) else torch.as_tensor(v)).detach().float().to(xn.device)
                 vn = vt / vt.norm().clamp_min(1e-6)
                 cos = float((xn * vn).sum())
                 tangent = vn - cos * xn
@@ -1147,7 +1619,62 @@ def apply_body_laws(tuner, probes=None, eps=GRAVITY_EPS):
                 newx = xn + step * force
                 dirs[L] = (newx / newx.norm().clamp_min(1e-6))
                 moved += 1
-    if moved:
+                anchor_moved = True
+    # Also move unfrozen typed probes under the same inter-body laws
+    for pname, ppoles in bodies["probe_poles"].items():
+        pdata = (probes or {}).get(pname)
+        if not pdata or not ppoles or pdata.get("frozen", False) or probe_is_released(pdata):
+            continue
+        dirs = pdata.get("direction") or {}
+        if not dirs:
+            continue
+        pos_dict = pdata.get("position") if isinstance(pdata.get("position"), dict) else None
+        scale_dict = pdata.get("scale") if isinstance(pdata.get("scale"), dict) else {}
+        poles_dict = pdata.get("poles") if isinstance(pdata.get("poles"), dict) else None
+        probe_moved = False
+        for L, x in list(dirs.items()):
+            xt = x if torch.is_tensor(x) else torch.as_tensor(x)
+            orig_dev = xt.device
+            xt = xt.detach().float()
+            xn = xt / xt.norm().clamp_min(1e-6)
+            force = torch.zeros_like(xn)
+            for sname, poles_j, mj, jdirs in sources:
+                if sname == pname or abs(mj) < 1e-9:
+                    continue
+                k_eff = law_coupling(ppoles, poles_j, laws)
+                if abs(k_eff) < 1e-12:
+                    continue
+                v = jdirs.get(L)
+                if v is None:
+                    continue
+                vt = (v if torch.is_tensor(v) else torch.as_tensor(v)).detach().float().to(xn.device)
+                vn = vt / vt.norm().clamp_min(1e-6)
+                cos = float((xn * vn).sum())
+                tangent = vn - cos * xn
+                force = force + (k_eff * mj / ((1.0 - cos) + eps) ** 2) * tangent
+            if force.abs().sum() > 0:
+                newx = xn + step * force
+                new_unit = (newx / newx.norm().clamp_min(1e-6)).to(orig_dev)
+                dirs[L] = new_unit
+                if pos_dict is not None and L in pos_dict:
+                    pos_t = (pos_dict[L] if torch.is_tensor(pos_dict[L]) else torch.as_tensor(pos_dict[L])).detach().float().to(xn.device)
+                    s_val = float(scale_dict.get(L, scale_dict.get(int(L), pos_t.norm().item() or 1.0)))
+                    disp = (step * s_val) * force
+                    pos_dict[L] = (pos_t + disp).to(pos_dict[L].device if torch.is_tensor(pos_dict[L]) else orig_dev)
+                    if poles_dict is not None and L in poles_dict and isinstance(poles_dict[L], (tuple, list)) and len(poles_dict[L]) == 2:
+                        pa, pb = poles_dict[L]
+                        pa_t = (pa if torch.is_tensor(pa) else torch.as_tensor(pa)).detach().float().to(xn.device) + disp
+                        pb_t = (pb if torch.is_tensor(pb) else torch.as_tensor(pb)).detach().float().to(xn.device) + disp
+                        poles_dict[L] = (pa_t.cpu(), pb_t.cpu())
+                moved += 1
+                probe_moved = True
+        if probe_moved:
+            set_probe_field(probes, pname, "direction", dirs)
+            if pos_dict is not None:
+                set_probe_field(probes, pname, "position", pos_dict)
+            if poles_dict is not None:
+                set_probe_field(probes, pname, "poles", poles_dict)
+    if anchor_moved:
         save_steer_bodies()
     return moved
 
@@ -1167,15 +1694,24 @@ def capture_anchor_dirs(model, text, max_chars=600):
     return dirs
 
 
-_GRAVITY_STATE = {"accum": None, "prev_cos": {}, "velocity": {}, "phi": None, "time": None}
+_GRAVITY_STATE = {
+    "accum": None,
+    "position": {},
+    "distance": {},
+    "prev_cos": {},
+    "prev_velocity": {},
+    "velocity": {},
+    "acceleration": {},
+    "phi": None,
+    "time": None,
+    "live_handles": [],
+}
 
 
 def flush_gravity_telemetry(tuner=None):
-    """Fold last generation's field telemetry into per-mass radial VELOCITY
-    (the sensing half of doppler: what is moving toward/away between turns)
-    and emit gravity_potential / gravity_time as live tuner streams -- so
-    'change time in an area' can drive any tempo knob through the existing
-    ':tune <knob> dynamic +gravity_time' machinery."""
+    """Fold last generation's field telemetry into per-mass radial VELOCITY,
+    position, distance, and acceleration, and emit gravity_potential / gravity_time
+    as live tuner streams."""
     acc = _GRAVITY_STATE.get("accum")
     _GRAVITY_STATE["accum"] = None
     if not acc or not acc.get("n"):
@@ -1184,15 +1720,28 @@ def flush_gravity_telemetry(tuner=None):
     phi = acc.get("phi", 0.0) / n
     t_mean = acc.get("time", 0.0) / n
     _GRAVITY_STATE["phi"], _GRAVITY_STATE["time"] = phi, t_mean
+    pos = _GRAVITY_STATE.setdefault("position", {})
+    dist = _GRAVITY_STATE.setdefault("distance", {})
+    prev_cos = _GRAVITY_STATE.setdefault("prev_cos", {})
+    prev_vel = _GRAVITY_STATE.setdefault("prev_velocity", {})
     vel = {}
+    accel = {}
     for nm, csum in (acc.get("cos") or {}).items():
-        c = csum / max(acc.get("cnt", {}).get(nm, 1), 1)
-        prev = _GRAVITY_STATE["prev_cos"].get(nm)
-        if prev is not None:
-            vel[nm] = c - prev
-        _GRAVITY_STATE["prev_cos"][nm] = c
-    if vel:
-        _GRAVITY_STATE["velocity"] = vel
+        c = float(csum / max(acc.get("cnt", {}).get(nm, 1), 1))
+        pos[nm] = c
+        dist[nm] = float(1.0 - c)
+        if nm in prev_cos:
+            v = float(c - prev_cos[nm])
+            vel[nm] = v
+            if nm in prev_vel:
+                accel[nm] = float(v - prev_vel[nm])
+            prev_vel[nm] = v
+        prev_cos[nm] = c
+    _GRAVITY_STATE["velocity"] = vel
+    _GRAVITY_STATE["acceleration"] = accel
+    _GRAVITY_STATE['gate_duty'] = {
+        name: totals[0] / max(1, totals[1])
+        for name, totals in acc.get('gates', {}).items()}
     if tuner is not None:
         try:
             tuner.observe("gravity_potential", float(phi))
@@ -1206,113 +1755,959 @@ def gravity_velocities():
     return dict(_GRAVITY_STATE.get("velocity") or {})
 
 
+IMPULSE_MODES = {"velocity", "distance", "force", "force_distance"}
+IMPULSE_DEFAULT_SPEED = 0.25
+IMPULSE_DEFAULT_DECAY = 0.85
+IMPULSE_DEFAULT_DURATION = 6.0
+SPACE_DEFAULT_RATE = 0.1
+ROTATION_DEFAULT_ANGLE = 0.05
+BAND_DEFAULT_REST = 0.5
+BAND_DEFAULT_GIVE = 0.2
+BAND_DEFAULT_STRENGTH = 1.0
+
+def _finite_float(value, default=0.0, lo=None, hi=None):
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    if v != v or v in (float("inf"), float("-inf")):
+        return float(default)
+    if lo is not None:
+        v = max(float(lo), v)
+    if hi is not None:
+        v = min(float(hi), v)
+    return v
+
+def impulse_body_dirs(node, probes=None):
+    """Directions for an impulse target. Released probes stay observational."""
+    bodies = steer_bodies()
+    node = str(node or "")
+    if (bodies["fields"].get(node) or {}).get("excluded"):
+        return {}
+    if node.startswith("probe:"):
+        pname = node.split(":", 1)[1]
+        pdata = (probes or {}).get(pname)
+        if not pdata or probe_is_released(pdata):
+            return {}
+        return pdata.get("direction") or {}
+    if node.startswith("anchor:"):
+        aname = node.split(":", 1)[1]
+        return (bodies["anchors"].get(aname) or {}).get("dirs") or {}
+    if node.startswith('trigger:'):
+        body = bodies.get('trigger_bodies', {}).get(node.split(':', 1)[1], {})
+        return body.get('dirs', {}) if body.get('n', 0) >= body.get('min_evidence', 2) else {}
+    return {}
+
+
+def update_trigger_bodies(tuner, hs, probes=None):
+    changed = 0
+    layers = {int(layer) for p in (probes or {}).values()
+              for layer in p.get('direction', {})}
+    for name, body in steer_bodies().get('trigger_bodies', {}).items():
+        trigger = tuner.triggers.get(name)
+        if trigger is None or not trigger.signals or not trigger._fires(trigger.signals[-1]):
+            continue
+        rate = _finite_float(body.get('ema', .1), .1, lo=0., hi=1.)
+        dirs = body.setdefault('dirs', {})
+        placed = False
+        for layer in layers:
+            center = hs[layer].detach().float().reshape(-1, hs[layer].shape[-1]).mean(0).cpu()
+            if not torch.isfinite(center).all() or center.norm() < 1e-6:
+                continue
+            previous = dirs.get(layer)
+            dirs[layer] = center if previous is None else (1. - rate) * previous + rate * center
+            placed = True
+        if placed:
+            body['n'] = int(body.get('n', 0)) + 1
+            changed += 1
+    if changed:
+        save_steer_bodies()
+    return changed
+
+def format_impulse_config(name, cfg, probes=None, tuner=None):
+    sign = "toward" if float(cfg.get("sign", 1.0) or 1.0) >= 0 else "away"
+    duration = _finite_float(cfg.get("duration", IMPULSE_DEFAULT_DURATION), IMPULSE_DEFAULT_DURATION, lo=0.0)
+    age = _finite_float(cfg.get("age", 0.0), 0.0, lo=0.0)
+    remaining = "open" if duration <= 0 else f"{max(0.0, duration - age):g}"
+    speed_src = cfg.get("speed") or {"kind": "constant", "value": IMPULSE_DEFAULT_SPEED}
+    time_src = cfg.get("time") or {"kind": "constant", "value": 1.0}
+    speed_now = resolve_field_source(
+        speed_src, probes, tuner, steer_bodies()["g_families"], steer_bodies()["fields"]
+    ) if tuner is not None else speed_src.get("value", IMPULSE_DEFAULT_SPEED)
+    time_now = resolve_field_source(
+        time_src, probes, tuner, steer_bodies()["g_families"], steer_bodies()["fields"],
+        channel="time",
+    ) if tuner is not None else time_src.get("value", 1.0)
+    return (
+        f"impulse:{name} {sign} {cfg.get('node', '(missing)')} "
+        f"speed<-{format_field_source(speed_src)}={_finite_float(speed_now):+g} "
+        f"time<-{format_field_source(time_src)}={_finite_float(time_now):+g} "
+        f"decay={_finite_float(cfg.get('decay', IMPULSE_DEFAULT_DECAY), IMPULSE_DEFAULT_DECAY, lo=0.0, hi=1.0):g} "
+        f"duration={duration:g} age={age:g} remaining={remaining} "
+        f"mode={cfg.get('mode', 'velocity')}"
+    )
+
+def _impulse_decay_factor(term, time_index):
+    dt = _finite_float(term.get("dt", 1.0), 1.0, lo=-20.0, hi=20.0)
+    age = _finite_float(term.get("age", 0.0), 0.0, lo=0.0)
+    duration = _finite_float(term.get("duration", IMPULSE_DEFAULT_DURATION), IMPULSE_DEFAULT_DURATION, lo=0.0)
+    phase = age + abs(dt) * max(0, int(time_index))
+    if duration > 0.0 and phase > duration:
+        return 0.0
+    decay = _finite_float(term.get("decay", IMPULSE_DEFAULT_DECAY), IMPULSE_DEFAULT_DECAY, lo=0.0, hi=1.0)
+    if decay >= 1.0:
+        return 1.0
+    return float(decay ** min(phase, 1000.0))
+
+def build_impulse_field_entries(probes, tuner):
+    """Resolve configured initial velocities into per-layer field entries.
+
+    Each impulse is a transient tangent velocity. Its `time` source is a real
+    evolution parameter, not wall-clock time: a probe/status/outcome stream can
+    make the impulse advance quickly, slowly, backward, or not at all.
+    """
+    bodies = steer_bodies()
+    impulses = bodies["impulses"]
+    if not impulses:
+        return {}, [], False
+    per_layer = {}
+    summaries = []
+    changed = False
+    families = bodies["g_families"]
+    fields = bodies["fields"]
+    for iname, cfg in sorted(impulses.items()):
+        if not isinstance(cfg, dict):
+            continue
+        dirs = impulse_body_dirs(cfg.get("node"), probes)
+        if not dirs:
+            continue
+        speed_src = cfg.get("speed") or {"kind": "constant", "value": IMPULSE_DEFAULT_SPEED}
+        time_src = cfg.get("time") or {"kind": "constant", "value": 1.0}
+        speed = _finite_float(
+            resolve_field_source(speed_src, probes, tuner, families, fields),
+            0.0,
+            lo=-20.0,
+            hi=20.0,
+        )
+        dt = _finite_float(
+            resolve_field_source(time_src, probes, tuner, families, fields, channel="time"),
+            1.0,
+            lo=-20.0,
+            hi=20.0,
+        )
+        decay = _finite_float(cfg.get("decay", IMPULSE_DEFAULT_DECAY), IMPULSE_DEFAULT_DECAY, lo=0.0, hi=1.0)
+        duration = _finite_float(cfg.get("duration", IMPULSE_DEFAULT_DURATION), IMPULSE_DEFAULT_DURATION, lo=0.0)
+        age = _finite_float(cfg.get("age", 0.0), 0.0, lo=0.0)
+        if duration > 0.0 and age >= duration:
+            summaries.append((iname, cfg, speed, dt, "spent"))
+            continue
+        if abs(speed) < 1e-12 or abs(dt) < 1e-12:
+            summaries.append((iname, cfg, speed, dt, "paused"))
+            continue
+        mode = str(cfg.get("mode", "velocity") or "velocity").lower()
+        if mode not in IMPULSE_MODES:
+            mode = "velocity"
+        sign = 1.0 if float(cfg.get("sign", 1.0) or 1.0) >= 0 else -1.0
+        term = {
+            "name": iname,
+            "sign": sign,
+            "speed": speed,
+            "dt": dt,
+            "decay": decay,
+            "duration": duration,
+            "age": age,
+            "mode": mode,
+        }
+        for L, v in dirs.items():
+            try:
+                Li = int(L)
+            except (TypeError, ValueError):
+                continue
+            vt = v if torch.is_tensor(v) else torch.as_tensor(v)
+            vt = vt.detach().to(dtype=torch.float32)
+            vn = vt.norm().clamp_min(1e-6)
+            per_layer.setdefault(Li, []).append({
+                "direction": vt / vn,
+                "mass": 0.0,
+                "g": 0.0,
+                "time": 1.0,
+                "shape": {"kind": "point"},
+                "name": f"impulse:{iname}",
+                "qualities": [],
+                "impulses": [term],
+            })
+        if abs(dt) > 0:
+            cfg["age"] = (min(duration, age + abs(dt)) if duration > 0.0 else age + abs(dt))
+            changed = True
+        summaries.append((iname, cfg, speed, dt, "active"))
+    return per_layer, summaries, changed
+
+def space_scale_factor(cfg, probes=None, tuner=None):
+    """Metric factor a for one space region: expand -> 1+|w|, contract ->
+    1/(1+|w|), symmetric in log-space; w is the resolved warp source."""
+    src = cfg.get("warp")
+    if not src:
+        return 1.0
+    bodies = steer_bodies()
+    w = abs(_finite_float(
+        resolve_field_source(src, probes, tuner, bodies["g_families"], bodies["fields"]),
+        0.0, lo=-20.0, hi=20.0,
+    ))
+    if w <= 1e-12:
+        return 1.0
+    a = 1.0 + w if float(cfg.get("sign", 1.0) or 1.0) >= 0 else 1.0 / (1.0 + w)
+    return max(0.05, min(20.0, a))
+
+def format_space_config(name, cfg, probes=None, tuner=None):
+    sign_word = "expand" if float(cfg.get("sign", 1.0) or 1.0) >= 0 else "contract"
+    rate_src = cfg.get("rate")
+    warp_src = cfg.get("warp")
+    bodies = steer_bodies()
+    rate_now = _finite_float(resolve_field_source(
+        rate_src, probes, tuner, bodies["g_families"], bodies["fields"]
+    )) if (rate_src and tuner is not None) else 0.0
+    a_now = space_scale_factor(cfg, probes, tuner) if tuner is not None else 1.0
+    return (
+        f"space:{name} {sign_word} {cfg.get('node', '(missing)')}"
+        + (f" rate<-{format_field_source(rate_src)}={rate_now:+g}" if rate_src else " rate=off")
+        + (f" warp<-{format_field_source(warp_src)} a={a_now:g}" if warp_src else " warp=off")
+    )
+
+def build_space_effects(probes, tuner):
+    """Selective metric expansion/contraction plus force-free comoving drift.
+
+    A region is selective by MEMBERSHIP, not by a distance kernel. Warp
+    rescales state<->member distances (expansion a>1 thins the region's
+    influence toward the exclusion limit; contraction a<1 makes it grip and
+    sharpens its near field); bound systems do not expand, so member<->member
+    space is untouched. Rate is a flat comoving drift: space carries the
+    state toward/away from the region without any body exerting force --
+    persistent while configured, unlike a decaying impulse."""
+    bodies = steer_bodies()
+    spaces = bodies["spaces"]
+    warp_node, warp_family, warp_layer = {}, {}, {}
+    drift_layers = {}
+    summaries = []
+    if not spaces:
+        return warp_node, warp_family, warp_layer, drift_layers, summaries
+    families = bodies["g_families"]
+    fields = bodies["fields"]
+    for sname, cfg in sorted(spaces.items()):
+        if not isinstance(cfg, dict):
+            continue
+        node = str(cfg.get("node") or "")
+        sign = 1.0 if float(cfg.get("sign", 1.0) or 1.0) >= 0 else -1.0
+        a = space_scale_factor(cfg, probes, tuner)
+        warping = abs(a - 1.0) > 1e-9
+        if warping:
+            if node.startswith("layer:"):
+                try:
+                    Li = int(node.split(":", 1)[1])
+                    warp_layer[Li] = warp_layer.get(Li, 1.0) * a
+                except (TypeError, ValueError):
+                    pass
+            elif node.startswith("family:"):
+                fname = node.split(":", 1)[1]
+                warp_family[fname] = warp_family.get(fname, 1.0) * a
+            else:
+                warp_node[node] = warp_node.get(node, 1.0) * a
+        rate_src = cfg.get("rate")
+        H = _finite_float(
+            resolve_field_source(rate_src, probes, tuner, families, fields),
+            0.0, lo=-20.0, hi=20.0,
+        ) if rate_src else 0.0
+        drifting = abs(H) > 1e-12
+        if drifting:
+            # Drift needs member directions. A layer region has none: it is
+            # warp-only. A family region drifts every member body.
+            if node.startswith("family:"):
+                fname = node.split(":", 1)[1]
+                members = [
+                    n for n, fcfg in fields.items()
+                    if fcfg.get("family") == fname and n.startswith(("probe:", "anchor:"))
+                ]
+            elif node.startswith(("probe:", "anchor:")):
+                members = [node]
+            else:
+                members = []
+            # Comoving drift rides the impulse term machinery as a permanent
+            # non-decaying velocity: expand -> recede (negative weight),
+            # contract -> approach; a signed live H flips it naturally.
+            term = {
+                "name": f"space:{sname}",
+                "sign": -sign,
+                "speed": H,
+                "dt": 1.0,
+                "decay": 1.0,
+                "duration": 0.0,
+                "age": 0.0,
+                "mode": "velocity",
+            }
+            for member in members:
+                dirs = impulse_body_dirs(member, probes)
+                for L, v in dirs.items():
+                    try:
+                        Li = int(L)
+                    except (TypeError, ValueError):
+                        continue
+                    vt = v if torch.is_tensor(v) else torch.as_tensor(v)
+                    vt = vt.detach().to(dtype=torch.float32)
+                    vn = vt.norm().clamp_min(1e-6)
+                    drift_layers.setdefault(Li, []).append({
+                        "direction": vt / vn,
+                        "mass": 0.0,
+                        "g": 0.0,
+                        "time": 1.0,
+                        "shape": {"kind": "point"},
+                        "name": f"space:{sname}",
+                        "qualities": [],
+                        "impulses": [dict(term)],
+                        "warp": 1.0,
+                    })
+        state = "active" if (warping or drifting) else "inert"
+        summaries.append((sname, cfg, a, H, state))
+    return warp_node, warp_family, warp_layer, drift_layers, summaries
+
+def _rotation_delta(h_float, rotations):
+    """Sum of plane-rotation deltas. Each (e1, e2, theta) rotates every token
+    state's span{e1,e2} component by theta (from -> to for theta > 0): an
+    exact isometry before the shared envelope cap -- norm preserved, the
+    orthogonal complement untouched. Small angles compose additively."""
+    current = h_float
+    for e1, e2, theta in rotations:
+        a = (current * e1).sum(-1, keepdim=True)
+        b = (current * e2).sum(-1, keepdim=True)
+        c = math.cos(theta) - 1.0
+        s = math.sin(theta)
+        current = current + (a * c - b * s) * e1 + (a * s + b * c) * e2
+    return current - h_float
+
+def format_rotation_config(name, cfg, probes=None, tuner=None):
+    angle_src = cfg.get("angle") or {"kind": "constant", "value": ROTATION_DEFAULT_ANGLE}
+    bodies = steer_bodies()
+    theta_now = _finite_float(resolve_field_source(
+        angle_src, probes, tuner, bodies["g_families"], bodies["fields"]
+    ), 0.0, lo=-math.pi / 2, hi=math.pi / 2) if tuner is not None else angle_src.get("value", ROTATION_DEFAULT_ANGLE)
+    return (
+        f"rotation:{name} {cfg.get('from', '(missing)')} -> {cfg.get('to', '(missing)')} "
+        f"angle<-{format_field_source(angle_src)}={theta_now:+g} rad/step"
+    )
+
+def build_rotation_field_entries(probes, tuner):
+    """Resolve configured rotations into per-layer (e1, e2, theta) planes.
+
+    A rotation transports the from-body component of the state onto the
+    to-body direction -- rigid shifting, not a pull: it does not fight the
+    source basin, it remaps it. Per layer the plane is span{u, v} where both
+    bodies have directions; parallel directions have no unique plane and are
+    skipped. theta is a live source in radians per shell step; its sign
+    reverses the transport."""
+    bodies = steer_bodies()
+    rotations = bodies["rotations"]
+    per_layer, summaries = {}, []
+    if not rotations:
+        return per_layer, summaries
+    families, fields = bodies["g_families"], bodies["fields"]
+    for rname, cfg in sorted(rotations.items()):
+        if not isinstance(cfg, dict):
+            continue
+        angle_src = cfg.get("angle") or {"kind": "constant", "value": ROTATION_DEFAULT_ANGLE}
+        theta = _finite_float(
+            resolve_field_source(angle_src, probes, tuner, families, fields),
+            0.0, lo=-math.pi / 2, hi=math.pi / 2,
+        )
+        u_dirs, v_dirs = {}, {}
+        for src_node, dest in ((cfg.get("from"), u_dirs), (cfg.get("to"), v_dirs)):
+            for L, v in (impulse_body_dirs(src_node, probes) or {}).items():
+                try:
+                    dest[int(L)] = v
+                except (TypeError, ValueError):
+                    continue
+        shared = sorted(set(u_dirs) & set(v_dirs))
+        if not shared or not abs(theta) > 1e-9:
+            summaries.append((rname, cfg, theta, "inert" if not shared else "paused"))
+            continue
+        placed = 0
+        for Li in shared:
+            ut = u_dirs[Li] if torch.is_tensor(u_dirs[Li]) else torch.as_tensor(u_dirs[Li])
+            vt = v_dirs[Li] if torch.is_tensor(v_dirs[Li]) else torch.as_tensor(v_dirs[Li])
+            ut = ut.detach().to(dtype=torch.float32).reshape(-1)
+            vt = vt.detach().to(dtype=torch.float32).reshape(-1)
+            e1 = ut / ut.norm().clamp_min(1e-6)
+            w = vt - (vt * e1).sum() * e1
+            wn = w.norm()
+            if float(wn) < 1e-6:
+                continue  # parallel: no unique rotation plane at this layer
+            per_layer.setdefault(Li, []).append((e1, w / wn, float(theta)))
+            placed += 1
+        summaries.append((rname, cfg, theta, "active" if placed else "inert"))
+    return per_layer, summaries
+
+class Gate:
+    """One when-condition of the field grammar:
+
+        when <source> below|above <x|source> [each token|turn] [and ...]
+
+    THE single implementation -- parsing, turn evaluation, per-token
+    compilation, and display all live here. The band handler, the law
+    handler, and the autocomplete validator all consume this class, so the
+    grammar can no longer diverge between them (it did, twice, before this
+    existed). Instances wrap the persisted dict schema unchanged --
+    {"source", "op", "value" | "threshold_source", "tempo"?} -- so saved
+    bands and laws load as-is.
+    """
+
+    KEYWORDS = ("when", "and")
+    COMPARATORS = {"below": "below", "under": "below", "above": "above", "over": "above"}
+    TEMPOS = ("token", "turn")
+
+    def __init__(self, when=None):
+        self.when = dict(when or {})
+
+    def to_dict(self):
+        return dict(self.when)
+
+    # ---------------------------------------------------------------- parse
+    @classmethod
+    def live_source_builder(cls, probes=None, tuner=None, families=None):
+        """Semantic validation for the live handlers: tokens become real,
+        validated field sources."""
+        def build(token):
+            source = parse_field_source(token)
+            error = field_source_error(
+                source, probes, tuner, families
+            ) if source else f"invalid source '{token}'"
+            return (None, error) if error else (source, None)
+        return build
+
+    @classmethod
+    def parse_clause(cls, tokens, start, *, source_builder):
+        """Parse and-chained conditions beginning at tokens[start].
+
+        tokens[start] must be 'when' or 'and': the keyword occupies its own
+        slot and source/op/threshold follow at +1..+3 -- the offset rule the
+        hand-rolled copies kept getting wrong. source_builder(token) returns
+        (source_or_None, error_or_None); the live handlers build real field
+        sources, the autocomplete validator only checks names. Returns
+        (gates, next_index, error); gates are plain dicts ready to persist.
+        """
+        gates, i = [], int(start)
+        while True:
+            head = tokens[i].lower() if i < len(tokens) else "(end)"
+            if head not in cls.KEYWORDS:
+                return None, i, f"expected 'when' or 'and', got '{head}'"
+            if len(tokens) - i < 4:
+                return None, i, "each condition needs: <source> below|above <x|source>"
+            source, error = source_builder(tokens[i + 1])
+            if error:
+                return None, i, error
+            op = cls.COMPARATORS.get(tokens[i + 2].lower())
+            if op is None:
+                return None, i, "when comparator must be below or above"
+            entry = {"source": source, "op": op}
+            try:
+                entry["value"] = float(tokens[i + 3])
+            except ValueError:
+                threshold, error = source_builder(tokens[i + 3])
+                if error:
+                    return None, i, f"when threshold must be a number or live source ({error})"
+                entry["threshold_source"] = threshold
+            i += 4
+            if i < len(tokens) and tokens[i].lower() == "each":
+                if i + 1 >= len(tokens) or tokens[i + 1].lower() not in cls.TEMPOS:
+                    return None, i, "each needs 'token' or 'turn'"
+                entry["tempo"] = tokens[i + 1].lower()
+                i += 2
+            gates.append(entry)
+            if i < len(tokens) and tokens[i].lower() == "and":
+                continue  # 'and' takes the keyword slot; offsets stay aligned
+            break
+        return gates, i, None
+
+    # ------------------------------------------------------------- evaluate
+    def tempo(self):
+        """'token' (default: live per-token test when the source carries a
+        direction) or 'turn' (last reading, once per build)."""
+        return str(self.when.get("tempo", "token") or "token").lower()
+
+    def threshold(self, probes=None, tuner=None):
+        bodies = steer_bodies()
+        if "threshold_source" in self.when:
+            return _finite_float(resolve_field_source(
+                self.when["threshold_source"], probes, tuner,
+                bodies["g_families"], bodies["fields"],
+            ))
+        return _finite_float(self.when.get("value", 0.0))
+
+    def evaluate(self, probes=None, tuner=None):
+        """Turn-tempo evaluation against the live sources. Returns
+        (passes, live_value); the threshold itself may be a live source."""
+        if not self.when:
+            return True, None
+        bodies = steer_bodies()
+        val = _finite_float(resolve_field_source(
+            self.when.get("source"), probes, tuner,
+            bodies["g_families"], bodies["fields"],
+        ))
+        threshold = self.threshold(probes, tuner)
+        if str(self.when.get("op", "below")).lower() in ("below", "under"):
+            return val < threshold, val
+        return val > threshold, val
+
+    def token_test(self, probes=None, tuner=None):
+        """Compile into a per-token live-cosine test, or None.
+
+        Token tempo tests the LIVE state each token (like a band's side
+        clause), so only direction-bearing sources compile: a probe reading
+        (.name), or pos:/dist: of a probe or @anchor. The comparison maps
+        into raw cosine space through the source's scale/offset; a live
+        threshold resolves once per turn at build. Returns
+        (dirs_by_layer, op, cos_bound) with op in ('above', 'below')."""
+        when = self.when
+        if not when:
+            return None
+        src = when.get("source") or {}
+        kind = src.get("kind")
+        name = str(src.get("name") or "")
+        if kind not in ("probe", "pos", "dist"):
+            return None
+        if kind == "probe" or not (name.startswith("@") or ":" in name):
+            node = f"probe:{name.lstrip('@')}" if not name.startswith("@") else f"anchor:{name[1:]}"
+        elif name.startswith("@"):
+            node = f"anchor:{name[1:]}"
+        else:
+            node = name  # already probe:/anchor: qualified
+        dirs = impulse_body_dirs(node, probes)
+        if not dirs:
+            return None
+        threshold = self.threshold(probes, tuner)
+        scale = float(src.get("scale", 1.0) or 1.0)
+        offset = float(src.get("offset", 0.0) or 0.0)
+        if abs(scale) < 1e-12:
+            return None  # a zero-scaled source is constant; nothing to test
+        base_bound = (threshold - offset) / scale
+        op = "below" if str(when.get("op", "below")).lower() in ("below", "under") else "above"
+        if scale < 0:
+            op = "above" if op == "below" else "below"
+        if kind == "dist":
+            # dist = 1 - cos: 'dist above t' == 'cos below 1-t' and vice versa.
+            base_bound = 1.0 - base_bound
+            op = "above" if op == "below" else "below"
+        out_dirs = {}
+        for L, v in dirs.items():
+            try:
+                Li = int(L)
+            except (TypeError, ValueError):
+                continue
+            vt = (v if torch.is_tensor(v) else torch.as_tensor(v)).detach().to(dtype=torch.float32).reshape(-1)
+            out_dirs[Li] = vt / vt.norm().clamp_min(1e-6)
+        if not out_dirs:
+            return None
+        return out_dirs, op, _finite_float(base_bound, 0.0, lo=-1.0, hi=1.0)
+
+    # -------------------------------------------------------------- display
+    def describe(self, probes=None, tuner=None):
+        """One condition, with its live state: token gates show the current
+        reading (the per-token verdict lives in the pull, not here); turn
+        gates show met/UNMET."""
+        when = self.when
+        threshold_txt = (
+            format_field_source(when["threshold_source"])
+            if "threshold_source" in when
+            else f"{_finite_float(when.get('value', 0.0)):g}"
+        )
+        txt = f"{format_field_source(when.get('source'))} {when.get('op', 'below')} {threshold_txt}"
+        token_gate = self.tempo() != "turn" and self.token_test(probes, tuner) is not None
+        passes, live = self.evaluate(probes, tuner) if tuner is not None else (True, None)
+        if token_gate:
+            txt += " [per token]"
+            if live is not None:
+                txt += f" (reading now {live:+g})"
+        elif live is not None:
+            txt += f" ({live:+.3f} {'met' if passes else 'UNMET'})"
+        return txt
+
+    @classmethod
+    def describe_all(cls, gates, probes=None, tuner=None):
+        gates = gates if isinstance(gates, list) else ([gates] if gates else [])
+        if not gates:
+            return ""
+        return " when " + " and ".join(cls(w).describe(probes, tuner) for w in gates)
+
+def live_gate_state(when, probes=None, tuner=None):
+    """Delegate; the gate grammar lives in Gate."""
+    return Gate(when).evaluate(probes, tuner)
+
+def format_law_gates(gates, probes=None, tuner=None):
+    """Delegate; rendering lives in Gate.describe_all."""
+    return Gate.describe_all(gates, probes, tuner)
+
+def gate_token_test(when, probes=None, tuner=None):
+    """Delegate; the gate grammar lives in Gate."""
+    return Gate(when).token_test(probes, tuner)
+
+def gate_tempo(when):
+    """Delegate; the gate grammar lives in Gate."""
+    return Gate(when).tempo()
+
+def band_gate_state(cfg, probes=None, tuner=None):
+    """Evaluate a band's when-gates (ALL must hold). Returns (engaged, live
+    value of the first unmet gate, or of the last gate when all pass)."""
+    gates = band_when_list(cfg)
+    if not gates:
+        return True, None
+    live = None
+    for w in gates:
+        passes, live = Gate(w).evaluate(probes, tuner)
+        if not passes:
+            return False, live
+    return True, live
+
+def format_band_config(name, cfg, probes=None, tuner=None):
+    mode = str(cfg.get("mode", "pull"))
+    rest = _finite_float(cfg.get("rest", BAND_DEFAULT_REST), BAND_DEFAULT_REST, lo=0.0)
+    give = _finite_float(cfg.get("give", BAND_DEFAULT_GIVE), BAND_DEFAULT_GIVE, lo=1e-4)
+    strength_src = cfg.get("strength") or {"kind": "constant", "value": 1.0}
+    bodies = steer_bodies()
+    s_now = _finite_float(resolve_field_source(
+        strength_src, probes, tuner, bodies["g_families"], bodies["fields"]
+    )) if tuner is not None else strength_src.get("value", 1.0)
+    when = cfg.get("when")
+    engaged, live = band_gate_state(cfg, probes, tuner) if tuner is not None else (True, None)
+    gate_txt = ""
+    if when:
+        gate_txt = (
+            f" when {format_field_source(when.get('source'))} {when.get('op', 'below')} "
+            f"{_finite_float(when.get('value', 0.0)):g}"
+            + (f" ({'ENGAGED' if engaged else 'slack'}, now {live:+g})" if live is not None else "")
+        )
+    return (
+        f"band:{name} {mode} {cfg.get('node', '(missing)')} rest={rest:g} give={give:g} "
+        f"strength<-{format_field_source(strength_src)}={s_now:+g}{gate_txt}"
+    )
+
+def handle_geometry_command(args, probes, tuner):
+    """Validate a complete manual geometry edit before changing persisted state."""
+    kind = args[0].lower()
+    collections = {'space': ('spaces', format_space_config),
+                   'rotate': ('rotations', format_rotation_config),
+                   'impulse': ('impulses', format_impulse_config)}
+    key, formatter = collections[kind]
+    bodies = steer_bodies()
+    configs = bodies[key]
+    if len(args) == 1:
+        return '\n'.join(formatter(n, c, probes, tuner) for n, c in sorted(configs.items())) or f'No {key} configured.'
+    name = args[1]
+    if len(args) == 2:
+        if name not in configs:
+            raise ValueError(f'Unknown {kind}: {name}')
+        return formatter(name, configs[name], probes, tuner)
+    if args[2] in ('drop', 'off', 'remove'):
+        configs.pop(name, None)
+        save_steer_bodies()
+        return f'Removed {kind}: {name}'
+    def node(raw):
+        result = canonical_field_node(raw, probes, bodies['anchors'], bodies['g_families'], tuner)
+        if result is None:
+            raise ValueError(f'Unknown field node: {raw}')
+        return result
+    if len(args) < 4:
+        raise ValueError(f'{kind} needs a name, action and target')
+    if kind == 'rotate':
+        cfg = {'from': node(args[2]), 'to': node(args[3])}
+        allowed = {'angle'}
+    else:
+        if args[2] not in ('expand', 'contract', 'pull', 'push'):
+            raise ValueError('Use expand/contract for space or pull/push for impulse')
+        if kind == 'space' and args[2] not in ('expand', 'contract'):
+            raise ValueError('Space requires expand or contract')
+        if kind == 'impulse' and args[2] not in ('pull', 'push'):
+            raise ValueError('Impulse requires pull or push')
+        cfg = {'node': node(args[3]), 'sign': 1. if args[2] in ('expand', 'pull') else -1.}
+        allowed = {'warp', 'rate'} if kind == 'space' else {'speed', 'time', 'decay', 'duration', 'mode'}
+    tail = args[4:]
+    if len(tail) % 2:
+        raise ValueError('Each setting needs a value')
+    for setting, value in zip(tail[::2], tail[1::2]):
+        if setting not in allowed:
+            raise ValueError(f'Unknown {kind} setting: {setting}')
+        if setting == 'mode':
+            if value not in IMPULSE_MODES:
+                raise ValueError('Unknown impulse mode')
+            cfg[setting] = value
+        elif setting in ('decay', 'duration'):
+            number = float(value)
+            if not math.isfinite(number) or number < 0 or (setting == 'decay' and number > 1):
+                raise ValueError(f'Invalid {setting}')
+            cfg[setting] = number
+        else:
+            source = parse_field_source(value)
+            error = field_source_error(source, probes, tuner, bodies['g_families']) if source else 'Invalid source'
+            if error:
+                raise ValueError(error)
+            cfg[setting] = source
+    if kind == 'space' and not any(k in cfg for k in ('warp', 'rate')):
+        raise ValueError('Space needs warp or rate')
+    configs[name] = cfg
+    save_steer_bodies()
+    return formatter(name, cfg, probes, tuner)
+
+
+def band_when_list(bcfg):
+    """Normalize when conditions of a band into a list of condition dicts."""
+    if not isinstance(bcfg, dict):
+        return []
+    w = bcfg.get("when")
+    if isinstance(w, list):
+        return w
+    elif isinstance(w, dict):
+        return [w]
+    return []
+
+
+def format_band_when_desc(whens):
+    """Format a list of when conditions into human-readable string without nested quotes."""
+    if not whens:
+        return ""
+    parts = []
+    for c in whens:
+        src = format_field_source(c.get("source"))
+        op = c.get("op", "above")
+        val = c.get("value")
+        if val is None and "threshold_source" in c:
+            val = format_field_source(c.get("threshold_source"))
+        parts.append(f"{src} {op} {val}")
+    return " when " + " and ".join(parts)
+
+
+def _band_weight(term, distance):
+    """Calculate the Hooke restoring force weight for a band tether at a given distance."""
+    d = distance if isinstance(distance, torch.Tensor) else torch.as_tensor(distance, dtype=torch.float32)
+    rest = float(term.get("rest", 0.5))
+    give = max(1e-4, float(term.get("give", 0.2)))
+    mode = term.get("mode", "pull").lower()
+    strength = float(term.get("strength_val", term.get("strength", 1.0)))
+
+    delta = (d - rest) / give
+    force = strength * torch.tanh(delta)
+
+    if mode == "pull":
+        return torch.where(d > rest, force, torch.zeros_like(force))
+    elif mode == "push":
+        return torch.where(d < rest, force, torch.zeros_like(force))
+    elif mode == "spring":
+        return force
+    return torch.zeros_like(force)
+
+
+def _band_side_tests(term):
+    """Extract live token-level side/gate tests for a band term: list of (axis_tensor, op, threshold_value)."""
+    tests = []
+    if not isinstance(term, dict):
+        return tests
+    whens = band_when_list(term)
+    for cond in whens:
+        op = cond.get("op", "above")
+        val = cond.get("value", 0.0)
+        axis = cond.get("_gate_direction")
+        if axis is not None:
+            tests.append((axis, op, float(val)))
+    return tests
+
+
+def build_band_field_entries(probes, tuner, bodies=None):
+    """Compile active band tethers into per-layer field entries for forward hooks.
+
+    Returns (per_layer_dict, summaries_list).
+    """
+    bodies = bodies or steer_bodies()
+    bands = bodies.get("bands") or {}
+    per_layer = {}
+    summaries = []
+
+    for bname, bcfg in sorted(bands.items()):
+        node = bcfg.get("node", "")
+        mode = bcfg.get("mode", "pull")
+        rest = float(bcfg.get("rest", 0.5))
+        give = max(1e-4, float(bcfg.get("give", 0.2)))
+        st_spec = bcfg.get("strength")
+        if isinstance(st_spec, (int, float)):
+            st_spec = {"kind": "constant", "value": float(st_spec)}
+        elif not isinstance(st_spec, dict):
+            st_spec = parse_field_source(str(st_spec or "1"))
+        strength_val = resolve_field_source(st_spec, probes, tuner, bodies.get("g_families", {}), bodies.get("fields", {}))
+
+        whens = band_when_list(bcfg)
+        status = "active"
+        for cond in whens:
+            if cond.get("tempo") == "turn":
+                c_src = cond.get("source")
+                c_op = cond.get("op", "above")
+                c_val = cond.get("value")
+                if c_val is None and "threshold_source" in cond:
+                    c_val = resolve_field_source(cond["threshold_source"], probes, tuner, bodies.get("g_families", {}))
+                c_live = resolve_field_source(c_src, probes, tuner, bodies.get("g_families", {}))
+                if c_val is not None:
+                    if c_op == "above" and not (c_live > c_val):
+                        status = "slack"
+                        break
+                    elif c_op == "below" and not (c_live < c_val):
+                        status = "slack"
+                        break
+
+        summaries.append((bname, node, mode, rest, status))
+        if status != "active":
+            continue
+
+        node_clean = node.removeprefix('probe:').lstrip('@$')
+        dirs = impulse_body_dirs(node, probes)
+        if node.startswith(("@", "$")) or node in bodies.get("anchors", {}):
+            aname = node.lstrip("@$")
+            if aname in bodies.get("anchors", {}):
+                dirs = bodies["anchors"][aname].get("dirs", {})
+        elif node_clean in probes:
+            if probe_is_released(probes[node_clean]):
+                continue
+            dirs = probes[node_clean].get("direction", {})
+
+        for L, v in dirs.items():
+            try:
+                Li = int(L)
+            except (TypeError, ValueError):
+                continue
+            vt = v if torch.is_tensor(v) else torch.as_tensor(v, dtype=torch.float32)
+            vn = vt.norm().clamp_min(1e-6)
+            unit_dir = vt / vn
+
+            term_whens = []
+            for cond in whens:
+                if Gate(cond).tempo() == 'turn':
+                    continue
+                cond_copy = dict(cond)
+                cond_copy['value'] = Gate(cond).threshold(probes, tuner)
+                c_src = cond.get("source")
+                if isinstance(c_src, dict) and c_src.get("kind") == "probe":
+                    p_name = c_src.get("name")
+                    if p_name in probes and Li in probes[p_name].get("direction", {}):
+                        p_v = probes[p_name]["direction"][Li]
+                        p_vt = p_v if torch.is_tensor(p_v) else torch.as_tensor(p_v, dtype=torch.float32)
+                        cond_copy["_gate_direction"] = p_vt / p_vt.norm().clamp_min(1e-6)
+                term_whens.append(cond_copy)
+
+            term = {
+                "name": bname,
+                "mode": mode,
+                "rest": rest,
+                "give": give,
+                "strength": st_spec,
+                "strength_val": strength_val,
+                "when": term_whens,
+            }
+            per_layer.setdefault(Li, []).append({
+                "direction": unit_dir,
+                "name": node_clean,
+                "mass": 0.0,
+                "bands": [term],
+            })
+
+    return per_layer, summaries
+
+
 def _gravity_pull(h_float, entries, G, eps=GRAVITY_EPS, doppler=0.0,
                   vstate=None, vkey=None, taus=None, names=None, telem=None,
-                  time_index=0):
-    """Pure field math. h_float: (..., D) float32 hidden states; entries:
-    legacy [(unit_direction(D), mass)] or field dictionaries with direction,
-    mass, personal g, time, shape, and name. Returns the additive pull, bounded
-    by tanh(|field|) so stacked masses saturate instead of exploding, and
-    scaled to each token's own residual norm.
+                  time_index=0, plasticity=None, plasticity_signals=None):
+    """Compose named field effects with local geometry and per-position gates.
 
-    doppler > 0 makes the coupling velocity-aware: attention to a mass is not
-    line-of-sight distance alone but how fast the state is moving toward or
-    away from it (change in last-position cos between forwards; approaching
-    damps the pull, receding restores it -- a damped field that settles).
-
-    Per-entry time coefficients are local clock rates: they scale how much
-    change this field can produce in one shell step, while radial velocity is
-    measured against the same clock. telem accumulates potential, local time,
-    and per-mass cos for the sensing/stream side."""
-    structured = any(isinstance(item, dict) for item in entries)
-    normalized = []
-    for idx, item in enumerate(entries):
-        if isinstance(item, dict):
-            normalized.append((
-                item["direction"],
-                float(item.get("mass", 0.0)),
-                float(item.get("g", G)),
-                float(item.get("time", 1.0)),
-                item.get("shape") or {"kind": "point"},
-                item.get("name", str(idx)),
-                list(item.get("qualities") or []),
-            ))
-        else:
-            v_hat, mass = item[:2]
-            tau = taus[idx] if taus and idx < len(taus) and taus[idx] is not None else 1.0
-            name = names[idx] if names and idx < len(names) else str(idx)
-            normalized.append((v_hat, float(mass), 1.0, float(tau), {"kind": "point"}, name, []))
+    Every contribution is tangent to the state. The final saturation preserves
+    the existing residual envelope; the forward hook also applies _cap_steer.
+    """
+    from invariants.field_geometry import FieldEntry
+    structured = any(isinstance(item, (dict, FieldEntry)) for item in entries)
+    normalized = [FieldEntry.from_input(item, i, G, taus, names)
+                  for i, item in enumerate(entries)]
     s_norm = h_float.norm(dim=-1, keepdim=True).clamp_min(1e-6)
     s_hat = h_float / s_norm
-    cos_list = [(s_hat * item[0]).sum(-1, keepdim=True) for item in normalized]
-    scalars = None
-    T_local = 1.0
-    if doppler or normalized or telem is not None:
-        scalars = []
-        for (_v_hat, m, g_i, tau_i, shape, _name, qualities), cos_t in zip(normalized, cos_list):
-            c = float(cos_t.reshape(-1)[-1])
-            d = torch.tensor(max(0.0, 1.0 - c))
-            q_scalar = sum(
-                abs(float(term.get("amplitude", 0.0)))
-                * abs(time_vector_value(term.get("time_vector"), time_index))
-                * abs(float(quality_formula_value(term.get("formula"), d)))
-                for term in qualities
-            )
-            proximity = abs(m) * (
-                abs(g_i) * abs(float(_gravity_kernel(d, shape, eps=eps))) + q_scalar
-            )
-            scalars.append((c, proximity, tau_i))
-        wsum = sum(p for _c, p, _tau in scalars)
-        if wsum > 1e-12:
-            T_local = sum(p * tau for _c, p, tau in scalars) / wsum
-        T_local = max(0.05, min(20.0, T_local))
     pull = torch.zeros_like(h_float)
-    for idx, ((v_hat, m, g_i, tau_i, shape, _name, qualities), cos) in enumerate(zip(normalized, cos_list)):
-        distance = (1.0 - cos).clamp_min(0.0)
-        w = (m * g_i * tau_i) * _gravity_kernel(distance, shape, eps=eps)
-        for term in qualities:
-            q_time = time_vector_value(term.get("time_vector"), time_index)
-            w = w + (
-                m * tau_i * float(term.get("amplitude", 0.0)) * q_time
-                * quality_formula_value(term.get("formula"), distance)
-            )
+    scalars = []
+    for idx, entry in enumerate(normalized):
+        v_hat = entry.direction.to(device=h_float.device, dtype=h_float.dtype)
+        cos = (s_hat * v_hat).sum(-1, keepdim=True).clamp(-1, 1)
+        raw_distance = (1. - cos).clamp_min(0)
+        warp = _finite_float(entry.warp, 1., lo=.02, hi=50.)
+        distance = raw_distance * warp
+        mass = float(entry.mass)
+        if plasticity is not None and plasticity.enabled:
+            if entry.geometry is not None:
+                distance = entry.geometry.distance(distance, s_hat)
+                support = entry.geometry.support(s_hat)
+                mass = mass * (1. + plasticity.strength * plasticity.mass_strength * support).clamp(.1, 3.)
+            elif not entry.geometry_live:
+                distance = plasticity.effective_distance(entry.name, distance, plasticity_signals)
+                mass *= plasticity.mass_multiplier(entry.name, plasticity_signals or {})
+        w = mass * entry.g * entry.time * _gravity_kernel(distance, entry.shape, eps=eps)
+        for term in entry.qualities:
+            w = w + (mass * entry.time * float(term.get("amplitude", 0.))
+                     * time_vector_value(term.get("time_vector"), time_index)
+                     * quality_formula_value(term.get("formula"), distance))
+        for term in entry.bands:
+            mask = torch.ones_like(distance, dtype=torch.bool)
+            for axis, op, boundary in _band_side_tests(term):
+                projection = (h_float * axis.to(h_float.device)).sum(-1, keepdim=True)
+                mask &= projection > boundary if op == "above" else projection < boundary
+            if "side" in term:
+                projection = (h_float * term["side"].to(h_float.device)).sum(-1, keepdim=True)
+                mask &= (float(term.get("side_sign", 1.)) * projection
+                         >= float(term.get("side_boundary", 0.)))
+            w = w + torch.where(mask, _band_weight(term, distance), torch.zeros_like(distance))
+        cos_now = float(cos.reshape(-1)[-1])
         if doppler and vstate is not None:
-            cos_now = scalars[idx][0] if scalars else float(cos.reshape(-1)[-1])
             prev = vstate.get((vkey, idx))
             vstate[(vkey, idx)] = cos_now
             if prev is not None:
-                v_rad = (cos_now - prev) / max(tau_i, 0.05)
-                w = w * max(0.25, min(4.0, 1.0 - doppler * v_rad))
+                radial = (cos_now - prev) / max(entry.time, .05)
+                w = w * max(.25, min(4., 1. - doppler * radial))
+        for term in entry.impulses:
+            velocity = (float(term.get("sign", 1.)) * float(term.get("speed", 0.))
+                        * float(term.get("dt", 1.)) * _impulse_decay_factor(term, time_index))
+            mode = term.get("mode", "velocity")
+            iw = velocity * distance if mode in {"distance", "force_distance"} else velocity
+            if mode in {"force", "force_distance"}:
+                iw = iw * w
+            w = w + iw
         tangent = v_hat - cos * s_hat
         pull = pull + w * tangent
-    if telem is not None and scalars is not None:
-        telem["phi"] = telem.get("phi", 0.0) + sum(p for _c, p, _tau in scalars)
-        telem["time"] = telem.get("time", 0.0) + T_local
+        proximity = abs(float(torch.as_tensor(w).reshape(-1)[-1]))
+        scalars.append((entry.name, cos_now, proximity, entry.time))
+    if telem is not None:
+        total = sum(row[2] for row in scalars)
+        local_time = sum(row[2] * row[3] for row in scalars) / total if total > 1e-12 else 1.
+        telem["phi"] = telem.get("phi", 0.) + total
+        telem["time"] = telem.get("time", 0.) + max(.05, min(20., local_time))
         telem["n"] = telem.get("n", 0) + 1
-        cmap = telem.setdefault("cos", {})
-        cnt = telem.setdefault("cnt", {})
-        for i, item in enumerate(normalized):
-            nm = item[5]
-            cmap[nm] = cmap.get(nm, 0.0) + scalars[i][0]
-            cnt[nm] = cnt.get(nm, 0) + 1
-    mag = pull.norm(dim=-1, keepdim=True)
-    direction = pull / mag.clamp_min(1e-6)
-    outside_g = 1.0 if structured else float(G)
-    return outside_g * GRAVITY_NORM_FRACTION * torch.tanh(mag) * direction * s_norm
+        cmap, counts = telem.setdefault("cos", {}), telem.setdefault("cnt", {})
+        for name, cosine, _potential, _time in scalars:
+            cmap[name] = cmap.get(name, 0.) + cosine
+            counts[name] = counts.get(name, 0) + 1
+    magnitude = pull.norm(dim=-1, keepdim=True)
+    direction = pull / magnitude.clamp_min(1e-6)
+    outside_g = 1. if structured else float(G)
+    return outside_g * GRAVITY_NORM_FRACTION * torch.tanh(magnitude) * direction * s_norm
 
 
-def build_gravity_field_handles(model, probes, tuner, cap_fraction=None):
+def build_gravity_field_handles(model, probes, tuner, cap_fraction=None, plasticity=None, plasticity_signals=None):
     """Install the field as per-layer forward hooks; returns (handles, desc).
     Every applied push still passes through the engine's _cap_steer envelope,
     and the pull is computed under no_grad so TTT synthesis cannot smuggle an
     uncapped gradient copy of it. Anchors join probes as masses; if the law
     step is on, typed inter-body forces move the unfrozen anchors first."""
     from invariants.engine import _cap_steer
+    indirect = getattr(plasticity, 'indirect_controller', None) or getattr(tuner, 'indirect_controller', None)
+    observation_probes = probes
+    probes = steering_probe_view(probes, tuner, indirect)
     flush_gravity_telemetry(tuner)
     apply_body_laws(tuner, probes)
     masses = gravity_field_masses(probes, tuner)
-    if not masses:
-        return [], "no masses yet (no probe/anchor has an explicit mass or a credited lift)"
+    _GRAVITY_STATE['mass'] = {name: mass for name, mass, _dirs in masses}
     doppler = float(tuner.get("gravity_doppler", 0.0))
     vstate = {} if doppler else None
     telem = {}
@@ -1343,23 +2738,130 @@ def build_gravity_field_handles(model, probes, tuner, cap_fraction=None):
                 "name": _name,
                 "qualities": cfg["qualities"],
             })
+    band_layers, _band_summaries = build_band_field_entries(probes, tuner)
+    for b_Li, b_entries in band_layers.items():
+        per_layer.setdefault(b_Li, []).extend(b_entries)
+    warp_node, warp_family, warp_layer, drift_layers, space_summaries = build_space_effects(probes, tuner)
+    impulse_layers, impulse_summaries, impulse_changed = build_impulse_field_entries(probes, tuner)
+    rotation_layers, rotation_summaries = build_rotation_field_entries(probes, tuner)
+    if impulse_changed:
+        save_steer_bodies()
+    for contributions in (drift_layers, impulse_layers):
+        for layer, extra in contributions.items():
+            per_layer.setdefault(layer, []).extend(extra)
+    for layer in rotation_layers:
+        per_layer.setdefault(layer, [])
+    indirect_plan = indirect.plan(observation_probes) if indirect is not None else []
+    for _cname, _cdata in (observation_probes or {}).items():
+        if _cname not in probes and isinstance(_cdata, dict) and _cdata.get('composed_from'):
+            probes[_cname] = _cdata
+    indirect_actions_applied = []
+    for helper in (indirect.joint_plan['helpers'] if indirect is not None else []):
+        name, coefficient = helper['name'], float(helper['coefficient'])
+        if not coefficient:
+            continue
+        agreeing = [action for action in indirect_plan if action['name'] == name
+                    and action.get('layers') == helper.get('layers')
+                    and action['coefficient'] * coefficient > 0]
+        agreed_magnitude = math.fsum(abs(action['coefficient']) for action in agreeing)
+        indirect_actions_applied.extend(dict(action,
+            requested_coefficient=action['coefficient'],
+            coefficient=coefficient * abs(action['coefficient']) / agreed_magnitude)
+            for action in agreeing)
+        layer_coeffs = helper.get('layer_coefficients') or {}
+        helper_probe = probes.get(name) or observation_probes.get(name) or {}
+        for layer, vector in (helper_probe.get('direction') or {}).items():
+            layer = int(layer)
+            if helper.get('layers') is not None and layer not in helper['layers']:
+                continue
+            cfg = field_entry_config(name, layer, probes, tuner)
+            layer_mass = float(layer_coeffs.get(layer, layer_coeffs.get(str(layer), coefficient)))
+            if cfg['excluded'] or not layer_mass or not cfg['g']:
+                continue
+            vector = torch.as_tensor(vector, device=model.device, dtype=torch.float32)
+            if not torch.isfinite(vector).all() or vector.norm() <= 1e-6:
+                continue
+            per_layer.setdefault(layer, []).append({
+                'name': name, 'direction': vector / vector.norm(),
+                'mass': layer_mass, 'g': abs(cfg['g']), 'time': cfg['time'],
+                'shape': cfg['shape'], 'qualities': [],
+                'indirect_targets': [action['target'] for action in agreeing],
+            })
+    from invariants.field_geometry import compile_local_geometry
+    live_directions = {name: impulse_body_dirs('probe:' + name, probes)
+                       for name in probes if not probes[name].get('released')}
+    controller = getattr(plasticity, 'target_controller', None)
+    if controller is not None and plasticity.enabled:
+        controller.prepare(plasticity_signals or {}, [name for name, dirs in live_directions.items() if dirs])
+    for layer, contributions in per_layer.items():
+        for entry in contributions:
+            node = canonical_field_node(entry['name'], probes=probes) or entry['name']
+            family = steer_bodies()['fields'].get(node, {}).get('family')
+            entry['warp'] = (warp_node.get(node, 1.) * warp_family.get(family, 1.)
+                             * warp_layer.get(layer, 1.))
+            if plasticity is not None:
+                entry['geometry_live'] = True
+                entry['geometry'] = compile_local_geometry(
+                    plasticity, entry['name'].removeprefix('probe:'), layer,
+                    live_directions, width=entry['direction'].numel())
     if not per_layer:
         return [], "all personal/family/global G sources currently resolve to zero"
     handles = []
     for Li, entries in sorted(per_layer.items()):
         clock = {"index": 0}
+        indirect_helpers = {(target, entry['name']) for entry in entries
+                            for target in entry.get('indirect_targets', [])}
+        indirect_actions = [action for action in indirect_actions_applied
+                            if (action['target'], action['name']) in indirect_helpers
+                            and (action.get('layers') is None or Li in action['layers'])]
+        law_tests = {}
+        for pair, conditions in steer_bodies().get('law_gates', {}).items():
+            tests = []
+            for condition in conditions:
+                gate = Gate(condition)
+                compiled = gate.token_test(probes, tuner) if gate.tempo() == 'token' else None
+                if compiled is not None and Li in compiled[0]:
+                    tests.append((compiled[0][Li], compiled[1], compiled[2]))
+                else:
+                    tests.append((None, None, gate.evaluate(probes, tuner)[0]))
+            law_tests['|'.join(pair)] = tests
         def hook(module, inp, out, entries=entries, cap_fraction=cap_fraction,
                  doppler=doppler, vstate=vstate, vkey=Li, telem=telem,
-                 clock=clock):
+                 clock=clock, plasticity=plasticity,
+                 plasticity_signals=plasticity_signals,
+                 rotations=rotation_layers.get(Li, []), law_tests=law_tests,
+                 indirect_actions=indirect_actions):
             h = out[0] if isinstance(out, tuple) else out
             with torch.no_grad():
+                state_unit = h.detach().float() / h.detach().float().norm(dim=-1, keepdim=True).clamp_min(1e-6)
+                for name, tests in law_tests.items():
+                    mask = torch.ones(h.shape[:-1], device=h.device, dtype=torch.bool)
+                    for axis, comparator, boundary in tests:
+                        if axis is None:
+                            mask &= bool(boundary)
+                        else:
+                            projection = (state_unit * axis.to(h.device)).sum(-1)
+                            mask &= projection > boundary if comparator == 'above' else projection < boundary
+                    counts = telem.setdefault('gates', {}).setdefault(name, [0, 0])
+                    counts[0] += int(mask.sum())
+                    counts[1] += mask.numel()
                 add = _gravity_pull(
                     h.detach().float(), entries, 1.0, doppler=doppler,
                     vstate=vstate, vkey=vkey, telem=telem,
                     time_index=clock["index"],
+                    plasticity=plasticity,
+                    plasticity_signals=plasticity_signals,
                 )
+                if rotations:
+                    planes = [(a.to(h.device), b.to(h.device), angle)
+                              for a, b, angle in rotations]
+                    add = add + _rotation_delta(h.detach().float(), planes)
                 clock["index"] += 1
             newh = h + _cap_steer(add.to(h.dtype), h, cap_fraction=cap_fraction)
+            if indirect is not None and indirect_actions and bool((newh != h).any()):
+                # Confirm a representable field change with these helpers
+                # present. This does not isolate each helper's causal effect.
+                indirect.mark_applied(indirect_actions)
             if isinstance(out, tuple):
                 return (newh,) + tuple(out[1:])
             return newh
@@ -1390,6 +2892,11 @@ def build_gravity_field_handles(model, probes, tuner, cap_fraction=None):
         + (f"; {personal} shaped/family/time layer-entry(s)" if personal else "")
         + (f"; {quality_count} quality-law layer-entry(s)" if quality_count else "")
         + (f"; frozen: {', '.join(frozen)}" if frozen else "")
+        + (f"; {len(space_summaries)} space(s)" if space_summaries else "")
+        + (f"; {len(impulse_summaries)} impulse(s)" if impulse_summaries else "")
+        + (f"; {len(rotation_summaries)} rotation(s)" if rotation_summaries else "")
+        + ("; indirect " + ", ".join(f"{a['target']} via {a['name']} {a['coefficient']:+.3f}"
+                                     for a in indirect_plan) if indirect_plan else "")
     )
     return handles, desc
 
@@ -1533,6 +3040,7 @@ def expect_generation_profile(pending_expect):
             "max_synthesis_steps": 0,
             "max_routing_events": 0,
             "max_loops": 0,
+            "routing_depth": 0,
             "expert_proof_weight": 0.0,
             "expert_proof_scores": {},
             "routing_probe_terms": [],
@@ -1575,57 +3083,129 @@ def expected_macro_parts(response):
 
 
 def score_probes_on_text(model, text, probes, tuner, turn_row=None, turn_sense=None, label_prefix="Probe Score"):
+    """Explicit text-replay diagnostic; never used for live generation readings."""
     if not probes or not text:
         return
+    prepare_probe_measurements(probes, tuner, LEGACY_PROBE_SOURCE)
     from colorama import Fore, Style
-    from invariants.engine import _inputs as _p_inputs, _hidden_states as _p_hidden, probe_score
-    p_ids = _p_inputs(model, text[:600])
-    p_hs = _p_hidden(model, p_ids["input_ids"], p_ids.get("attention_mask"))
-    seeded = []
-    for pname, pdata in probes.items():
-        raw = probe_score(p_hs, pdata["direction"])
-        sig = centered_probe_observation(pdata, raw)
-        if sig is None:
-            seeded.append(pname)
-            continue
-        tuner.observe(f"probe_{pname}", sig)
-        if turn_row is not None:
-            turn_row[f"probe_{pname}"] = float(sig)
-        if pdata.get("chatty", True):
-            print(Fore.CYAN + f"  [{label_prefix}] {pname}: {sig:+.3f}" + Style.RESET_ALL, flush=True)
-        if turn_sense is not None:
-            tuner.credit(f"probe_{pname}", sig, turn_sense)
-    save_probe_raw_histories(probes)
-    if seeded:
-        print(
-            Fore.CYAN
-            + f"  [Probe Seed] initialized raw baselines for {len(seeded)} probe(s); "
-            + "centered readings begin on their next scored text."
-            + Style.RESET_ALL,
-            flush=True,
-        )
+    from invariants.engine import _inputs as _p_inputs, _hidden_states as _p_hidden, probe_profile
+    try:
+        with torch.no_grad():
+            p_ids = _p_inputs(model, text[:600])
+            p_hs = _p_hidden(model, p_ids["input_ids"], p_ids.get("attention_mask"))
+        seeded = []
+        g_pos = _GRAVITY_STATE.setdefault("position", {})
+        g_dist = _GRAVITY_STATE.setdefault("distance", {})
+        g_prev_cos = _GRAVITY_STATE.setdefault("prev_cos", {})
+        g_prev_vel = _GRAVITY_STATE.setdefault("prev_velocity", {})
+        g_vel = _GRAVITY_STATE.setdefault("velocity", {})
+        g_accel = _GRAVITY_STATE.setdefault("acceleration", {})
+        for pname, pdata in probes.items():
+            prof = probe_profile(
+                p_hs,
+                pdata.get("direction", {}),
+                position=pdata.get("position"),
+                scale=pdata.get("scale"),
+                token_mode=pdata.get("token_mode", "last"),
+            )
+            pdata["last_profile"] = prof
+            raw = float(prof.get("raw_score", 0.0))
+            # Populate positional telemetry when gravity field hook hasn't already updated this turn
+            if pname not in g_pos or tuner.get("prioritize_gravity", 0.0) <= 0:
+                pos_val = float(prof["slab_coord"]) if prof.get("slab_coord") is not None else raw
+                dist_val = float(prof["normalized_distance"]) if prof.get("normalized_distance") is not None else float(1.0 - raw)
+                g_pos[pname] = pos_val
+                g_dist[pname] = dist_val
+                if pname in g_prev_cos:
+                    v = float(pos_val - g_prev_cos[pname])
+                    g_vel[pname] = v
+                    if pname in g_prev_vel:
+                        g_accel[pname] = float(v - g_prev_vel[pname])
+                    g_prev_vel[pname] = v
+                g_prev_cos[pname] = pos_val
+            sig = centered_probe_observation(pdata, raw)
+            if sig is None:
+                seeded.append(pname)
+                continue
+            tuner.observe(f"probe_{pname}", sig)
+            if turn_row is not None:
+                turn_row[f"probe_{pname}"] = float(sig)
+            if pdata.get("chatty", True):
+                pos_extras = []
+                if prof.get("slab_coord") is not None:
+                    pos_extras.append(f"pos={prof['slab_coord']:+.2f}")
+                if prof.get("normalized_distance") is not None:
+                    pos_extras.append(f"d={prof['normalized_distance']:.2f}")
+                if prof.get("peak_token") is not None:
+                    pos_extras.append(f"peak@{prof['peak_token']}={prof['peak_score']:+.2f}")
+                extra_str = f" ({', '.join(pos_extras)})" if pos_extras else ""
+                print(Fore.CYAN + f"  [{label_prefix}] {console_probe_name(pname)}: {sig:+.3f}{extra_str}" + Style.RESET_ALL, flush=True)
+            if turn_sense is not None:
+                tuner.credit(f"probe_{pname}", sig, turn_sense)
+        save_probe_raw_histories(probes)
+        if seeded:
+            print(
+                Fore.CYAN
+                + f"  [Probe Seed] initialized raw baselines for {len(seeded)} probe(s); "
+                + "centered readings begin on their next scored text."
+                + Style.RESET_ALL,
+                flush=True,
+            )
+    finally:
+        if 'p_hs' in locals():
+            del p_hs
+        if 'p_ids' in locals():
+            del p_ids
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 def generate_agentic_text(*args, **kwargs):
-    if "vecs" not in kwargs and _ACTIVE_PROBES:
+    capture_probes = kwargs.setdefault("generation_probes", _ACTIVE_PROBES or {})
+    capture_tuner = kwargs.pop("generation_probe_tuner", _ACTIVE_TUNER)
+    if "vecs" not in kwargs and capture_probes:
         vecs = {
             pname: pdata["direction"]
-            for pname, pdata in _ACTIVE_PROBES.items()
+            for pname, pdata in capture_probes.items()
             if "direction" in pdata and not probe_is_released(pdata)
         }
         if vecs:
             kwargs["vecs"] = vecs
             
-    res = _engine_generate(*args, **kwargs)
-    
+    document_reader = kwargs.pop("document_reader", None)
+    generation_channel = kwargs.pop("generation_channel", "speech")
+    kwargs["generation_channel"] = generation_channel
     is_talk = kwargs.get("chatty_log", False)
     should_print = (_PROBES_SHOW_TALK and is_talk) or (_PROBES_SHOW_ACT and not is_talk)
+    requested_telemetry = bool(kwargs.get("return_telemetry", False))
+    capture_for_display = bool(generation_channel != "reader" and should_print and not is_talk
+                               and capture_probes and capture_tuner is not None)
+    if capture_for_display:
+        kwargs["return_telemetry"] = True
+    generation_config = kwargs.get('config')
+    isolation_overrides = {}
+    if generation_config is not None and getattr(generation_config, 'activation_memory_isolate', False):
+        isolation_overrides = apply_config_overrides(generation_config, {
+            'synthesis_enabled': False, 'cache_enabled': False, 'cache_write_enabled': False,
+            'use_expert_vectors': False, 'allow_organic_fallback': False,
+            'max_routing_events': 0, 'max_loops': 0, 'max_synthesis_events': 0,
+        })
+        kwargs['mid_chunk_hook'] = None
+    try:
+        if document_reader is None:
+            res = _engine_generate(*args, **kwargs)
+        else:
+            # Observe the real generation only; probe scoring below must not replace it.
+            with document_reader.capture_generation(channel=generation_channel):
+                res = _engine_generate(*args, **kwargs)
+    finally:
+        if isolation_overrides:
+            restore_config_overrides(generation_config, isolation_overrides)
     
-    if should_print and _ACTIVE_PROBES and _ACTIVE_MODEL and _ACTIVE_TUNER:
-        # Don't double-print for the main chatty loop which handles it manually
-        if not is_talk:
-            text = res[0] if isinstance(res, tuple) else res
-            if text and isinstance(text, str):
-                score_probes_on_text(_ACTIVE_MODEL, text, _ACTIVE_PROBES, _ACTIVE_TUNER, label_prefix="Act Probe")
+    # The main turn consumes its own capture exactly once, after outcome scoring.
+    if capture_for_display and isinstance(res, tuple):
+        score_generation_probes(capture_probes, capture_tuner, res[1], label_prefix="Act Probe")
+        if not requested_telemetry:
+            return res[0]
     return res
 from invariants.config import AgenticConfig
 from invariants.cognitive_cache import CACHE_FILE, model_cache_file, DEFAULT_MODEL
@@ -1639,12 +3219,80 @@ from invariants.claimmap import (
 )
 from invariants.trigger_tuner import TriggerTuner
 from dataclasses import dataclass, field
+def startup_macro_files(root=ROOT):
+    """Declared launch macros, in a stable filename order."""
+    directory = os.path.join(root, "startup")
+    if not os.path.isdir(directory):
+        return []
+    return sorted(
+        (name for name in os.listdir(directory)
+         if name.lower().endswith(".txt") and os.path.isfile(os.path.join(directory, name))),
+        key=lambda name: (name.casefold(), name),
+    )
+
+
+def startup_macro_path(name, root=ROOT):
+    """Resolve a declaration name without allowing paths outside startup/."""
+    name = str(name).strip().strip('"\'')
+    if not name or name in (".", "..") or any(c in name for c in ("/", "\\", ":")):
+        raise ValueError("Use a macro filename inside startup/, not a path.")
+    if not name.lower().endswith(".txt"):
+        name += ".txt"
+    directory = os.path.realpath(os.path.join(root, "startup"))
+    target = os.path.realpath(os.path.join(directory, name))
+    if os.path.normcase(os.path.dirname(target)) != os.path.normcase(directory):
+        raise ValueError("Startup macro must remain inside startup/.")
+    return target
+
+
+def declare_startup_macro(source, root=ROOT):
+    """Copy a .txt macro into startup/, preserving spaces in the source path."""
+    import shutil
+    source = str(source).strip().strip('"\'')
+    source = os.path.abspath(source if os.path.isabs(source) else os.path.join(root, source))
+    if not os.path.isfile(source):
+        raise ValueError(f"Source macro file not found: '{source}'")
+    if not source.lower().endswith(".txt"):
+        raise ValueError("Startup macros must use a .txt extension.")
+    target = startup_macro_path(os.path.basename(source), root)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    if os.path.normcase(os.path.realpath(source)) != os.path.normcase(target):
+        shutil.copyfile(source, target)
+    return target
+
+
+def startup_input_queue(macro_aliases, startup_user_input=None, enabled=True, root=ROOT):
+    """Expand setup first, before an explicit or resumed initial model prompt."""
+    queue = []
+    if enabled:
+        for name in startup_macro_files(root):
+            commands = expand_macro_lines(startup_macro_path(name, root), macro_aliases)
+            queue.extend((command, True) for command in (commands or []))
+    if startup_user_input:
+        queue.append(startup_user_input)
+    return queue
+
+
 import typing
 
-def _split_macro_commands(raw_str, split_colon_commands=True):
+def _clean_plaintext_chunk(chunk):
+    m = re.search(r'\s+(?<!\\)#.*$', chunk)
+    if m:
+        return chunk[:m.start()].strip()
+    if chunk.endswith('#'):
+        return chunk[:-1].strip()
+    return chunk
+
+
+def _split_macro_commands(raw_str, split_colon_commands=False):
+    s = raw_str.strip()
+    if s.startswith(";"):
+        return [s[1:].strip()]
+
     cmds = []
     curr = []
     i = 0
+
     while i < len(raw_str):
         if raw_str[i] == '\\' and i+1 < len(raw_str):
             nxt = raw_str[i+1]
@@ -1652,25 +3300,99 @@ def _split_macro_commands(raw_str, split_colon_commands=True):
                 curr.append('||')
                 i += 3
                 continue
-            elif nxt in (';', ':', '\\'):
+            elif nxt in (';', ':', '\\', '#'):
                 curr.append(nxt)
                 i += 2
                 continue
         elif raw_str[i] == ';':
-            cmds.append("".join(curr).strip())
+            has_space_after = (i + 1 < len(raw_str) and raw_str[i + 1].isspace())
+            chunk = "".join(curr).strip()
+            if has_space_after:
+                tail_candidate = raw_str[i + 1:].lstrip()
+                if tail_candidate.startswith(":"):
+                    # Explicit colon command (e.g. :clock; :travel or :clock ; :travel)
+                    if chunk:
+                        is_prompt = not (chunk.startswith(":") or chunk.startswith("@"))
+                        cleaned = _clean_plaintext_chunk(chunk) if is_prompt else chunk
+                        cmds.append((cleaned, is_prompt))
+                    curr = []
+                    spaces = len(raw_str[i + 1:]) - len(tail_candidate)
+                    i += 1 + spaces
+                    continue
+                else:
+                    # Semicolon followed by space indicates sending text (actual prompt turn)!
+                    if chunk:
+                        is_prompt = not (chunk.startswith(":") or chunk.startswith("@"))
+                        cleaned = _clean_plaintext_chunk(chunk) if is_prompt else chunk
+                        cmds.append((cleaned, is_prompt))
+                    prompt_tail = raw_str[i + 1:].strip()
+                    m_bc = re.search(r'\s*(?<!\\)#(.*?);\s*', prompt_tail)
+                    if m_bc:
+                        p_text = prompt_tail[:m_bc.start()].strip()
+                        if p_text:
+                            cmds.append((p_text, True))
+                        rest = prompt_tail[m_bc.end():].strip()
+                        curr = []
+                        if rest:
+                            sub_cmds = _split_macro_commands(rest, split_colon_commands=split_colon_commands)
+                            for sc in sub_cmds:
+                                cmds.append((sc, not (sc.startswith(":") or sc.startswith("@"))))
+                        break
+                    else:
+                        if prompt_tail:
+                            cmds.append((prompt_tail, True))
+                        curr = []
+                        break
+            else:
+                # No space after semicolon: chained command (e.g. :clock ;travel or :clock;travel)
+                if chunk:
+                    is_prompt = not (chunk.startswith(":") or chunk.startswith("@"))
+                    cleaned = _clean_plaintext_chunk(chunk) if is_prompt else chunk
+                    cmds.append((cleaned, is_prompt))
+                curr = []
+                i += 1
+                continue
+        elif raw_str[i] == '\n':
+            chunk = "".join(curr).strip()
+            if chunk:
+                is_prompt = not (chunk.startswith(":") or chunk.startswith("@"))
+                cleaned = _clean_plaintext_chunk(chunk) if is_prompt else chunk
+                cmds.append((cleaned, is_prompt))
             curr = []
             i += 1
             continue
         elif split_colon_commands and raw_str[i:i+2] == ' :':
-            cmds.append("".join(curr).strip())
+            chunk = "".join(curr).strip()
+            if chunk:
+                is_prompt = not (chunk.startswith(":") or chunk.startswith("@"))
+                cleaned = _clean_plaintext_chunk(chunk) if is_prompt else chunk
+                cmds.append((cleaned, is_prompt))
             curr = [':']
             i += 2
             continue
         curr.append(raw_str[i])
         i += 1
     if curr:
-        cmds.append("".join(curr).strip())
-    return [c for c in cmds if c]
+        chunk = "".join(curr).strip()
+        if chunk:
+            is_prompt = not (chunk.startswith(":") or chunk.startswith("@"))
+            cleaned = _clean_plaintext_chunk(chunk) if is_prompt else chunk
+            cmds.append((cleaned, is_prompt))
+
+    is_command_line = raw_str.strip().startswith(":") or raw_str.strip().startswith("@")
+    out = []
+    for c, is_prompt in cmds:
+        if not c:
+            continue
+        if is_prompt:
+            out.append(c)
+        elif is_command_line:
+            if not c.startswith(":") and not c.startswith("@") and not c.startswith("#"):
+                c = ":" + c
+            out.append(c)
+        else:
+            out.append(c)
+    return out
 
 def _partition_unescaped_pipes(raw_str):
     curr = []
@@ -1715,12 +3437,14 @@ from invariants.self_concept_controller import SelfConceptController, format_ori
 from invariants.steer_map_store import SteerMapStore
 from invariants.document_engine import (
     DOCUMENT_TOOL_HEADER,
+    begin_reading_pass,
     ingest_document,
     reading_reply_note,
     record_chunk_read,
     select_next_chunk,
     stage_chunk,
 )
+from invariants.document_attention import IntrinsicDocumentReader
 from invariants.sandbox import (
     DEFAULT_TIMEOUT_SEC as SANDBOX_TIMEOUT_SEC,
     extract_python_block,
@@ -1742,11 +3466,11 @@ LLAMA3_EOT = "<|eot_id|>"
 MEMORY_TOOL_HEADER = "[Memory Tool Result]"
 ORIENTATION_TOOL_HEADER = "[Orientation Tool Result]"
 MEMORY_TOOL_PATTERN = re.compile(r"<<\s*MEMORY\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
-CLAIMMAP_TOOL_PATTERN = re.compile(r"<<\s*CLAIMMAP\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
+CLAIMMAP_TOOL_PATTERN = re.compile(r"(?:<<\s*CLAIMMAP\s*:\s*(.*?)\s*>>|<claimmap>(.*?)</claimmap>)", re.IGNORECASE | re.DOTALL)
 METHODMAP_TOOL_HEADER = "[MethodMap Tool Result]"
-METHODMAP_TOOL_PATTERN = re.compile(r"<<\s*METHODMAP\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
+METHODMAP_TOOL_PATTERN = re.compile(r"(?:<<\s*(?:METHOD|METHODMAP)\s*:\s*(.*?)\s*>>|<methodmap>(.*?)</methodmap>)", re.IGNORECASE | re.DOTALL)
 DOC_TOOL_PATTERN = re.compile(r"<<\s*DOC\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
-HELP_TOOL_PATTERN = re.compile(r"<<\s*HELP\s*>>", re.IGNORECASE)
+HELP_TOOL_PATTERN = re.compile(r"<<\s*HELP(?:\s*:\s*(.*?))?\s*>>", re.IGNORECASE | re.DOTALL)
 HELP_TOOL_HEADER = "[Help Tool Result]"
 CMD_TOOL_PATTERN = re.compile(r"<<\s*(?:TOOL|CMD)\s*:\s*(.*?)\s*>>", re.IGNORECASE | re.DOTALL)
 CMD_TOOL_HEADER = "[Runtime Tool Result]"
@@ -1802,7 +3526,7 @@ def format_field_prompt_context(tuner=None, probes=None, max_chars=5000):
     enabled = bool(tuner and tuner.get("prioritize_gravity", 0.0) > 0)
     has_state = any(
         state.get(key)
-        for key in ("anchors", "probe_poles", "laws", "fields", "g_families", "qualities", "sets")
+        for key in ("anchors", "probe_poles", "laws", "fields", "g_families", "qualities", "sets", "spaces", "rotations", "impulses", "bands")
     )
     if not enabled and not has_state:
         return None
@@ -1815,16 +3539,21 @@ def format_field_prompt_context(tuner=None, probes=None, max_chars=5000):
         (
             f"enabled={enabled}; default_G={_get('prioritize_alpha'):g}; "
             f"doppler={_get('gravity_doppler'):g}; law_step={_get('gravity_law_step'):g}; "
-            f"active_probes={','.join(sorted(probes)) or '(none)'}"
+            f"active_probes={','.join(probe_alias(name) for name in sorted(probes)) or '(none)'}"
         ),
         (
             "Mechanics available: personal/layer G, G families, local clocks, shaped fields, "
             "field-governed knob scalars, safe quality formulas over d=1-cos, "
             "law-defined sets, signed compliance, forward-time vectors, set exclusion, "
-            "and whole-field exclusion."
+            "whole-field exclusion, selective spaces, rotations, impulses, and conditional bands."
         ),
         "This state does not grant command access; only exposed tools may be called by the model.",
     ]
+
+    for key, formatter in (('spaces', format_space_config), ('rotations', format_rotation_config),
+                           ('impulses', format_impulse_config)):
+        for name, config in sorted(state[key].items()):
+            lines.append(formatter(name, config, probes, tuner))
 
     for fname, cfg in sorted(state["g_families"].items()):
         g_spec = cfg.get("g")
@@ -1916,7 +3645,8 @@ def format_field_prompt_context(tuner=None, probes=None, max_chars=5000):
     for (left, right), k in sorted(state["laws"].items()):
         lines.append(f"pole-law {left}<->{right} k={float(k):+g}")
 
-    text = "\n".join(lines)
+    from invariants.exposure_language import obscure_probe_identifiers
+    text = obscure_probe_identifiers("\n".join(lines), probes)
     if len(text) > max_chars:
         text = text[: max_chars - 44] + "\n[field context truncated at prompt budget]"
     return text
@@ -1937,6 +3667,7 @@ def build_prompt(
     field_context=None,
     session_context=None,
     active_u_name=None,
+    reader_context=None,
 ):
     # Bare mode (default): the model sees NO system message and no persona. The
     # only standing shell-generated text is compact factual field state when
@@ -1957,11 +3688,12 @@ def build_prompt(
             MAX_PROMPT_CHARS - len(user_input) - len(field_context or "") - 512,
         )
         if len(memory_tool_result) > budget:
-            memory_tool_result = memory_tool_result[:budget] + "\n[memory truncated]"
+            memory_tool_result = memory_tool_result[:budget]
+    # In zero-second-prompt latent architecture, ClaimMap is steered purely
+    # through activations (steer_delta), never injected as prompt text.
     tool_blocks = [
         block
         for block in (
-            claimmap_tool_result,
             memory_tool_result,
             orientation_tool_result,
             methodmap_tool_result,
@@ -1978,16 +3710,29 @@ def build_prompt(
     
     current_prefix = f"[{active_u_name}]: " if active_u_name and active_u_name not in ("user", "assistant", "operator", "main_assistant") else ""
     current_message = current_prefix + user_input
-    
-    if tool_blocks:
-        current_message = "\n\n".join(tool_blocks) + "\n\n" + current_message
 
     parts = ["<|begin_of_text|>"]
+    # Internal thoughts, claimmaps, and substrate context enter via system role
+    # so they NEVER pollute or impersonate the operator's speech turn.
+    if tool_blocks and not (reader_context or document_tool_result):
+        parts.append(
+            f"{LLAMA3_START}system{LLAMA3_END}\n\n"
+            + "[Internal Substrate & Cognitive Context - Not Spoken by User]\n"
+            + "\n\n".join(tool_blocks)
+            + f"{LLAMA3_EOT}"
+        )
     for role, name, text in trim_session_context(session_context):
         header = "user" if role == "user" else "assistant"
         prefix = f"[{name}]: " if name not in ("user", "assistant", "operator", "main_assistant") else ""
         parts.append(f"{LLAMA3_START}{header}{LLAMA3_END}\n\n{prefix}{text}{LLAMA3_EOT}")
-    parts.append(f"{LLAMA3_START}user{LLAMA3_END}\n\n{current_message}{LLAMA3_EOT}")
+    for source, thought in (reader_context or []):
+        parts.append(f"{LLAMA3_START}system{LLAMA3_END}\n\n{source}{LLAMA3_EOT}")
+        parts.append(f"{LLAMA3_START}assistant{LLAMA3_END}\n\n[reader] {thought}{LLAMA3_EOT}")
+    if tool_blocks and (reader_context or document_tool_result):
+        parts.append(f"{LLAMA3_START}system{LLAMA3_END}\n\n" + "\n\n".join(tool_blocks) + LLAMA3_EOT)
+    # A document-only turn does not invent an operator message.
+    if user_input:
+        parts.append(f"{LLAMA3_START}user{LLAMA3_END}\n\n{current_message}{LLAMA3_EOT}")
     parts.append(f"{LLAMA3_START}assistant{LLAMA3_END}\n\n")
     return "".join(parts)
 
@@ -2054,7 +3799,8 @@ def extract_claimmap_payload(response):
     match = CLAIMMAP_TOOL_PATTERN.search(response or "")
     if not match:
         return None
-    payload = " ".join(match.group(1).split())
+    raw = match.group(1) if match.group(1) is not None else match.group(2)
+    payload = " ".join((raw or "").split())
     return payload[:4000] if payload else None
 
 
@@ -2062,7 +3808,8 @@ def extract_methodmap_query(response):
     match = METHODMAP_TOOL_PATTERN.search(response or "")
     if not match:
         return None
-    query = " ".join(match.group(1).split())
+    raw = match.group(1) if match.group(1) is not None else match.group(2)
+    query = " ".join((raw or "").split())
     return query[:240] if query else None
 
 
@@ -2132,10 +3879,22 @@ def extract_game_end(response):
     return bool(GAME_END_PATTERN.search(response or ""))
 
 def extract_help_request(response):
-    return bool(HELP_TOOL_PATTERN.search(response or ""))
+    m = HELP_TOOL_PATTERN.search(response or "")
+    if not m:
+        return None
+    return (m.group(1) or "").strip()
 
 def remove_help_tags(response):
     return HELP_TOOL_PATTERN.sub("", response or "").strip()
+
+COMMAND_CHECK_AVAILABILITY = "[Command Help] Use <<HELP: :command args>> to inspect syntax before requesting a shell-state change."
+
+def command_generation_help_context(staged_help=None, pending_expect=None):
+    if staged_help:
+        return staged_help
+    if pending_expect and isinstance(pending_expect, dict) and pending_expect.get("type") == "autocomplete":
+        return COMMAND_CHECK_AVAILABILITY
+    return None
 
 def extract_cmd_requests(response):
     """Every ':command' the model asked to run via <<TOOL: ...>>. Legacy
@@ -2207,7 +3966,7 @@ def is_tool_only_response(response):
             or extract_methodmap_query(text)
             or extract_doc_query(text)
             or extract_probe_query(text)
-            or extract_help_request(text)
+            or (extract_help_request(text) is not None)
             or extract_cmd_requests(text)
         )
         and not remove_tool_calls(text).strip()
@@ -2463,14 +4222,17 @@ class TrailingOpt:
     argument text. Stripped off before positional parsing so greedy text
     arguments (framings, signed mixes) never swallow it. Absent -> None."""
 
-    def __init__(self, keyword, value_names, kind="int", transform=None, help=""):
+    def __init__(self, keyword, value_names, kind="int", transform=None, help="", display=None):
         self.keyword = keyword
         self.value_names = tuple(value_names)
         self.kind = kind
         self.transform = transform
         self.help = help
+        self.display = display
 
     def render(self):
+        if self.display:
+            return f"[{self.display}]"
         vals = " ".join(f"<{v}>" for v in self.value_names)
         return f"[{self.keyword} {vals}]"
 
@@ -2563,9 +4325,17 @@ class CommandSpec:
         raw = (raw or "").strip()
         if self.pre is not None:
             raw = self.pre(raw)
-        values = {}
-        for opt in self.opts:
-            raw, values[opt.keyword] = opt.strip(raw, self.fail)
+        values = {opt.keyword: None for opt in self.opts}
+        changed = True
+        while changed:
+            changed = False
+            for opt in self.opts:
+                if values[opt.keyword] is None:
+                    new_raw, val = opt.strip(raw, self.fail)
+                    if val is not None:
+                        raw = new_raw
+                        values[opt.keyword] = val
+                        changed = True
         args = CommandArgs(raw, usage=self.usage())
         i = 0
         for spec in self.args:
@@ -2640,6 +4410,32 @@ def spec_help_entries(query, hidden_commands=None):
         if q in words and not (words & hidden):
             entries.append(COMMAND_SPECS[path].help_entry())
     return entries
+
+
+def automatic_command_help_entries(query=None, hidden_commands=None):
+    """Help entries generated from declared CommandSpecs. If query is provided,
+    matches exact or prefix spec path or words in command path; otherwise returns all non-hidden specs."""
+    if not query:
+        hidden = _hidden_command_words(hidden_commands)
+        return [
+            COMMAND_SPECS[path].help_entry()
+            for path in sorted(COMMAND_SPECS)
+            if not (set(w.lstrip(":").lower() for w in path.split()) & hidden)
+        ]
+    q_str = str(query).strip().lower()
+    if not q_str.startswith(":"):
+        q_str = ":" + q_str
+    hidden = _hidden_command_words(hidden_commands)
+    matching = [
+        COMMAND_SPECS[path].help_entry()
+        for path in sorted(COMMAND_SPECS)
+        if (path.lower() == q_str or path.lower().startswith(q_str + " "))
+        and not (set(w.lstrip(":").lower() for w in path.split()) & hidden)
+    ]
+    if matching:
+        return matching
+    return spec_help_entries(query, hidden_commands=hidden_commands)
+
 
 
 def render_specs_md(hidden_commands=None):
@@ -2724,23 +4520,57 @@ PROBE_BACKFILL_SPEC = register_spec(CommandSpec(
     examples=[":probe backfill accuracy 200"],
 ))
 
+PROBE_RECALC_SPEC = register_spec(CommandSpec(
+    ":probe recalc",
+    "Recalculate probes from their creation definitions across full model depth (or explicit band).",
+    args=[
+        ArgSpec("name", kind="word", required=False, default="all", display="name|all",
+                help="probe to recalculate; 'all' (default) recalculates all active/disk probes"),
+    ],
+    opts=[BAND_OPT],
+    examples=[":probe recalc", ":probe recalc all", ":probe recalc accuracy", ":probe recalc all band 21 30"],
+))
+
+PROBE_DEFINE_SPEC = register_spec(CommandSpec(
+    ":probe define",
+    "Show the probe's original stored definition and contrastive framings, "
+    "resolving adopted and composed root sources, layers, and replay commands.",
+    args=[
+        ArgSpec("name", help="probe to inspect; accepts [p_...] IDs"),
+    ],
+    examples=[":probe define illeism", ":probe solipsism define", ":probe define neutral"],
+))
+
 PROBE_EXPLAIN_SPEC = register_spec(CommandSpec(
     ":probe explain",
-    "Default = activation ping: briefly steer along the probe's own direction "
-    "(envelope-capped, baseline frozen so it cannot habituate) and print what "
-    "the nudge evokes. This is a qualitative sanity check and can be generic "
-    "or off-target. Append 'prompt' for the stored-definition explanation "
-    "grounded in the probe's WITH/WITHOUT framings.",
+    "Generate an activation-based explanation candidate from a blank native assistant continuation, "
+    "with separate subject, explanation-operation, and self-reference gains. "
+    "Set ':tune probe_explain_map 1' for a sustained operation computed from each current activation; "
+    "':tune probe_explain_map_tokens <3..64>' bounds its calibration trajectory. "
+    "Append 'logits' to measure directional distance in next-token logits at the blank native "
+    "assistant decision, without generating an explanation. Its signed token effects describe "
+    "predictive geometry; they do not establish a definition. The current-state map is an actuator, "
+    "not this distance measurement. ':tune probe_explain_logits_epsilon <positive value <=0.1>' sets the "
+    "measurement step (default .01). "
+    "No written request or answer prefix is supplied. Append 'evidence' for a definition inferred from measured examples, "
+    "'ping' (with optional alpha) for an activation nudge sanity check, or 'prompt' for an explicit "
+    "activation-definition request. Output form is checked; greetings and truncated replies remain "
+    "unqualified. Candidate meaning is unverified. Owner-specific operator traces are saved separately. "
+    "Use ':probe define' to view the original stored definition.",
     args=[
-        ArgSpec("name", help="probe to ping; choose/auto lets the model pick the probe"),
-        ArgSpec("alpha", kind="word", required=False, display="alpha|choose",
-                help="ping strength (signed float; negative pings away; default 1); "
-                     "'choose' adopts the live calibrated G (prioritize_alpha) when one exists"),
-        ArgSpec("mode", required=False, choices=("prompt", "words", "verbal"), display="prompt",
-                help="ask for the stored-definition explanation instead of the activation ping"),
+        ArgSpec("name", help="probe to explain; accepts [p_...] IDs; choose/auto lets the model pick"),
+        ArgSpec("mode_or_alpha", required=False, display="activation|logits|evidence|prompt|ping|alpha",
+                help="activation by default; 'evidence' uses measured examples; 'prompt' explicitly "
+                     "asks about the activation direction; 'logits' measures directional next-token "
+                     "distance without generation and requires a named probe; 'ping' [alpha] pings activation"),
+        ArgSpec("alpha", required=False, display="alpha",
+                help="ping strength when pinging (signed float; default 1; or 'choose')"),
     ],
-    examples=[":probe explain neutral", ":probe explain neutral 2.5",
-              ":probe explain neutral choose", ":probe explain self_model prompt"],
+    examples=[":probe explain neutral", ":probe self_model explain",
+              ":probe illeism explain logits", ":probe explain illeism logits",
+              ":probe self_model explain evidence",
+              ":probe explain neutral ping", ":probe explain neutral ping 2.5",
+              ":probe explain self_model prompt"],
 ))
 
 
@@ -2795,6 +4625,13 @@ STEER_FIELD_SPEC = register_spec(CommandSpec(
                 help="default global G (prioritize_alpha) to set alongside on"),
     ],
     examples=[":steer field on 0.1", ":steer field 0.1", ":steer gravity off"],
+    pre=_field_bare_number_shorthand,
+))
+FIELD_SPEC = register_spec(CommandSpec(
+    ":field",
+    "Alias for :steer field. Inspect or control the gravity field status, masses, and G.",
+    args=STEER_FIELD_SPEC.args,
+    examples=[":field", ":field on 0.1", ":field off", ":field status"],
     pre=_field_bare_number_shorthand,
 ))
 
@@ -2871,12 +4708,46 @@ STEER_POLE_SPEC = register_spec(CommandSpec(
     examples=[":steer pole honesty integrity+", ":steer pole @pin integrity off"],
 ))
 
+register_spec(CommandSpec(':other',
+    'Select the referent for @ in observational relational probes; self selects the owning agent; clear leaves it unassociated.',
+    args=[ArgSpec('referent', kind='text', required=False)],
+    examples=[':other', ':other self', ':other user', ':other Gavin', ':other clear']))
+
+register_spec(CommandSpec(':relate',
+    'Observe probe relationships, route multiple targets indirectly, or investigate helper effects on archived contexts; optional via restricts helpers.',
+    args=[ArgSpec('args', kind='text', required=False)],
+    examples=[':relate target accuracy maximize curiosity uncertainty', ':relate indirect minimize lying hallucination maximize truthfulness', ':relate indirect minimize lying hallucination maximize truthfulness via +empathy_d4096 +epistemic_humility', ':relate indirect lying minimize +empathy_d4096 +epistemic_humility', ':relate indirect investigate limit 3 helpers 2 tokens 48', ':relate indirect continue on stride 8 horizon 12', ':relate indirect continue status', ':relate indirect continue off', ':relate indirect continue stride 8 horizon 12 -- Explain your reasoning.', ':relate indirect import invariants/out/replay_investigation/pilot', ':relate indirect roles', ':relate status', ':relate trial', ':relate observe', ':relate off']))
+
+for _geometry_path, _geometry_help, _geometry_examples in (
+    ('space', 'Selective expansion/contraction of probes, families or layers; warp changes distance, rate provides persistent drift.',
+     [':steer space focus contract .care warp 0.5', ':steer space focus drop']),
+    ('rotate', 'Transport state through the plane between two bodies, subject to the shared steering cap.',
+     [':steer rotate focus .care .accuracy angle 0.05']),
+    ('impulse', 'A decaying pull/push independent of body mass.',
+     [':steer impulse focus pull .care speed 0.25 decay 0.85 duration 6'])):
+    register_spec(CommandSpec(':steer ' + _geometry_path, _geometry_help,
+        args=[ArgSpec('args', kind='text', required=False)], examples=_geometry_examples))
+
+
+def _strip_geometry_gates(raw):
+    tokens = raw.split()
+    if 'when' in tokens:
+        start = tokens.index('when')
+        gates, end, error = Gate.parse_clause(tokens, start,
+            source_builder=lambda token: (parse_field_source(token), None))
+        if error or end != len(tokens):
+            raise CommandUsageError(error or 'Unexpected gate arguments')
+        return ' '.join(tokens[:start])
+    return raw
+
+
 STEER_LAW_SPEC = register_spec(CommandSpec(
     ":steer law",
     "Couple two pole families: k>0 like poles repel / unlike attract, k<0 "
     "flips, off removes; unlisted pairs are INERT. ':tune gravity_law_step' "
     "integrates the forces -- only unfrozen anchors move, probes never do. "
     "Bare :steer law lists the laws and the step.",
+    pre=_strip_geometry_gates,
     args=[
         ArgSpec("famA", kind="choice", required=False, display="famA|choose",
                 help="first pole family; choose = the model picks among known families"),
@@ -2886,6 +4757,32 @@ STEER_LAW_SPEC = register_spec(CommandSpec(
     ],
     examples=[":steer law integrity chaos -0.3", ":steer law choose chaos -0.3",
               ":steer law integrity chaos off"],
+))
+
+STEER_BAND_SPEC = register_spec(CommandSpec(
+    ":steer band",
+    "A one-sided Hooke tether: pull exerts restoring force toward a node only when "
+    "stretched beyond rest (slack inside costs zero); push pushes away only when "
+    "compressed inside rest; spring is two-sided. when gates the band on a live sensor threshold. "
+    "drop removes a band. Bare :steer band lists active bands.",
+    pre=_strip_geometry_gates,
+    args=[
+        ArgSpec("name", required=False, help="name of the band"),
+        ArgSpec("mode", required=False, default="status", choices=("pull", "push", "spring", "drop", "off", "remove", "status"),
+                display="pull|push|spring|drop", help="mode or action"),
+        ArgSpec("node", required=False, help="target probe or anchor to tether"),
+    ],
+    opts=[
+        TrailingOpt("rest", ("r",), kind="float", help="rest distance"),
+        TrailingOpt("give", ("g",), kind="float", help="tether compliance"),
+        TrailingOpt("strength", ("source", "scale"), kind="str", help="source and scale"),
+        TrailingOpt("when", ("source", "direction", "val"), kind="str", display="when <source> below|above", help="when <source> below|above"),
+    ],
+    examples=[
+        ":steer band confusion_to_inquiry pull probe:inquisitive rest 0.6 give 0.3 strength 0.25 when probe:confusion above 0.04",
+        ":steer band accuracy_slingshot drop",
+        ":steer band",
+    ],
 ))
 
 TUNE_SPEC = register_spec(CommandSpec(
@@ -3229,6 +5126,12 @@ def record_internal_traces(memory, records, steer_map=None, conversation_outcome
                 provenance={"source": "synthesis_recorder"},
                 metrics={
                     "loop": record.get("loop"),
+                    "stage_index": record.get("stage_index"),
+                    "routing_depth": record.get("routing_depth"),
+                    "routing_layer_span": record.get("routing_layer_span"),
+                    "replay_start": record.get("replay_start"),
+                    "replay_end": record.get("replay_end"),
+                    "stop_reason": record.get("stop_reason"),
                     "winner": winner,
                     "best_entropy": record.get("best_entropy"),
                     "entropies": entropies,
@@ -3313,19 +5216,25 @@ CALIBRATION_BINARY = {"sandbox_success", "words_had_impact"}
 CALIBRATION_CIRCULAR = {
     "claimmap_alpha", "memory_alpha", "steer_fraction", "steer_layer_sweep",
     "response_tokens", "routing_events", "routing_loops", "routing_entropy",
+    "routing_depth", "routing_layer_span",
     "routing_entropy_weight", "routing_collapse_margin",
     "routing_collapse_penalty", "routing_probe_weight",
     "synthesis_events", "synthesis_steps", "plateau_epsilon",
     "reading_settled_streak", "steer_band_lo", "steer_band_hi",
     "expert_proof_weight", "calibration_gain", "prioritize_alpha",
     "exposed_probe_alpha",
+    "probe_explain_subject", "probe_explain_operation", "probe_explain_reference",
+    "probe_explain_map", "probe_explain_map_tokens",
+    "probe_explain_logits_epsilon",
 }
 
 
 # Strength/budget knobs that may be calibrated FROM OUTCOMES (never from
 # their own value distribution): each turn credits (current value, sense),
 # and :calibrate <knob> outcome picks the tried value whose turns went best.
-OUTCOME_CALIBRATABLE = tuple(sorted(CALIBRATION_CIRCULAR - {"steer_band_lo", "steer_band_hi"}))
+OUTCOME_CALIBRATABLE = tuple(sorted(CALIBRATION_CIRCULAR - {
+    "steer_band_lo", "steer_band_hi", "probe_explain_logits_epsilon",
+}))
 
 
 def outcome_calibration(pairs, min_per_value=5, min_values=2):
@@ -3355,6 +5264,8 @@ def calibration_policy(name):
         return "cap", ""
     if name == "steer_band":
         return "band", ""
+    if name == "probe_explain_logits_epsilon":
+        return "reject", "this is a diagnostic finite-difference step; set a positive value no larger than 0.1 deliberately"
     if name in CALIBRATION_BINARY:
         return "reject", "its signal is binary (0/1); a percentile bar has no meaning there"
     if name in CALIBRATION_CIRCULAR:
@@ -3419,7 +5330,11 @@ def resolve_stream(name, tuner):
     phenomenality sensor name (probe wins when both exist -- reply-state over
     reasoning-state; say phen_<name> to force the sensor). A never-fed bare
     threshold shadowing a probe is skipped."""
-    name = (name or "").lower()
+    name = (name or "").lower().strip()
+    if name.startswith(("+", "-")):
+        name = name[1:].strip()
+    if name.startswith("!"):
+        name = name[1:].strip()
     if name in STREAM_ALIASES:
         return STREAM_ALIASES[name]
     if name in tuner.triggers and not _is_shadow_trigger(name, tuner):
@@ -3494,7 +5409,41 @@ def normalize_watch_item(raw, probes=None, tuner=None):
     text = str(raw or "").strip()
     if not text:
         return None, "empty item"
+    if text.startswith(("+", "-")):
+        text = text[1:].strip()
+    if not text:
+        return None, "empty item"
     low = text.lower()
+
+    if low.startswith("!"):
+        name = low[1:].strip()
+        stream = resolve_stream(name, tuner) if tuner is not None else name
+        if tuner is not None and (stream is None or stream not in tuner.triggers):
+            return None, f"no knob/stream named '{name}'"
+        return {"kind": "knob", "name": stream or name}, None
+    if low.startswith("%"):
+        name = low[1:].strip()
+        status = normalize_watch_status(name)
+        if status:
+            return {"kind": "status", "name": status}, None
+        return None, f"unknown status '{name}'"
+    if low.startswith("?"):
+        name = text[1:].strip()
+        if name in (probes or {}):
+            return {"kind": "probe", "name": name}, None
+        return None, f"no probe named '{name}'"
+    if low.startswith("."):
+        name = text[1:].strip()
+        if name in (probes or {}):
+            return {"kind": "probe", "name": name}, None
+        return None, f"no probe named '{name}'"
+    if low.startswith("="):
+        name = low[1:].strip()
+        status = normalize_watch_status(name)
+        if status:
+            return {"kind": "status", "name": status}, None
+        return None, f"unknown status '{name}'"
+
     if ":" in low:
         kind, name = low.split(":", 1)
         kind = kind.strip()
@@ -3824,6 +5773,7 @@ def build_priority_mix_direction(model, names, probes, tuner):
     and the data sets the degrees (a helpful probe adds, a harmful one
     subtracts/desteers). Per-layer sum over the probes' shared layers,
     normalized. {} when nothing carries weight yet."""
+    probes = steering_probe_view(probes, tuner)
     weighted = []
     for nm in names:
         if nm not in probes or probe_is_released(probes[nm]):
@@ -3860,6 +5810,7 @@ def build_priority_landscape_direction(model, target, probes, tuner, top_k=5, ne
     "move the live landscape so this can become salient" without pretending the
     evidence-ranked table changes immediately.
     """
+    probes = steering_probe_view(probes, tuner)
     if target not in probes or probe_is_released(probes[target]):
         return {}
     target_dir = probes[target].get("direction") or {}
@@ -3903,6 +5854,7 @@ def build_priority_landscape_direction(model, target, probes, tuner, top_k=5, ne
 
 def resolve_priority_direction(model, probes, tuner, priority_pin):
     """Return (direction, label, sign) for the current prioritize steering mode."""
+    probes = steering_probe_view(probes, tuner)
     priority_pin = priority_pin or {}
     mix = priority_pin.get("mix")
     landscape = priority_pin.get("landscape")
@@ -4067,19 +6019,34 @@ def macro_line_affects_probes_or_tuning(line):
 
 
 def split_because(line):
-    """Peel a trailing ' because <reason>' provenance clause off any command.
+    """Peel a trailing ' #<reason>' or ' because <reason>' provenance clause off any command.
     Returns (command_without_clause, reason_or_None). Only commands (lines that
     start with ':' or target an agent with '@name :cmd') carry a clause -- a plain utterance keeps its words intact.
-    Uses the LAST ' because ' so an end-of-line clause wins over the word
-    appearing inside an argument (a trailing 'because ...' inside a probe framing
-    is the one caveat)."""
+    Requires a space BEFORE '#', but does not require a space after '#'."""
     if not (line.startswith(":") or line.startswith("@")):
         return line, None
     low = line.lower()
-    idx = low.rfind(" because ")
-    if idx == -1:
-        return line, None
-    return line[:idx].rstrip(), line[idx + len(" because "):].strip()
+    idx_because = low.rfind(" because ")
+
+    idx_hash = -1
+    for i in range(len(line)):
+        if line[i] == "#":
+            if i > 0 and line[i - 1].isspace():
+                if i > 1 and line[i - 2] == "\\":
+                    continue
+                idx_hash = i
+                break
+
+    if idx_hash != -1 and (idx_because == -1 or idx_hash < idx_because):
+        cmd_part = line[:idx_hash].rstrip()
+        reason_part = line[idx_hash + 1:].strip()
+        return cmd_part, reason_part if reason_part else None
+    elif idx_because != -1:
+        cmd_part = line[:idx_because].rstrip()
+        reason_part = line[idx_because + len(" because "):].strip()
+        return cmd_part, reason_part if reason_part else None
+
+    return line, None
 
 
 DOC_REWRITE_MAX_CHARS = 12000
@@ -4108,14 +6075,14 @@ def parse_doc_rewrite_request(dargs):
 
 def parse_doc_read_request(dargs, probe_names, max_autoread=20):
     """Parse :doc read modifiers, including signed probe-guided selection."""
-    count, mode = 1, "order"
+    count, mode = None, "state"
     until_settled, explicit_count = False, False
     until_probe = None
     signed_probe_specs = []
     available = {str(name).lower() for name in (probe_names or [])}
     mode_aliases = {"weave": "interleave", "mtime": "updated", "chrono": "updated"}
     tokens = str(dargs or "").split()
-    if tokens and tokens[0].lower() == "read":
+    if tokens and tokens[0].lower() in {"read", "reread"}:
         tokens = tokens[1:]
     for extra in tokens:
         token = extra.strip().lower()
@@ -4135,7 +6102,7 @@ def parse_doc_read_request(dargs, probe_names, max_autoread=20):
                 return None, f"Probe '{pname}' cannot be both toward (+) and away (-) in one read."
             if spec not in signed_probe_specs:
                 signed_probe_specs.append(spec)
-        elif token in {"order", "reply", "interleave", "weave", "updated", "mtime", "chrono"}:
+        elif token in {"state", "order", "reply", "interleave", "weave", "updated", "mtime", "chrono"}:
             mode = mode_aliases.get(token, token)
         elif token in {"satisfied", "settled", "until"}:
             until_settled = True
@@ -4156,8 +6123,10 @@ def parse_doc_read_request(dargs, probe_names, max_autoread=20):
                 return None, f"Unrecognized :doc read argument '{extra}'."
     if (until_settled or until_probe) and not explicit_count:
         count = max_autoread
-    count = max(1, min(int(max_autoread), count))
+    until_complete = not explicit_count and not (until_settled or until_probe)
+    count = None if until_complete else max(1, min(int(max_autoread), count))
     return {
+        "until_complete": until_complete,
         "remaining": count,
         "mode": mode,
         "probe_specs": signed_probe_specs,
@@ -4165,6 +6134,102 @@ def parse_doc_read_request(dargs, probe_names, max_autoread=20):
         "until_probe": until_probe,
         "settled_streak": 0,
     }, None
+
+
+def configure_document_reading(memory, library, request, context="", restart=False):
+    """Resume a coverage pass, or begin another when asked or already complete."""
+    control = dict(request)
+    restart = restart or all(
+        len(doc.get("read") or ()) >= doc["chunk_count"] for doc in library
+    )
+    for doc in library:
+        begin_reading_pass(memory, doc, context=context, restart=restart)
+        doc.pop("_staged_read", None)
+    unread = sum(doc["chunk_count"] - len(doc.get("read") or ()) for doc in library)
+    control["remaining"] = unread if control.get("until_complete") else min(
+        unread, int(control.get("remaining") or 1)
+    )
+    control["target_shas"] = [doc["sha256"] for doc in library]
+    control["focus"] = context
+    return control
+
+
+def stage_document_read(session, index, reply_note=None):
+    """Stage text without claiming the model has processed it yet."""
+    if not 0 <= index < session["chunk_count"]:
+        raise ValueError("Invalid document passage index")
+    text = (f"{DOCUMENT_TOOL_HEADER}\nSource: {session['source_name']}\n"
+            f"Passage: {index + 1}/{session['chunk_count']}\n---\n{session['chunks'][index]}")
+    session["cursor"] = index
+    session["_staged_read"] = {
+        "text": text, "indices": [index], "pass_id": session.get("reading_pass_id"),
+    }
+    return text
+
+
+def complete_document_reading(memory, library, tool_result, response, control=None):
+    """Credit only a successful response to the exact staged passage and pass."""
+    if not tool_result:
+        if control and str(response or "").strip():
+            control["focus"] = response
+        return control
+    if not str(response or "").strip():
+        # Pause rather than spin or skip evidence after an empty generation.
+        return None
+    processed = False
+    for doc in library:
+        staged = doc.get("_staged_read") or {}
+        if (staged.get("text") != tool_result
+                or staged.get("pass_id") != doc.get("reading_pass_id")):
+            continue
+        for index in staged["indices"]:
+            record_chunk_read(memory, doc, index)
+        doc.pop("_staged_read", None)
+        processed = True
+    if processed and control:
+        control["focus"] = response
+        control["remaining"] -= 1
+        if control["remaining"] <= 0:
+            return None
+    return control
+
+
+def retain_document_thought(memory, reader_context, session, source, thought, reader_state=None):
+    """Keep generated reading tokens distinct from externally spoken turns."""
+    if not str(thought or "").strip():
+        return
+    metrics = {}
+    if reader_state is not None:
+        difference = reader_state.channel_difference()
+        if difference is not None:
+            metrics["reader_speech_state_change_rms"] = float(difference.square().mean().sqrt())
+    memory.append_event(
+        "document_reader_thought", text=thought, tags=["document_read", "internal"],
+        metrics=metrics,
+        provenance={"channel": "reader", "spoken": False,
+                    "sha256": session["sha256"], "reading_pass_id": session.get("reading_pass_id"),
+                    "chunk_index": session["cursor"], "source_name": session["source_name"]},
+    )
+    reader_context.append((source[:4800], thought[-3200:]))
+    # This is a working buffer; the complete history remains in memory events.
+    while len(reader_context) > 2 or (len(reader_context) > 1 and sum(
+        len(text) + len(reply) for text, reply in reader_context
+    ) > 8000):
+        reader_context.pop(0)
+
+
+def document_reading_should_stop(control, tuner, turn_sense=None, probe_signal=None):
+    """Apply only the early-stop condition the operator explicitly requested."""
+    if not control:
+        return False
+    if control.get("until_probe"):
+        trigger = tuner.triggers.get(f"probe_{control['until_probe']}")
+        return bool(trigger and probe_signal is not None and probe_signal >= trigger.value)
+    if control.get("until_settled"):
+        settled = turn_sense is None or turn_sense >= float(tuner.get("conversation_productive", 0.0))
+        control["settled_streak"] = control.get("settled_streak", 0) + 1 if settled else 0
+        return control["settled_streak"] >= max(1, int(tuner.get("reading_settled_streak", 2)))
+    return False
 
 
 def unique_rewrite_path(path):
@@ -4552,9 +6617,18 @@ def validate_command_autocomplete(
 ):
     """Normalize one completion and reject locally-detectable invalid syntax."""
     lines = [line.strip() for line in (response or "").splitlines() if line.strip()]
-    if len(lines) != 1:
+    if not lines:
         return None, "the model did not return exactly one command line"
-    candidate = lines[0].strip().strip("`").strip()
+    cmd_lines = [l for l in lines if l.startswith("COMMAND:")]
+    if cmd_lines:
+        if len(cmd_lines) > 1:
+            return None, "the model did not return exactly one final command line"
+        candidate = cmd_lines[0][len("COMMAND:"):].strip()
+    elif len(lines) == 1:
+        candidate = lines[0].strip()
+    else:
+        return None, "the model did not return exactly one command line"
+    candidate = candidate.strip("`").strip()
     if len(candidate) >= 2 and candidate[0] == candidate[-1] and candidate[0] in {"'", '"'}:
         candidate = candidate[1:-1].strip()
     if prefix and not candidate.startswith(prefix):
@@ -4602,7 +6676,7 @@ def validate_command_autocomplete(
         try:
             spec.parse(spec_tail, probe_resolver=_passthrough, choice_resolver=_passthrough)
         except CommandUsageError as exc:
-            return None, f"the completion fails its own grammar ({exc}); usage: {spec.usage()}"
+            return None, f"the completion fails its own argument language ({exc}); usage: {spec.usage()}"
     return candidate, None
 
 
@@ -5117,7 +7191,7 @@ def _extract_choice(text, candidates):
         return text
     toks = text.split()
     if toks:
-        first = re.sub(r"^[\s\-*'\"`:]+|[\s.,'\"`:]+$", "", toks[0])
+        first = re.sub(r"^[\s\-*'\"`:?!%]+|[\s.,'\"`:]+$", "", toks[0])
         if first in candidates:
             return first
     best = None  # ((pos, -len), name)
@@ -5187,7 +7261,294 @@ def resolve_probe_choice(pname_raw, options, model=None, config=None, action_nam
         print(Fore.YELLOW + f"[Choice] Model selected invalid target '{shown}'. Aborting." + Style.RESET_ALL)
         return None
 
-    return pname_raw.replace("probe_", "") if pname_raw.startswith("probe_") else pname_raw
+    raw = pname_raw.strip()
+    if raw.startswith("?"):
+        raw = raw[1:].strip()
+    target = raw.replace("probe_", "") if raw.startswith("probe_") else raw
+    if isinstance(options, dict):
+        if target in options:
+            return target
+        lookup = console_probe_lookup(raw, options)
+        if lookup:
+            return lookup
+    elif isinstance(options, (list, tuple, set)):
+        if target in options:
+            return target
+        options_dict = {k: {} for k in options if isinstance(k, str)}
+        lookup = console_probe_lookup(raw, options_dict)
+        if lookup:
+            return lookup
+    return target
+
+
+def normalize_probe_definition_args(raw):
+    """Accept either operator ordering without consuming contrastive framings."""
+    parts = raw.split()
+    actions = {"define", "define-experiment", "explain"}
+    if parts and parts[0].lower() in actions:
+        tail = raw.split(maxsplit=1)
+        return parts[0].lower() + " " + (tail[1] if len(tail) > 1 else "")
+    if len(parts) >= 2 and parts[1].lower() in actions:
+        action = parts[1].lower()
+        target = parts[0]
+        extra = parts[2:]
+        return " ".join([action, target] + extra)
+    return raw
+
+
+def parse_probe_explain_mode(tokens):
+    """Select one explicit mode; numeric suffixes retain the legacy ping syntax."""
+    modes, alphas = [], []
+    for token in tokens:
+        token = token.lower()
+        if token in ('words', 'verbal'):
+            token = 'prompt'
+        if token in ('activation', 'logits', 'evidence', 'prompt', 'ping'):
+            modes.append(token)
+        elif token in ('choose', 'auto'):
+            alphas.append('choose')
+        else:
+            try:
+                alpha = float(token)
+            except ValueError as exc:
+                raise ValueError(f"Unknown explain option '{token}'.") from exc
+            if not math.isfinite(alpha):
+                raise ValueError('Ping alpha must be finite.')
+            alphas.append(token)
+    if alphas:
+        modes.append('ping')
+    if len(set(modes)) > 1 or len(alphas) > 1:
+        raise ValueError('Choose one explain mode; only ping accepts an alpha.')
+    return (modes[0] if modes else 'activation'), (alphas[0] if alphas else None)
+
+
+PROBE_DIR = os.path.join(ROOT, "invariants", "out", "probes")
+
+
+def defining_profile_for(matrix):
+    """Reuse the owning tuner's profile without sharing it across agents."""
+    from invariants.defining_profile import DefiningProfile
+    profile = getattr(matrix, 'defining_profile', None)
+    if profile is None:
+        owner_path = getattr(matrix, 'path', None) or getattr(matrix.probe_behavior, 'path', None)
+        path = Path(owner_path).with_suffix('.defining.pt') if owner_path else None
+        try:
+            profile = DefiningProfile(path)
+        except (ValueError, OSError, RuntimeError) as exc:
+            # Preserve an unreadable profile; transient tracking cannot overwrite it.
+            print(Fore.YELLOW + f'[Probe] Could not load defining profile {path}: {exc}. '
+                  + 'New observations will remain in this session.' + Style.RESET_ALL)
+            profile = DefiningProfile()
+        matrix.defining_profile = profile
+    return profile
+
+
+def resolve_probe_definition_target(raw, probes, model=None, config=None, probe_dir=None):
+    """Operator definitions can address every active or stored probe by name or shown ID."""
+    raw = raw.strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw[1:-1].strip()
+    if raw.startswith("probe:"):
+        raw = raw[len("probe:"):].strip()
+    if raw in probes:
+        return raw
+    pdir = probe_dir or os.path.join(ROOT, "invariants", "out", "probes")
+    if os.path.isdir(pdir):
+        if os.path.exists(os.path.join(pdir, f"{raw}.pt")) or os.path.exists(os.path.join(pdir, raw)):
+            return raw
+    resolved = resolve_probe_choice(raw, probes, model=model, config=config, action_name="define")
+    if not resolved:
+        return resolved
+    if resolved in probes:
+        return resolved
+    return next((name for name in probes if probe_alias(name) == resolved), resolved)
+
+
+def resolve_probe_origin_hierarchy(name, pdata, probes=None, directory=None, visited=None):
+    """Recursively trace probe framings back to root contrastive text or recipe terms."""
+    if visited is None:
+        visited = set()
+    if name in visited:
+        return {"type": "cycle", "name": name}
+    visited.add(name)
+    fr = pdata.get("framings") or ("", "")
+    a = (fr[0] or "").strip() if len(fr) > 0 else ""
+    b = (fr[1] or "").strip() if len(fr) > 1 else ""
+    recipe = pdata.get("recipe")
+    pdir = directory or os.path.join(ROOT, "invariants", "out", "probes")
+    if a.startswith("adopted:"):
+        src = a.split(":", 1)[1].strip()
+        sub_name = src[:-3] if src.endswith(".pt") else src
+        sub_path = os.path.join(pdir, src if src.endswith(".pt") else f"{src}.pt")
+        sub_data = (probes or {}).get(sub_name)
+        if sub_data is None and os.path.exists(sub_path):
+            try:
+                sub_data = torch.load(sub_path, weights_only=False)
+            except Exception:
+                sub_data = None
+        sub_info = resolve_probe_origin_hierarchy(sub_name, sub_data, probes, pdir, visited.copy()) if sub_data else None
+        return {"type": "adopted", "source": src, "sub_info": sub_info}
+    if a.startswith("composed:") or recipe:
+        rec = recipe or a.split(":", 1)[1].strip()
+        terms, _ = parse_compose_expr(rec)
+        term_infos = []
+        for w, tname in terms:
+            t_path = os.path.join(pdir, f"{tname}.pt")
+            t_data = (probes or {}).get(tname)
+            if t_data is None and os.path.exists(t_path):
+                try:
+                    t_data = torch.load(t_path, weights_only=False)
+                except Exception:
+                    t_data = None
+            t_info = resolve_probe_origin_hierarchy(tname, t_data, probes, pdir, visited.copy()) if t_data else None
+            term_infos.append((w, tname, t_info))
+        return {"type": "composed", "recipe": rec, "terms": term_infos}
+    if a or b:
+        return {"type": "minted", "with": a, "without": b}
+    return {"type": "vector"}
+
+
+def _print_probe_origin_info(name, info, indent=2):
+    pad = " " * indent
+    t = info.get("type")
+    if t == "minted":
+        w = info.get("with", "")
+        wo = info.get("without", "")
+        print(pad + Fore.CYAN + "Origin: " + Fore.GREEN + "minted contrastive framings" + Style.RESET_ALL)
+        print(pad + Fore.CYAN + "WITH    (+ pole): " + Style.BRIGHT + Fore.WHITE + w + Style.RESET_ALL)
+        print(pad + Fore.CYAN + "WITHOUT (- pole): " + Style.BRIGHT + Fore.WHITE + wo + Style.RESET_ALL)
+        print(pad + Fore.CYAN + f"Replay: :probe {name} {w} || {wo}" + Style.RESET_ALL)
+    elif t == "adopted":
+        src = info.get("source", "")
+        print(pad + Fore.CYAN + "Origin: " + Fore.GREEN + f"adopted from {src}" + Style.RESET_ALL)
+        sub = info.get("sub_info")
+        if sub:
+            if sub.get("type") == "minted":
+                w = sub.get("with", "")
+                wo = sub.get("without", "")
+                print(pad + Fore.CYAN + f"Root definition (from {src}):" + Style.RESET_ALL)
+                print(pad + Fore.CYAN + "  WITH    (+ pole): " + Style.BRIGHT + Fore.WHITE + w + Style.RESET_ALL)
+                print(pad + Fore.CYAN + "  WITHOUT (- pole): " + Style.BRIGHT + Fore.WHITE + wo + Style.RESET_ALL)
+            else:
+                _print_probe_origin_info(src, sub, indent=indent + 2)
+        print(pad + Fore.CYAN + f"Replay: :probe adopt {name}" + Style.RESET_ALL)
+    elif t == "composed":
+        rec = info.get("recipe", "")
+        print(pad + Fore.CYAN + "Origin: " + Fore.GREEN + f"composed (recipe: {rec})" + Style.RESET_ALL)
+        for w, tname, tinfo in info.get("terms", []):
+            sign = "+" if w >= 0 else "-"
+            weight_str = f"{sign}{abs(w):g}*" if abs(w) != 1.0 else (sign if sign == "-" else "")
+            if tinfo and tinfo.get("type") == "minted":
+                tw = tinfo.get("with", "")
+                two = tinfo.get("without", "")
+                print(pad + Fore.CYAN + f"  Component {weight_str}{tname}:" + Style.RESET_ALL)
+                print(pad + Fore.CYAN + "    WITH    (+ pole): " + Style.BRIGHT + Fore.WHITE + tw + Style.RESET_ALL)
+                print(pad + Fore.CYAN + "    WITHOUT (- pole): " + Style.BRIGHT + Fore.WHITE + two + Style.RESET_ALL)
+            elif tinfo and tinfo.get("type") == "adopted":
+                src = tinfo.get("source", "")
+                sub = tinfo.get("sub_info")
+                if sub and sub.get("type") == "minted":
+                    tw = sub.get("with", "")
+                    two = sub.get("without", "")
+                    print(pad + Fore.CYAN + f"  Component {weight_str}{tname} (adopted from {src}):" + Style.RESET_ALL)
+                    print(pad + Fore.CYAN + "    WITH    (+ pole): " + Style.BRIGHT + Fore.WHITE + tw + Style.RESET_ALL)
+                    print(pad + Fore.CYAN + "    WITHOUT (- pole): " + Style.BRIGHT + Fore.WHITE + two + Style.RESET_ALL)
+                else:
+                    print(pad + Fore.CYAN + f"  Component {weight_str}{tname} (adopted from {src})" + Style.RESET_ALL)
+            else:
+                print(pad + Fore.CYAN + f"  Component {weight_str}{tname}" + Style.RESET_ALL)
+        print(pad + Fore.CYAN + f"Replay: :probe compose {name} {rec}" + Style.RESET_ALL)
+    else:
+        print(pad + Fore.CYAN + "Origin: stored vector (no contrastive text framings stored)" + Style.RESET_ALL)
+        print(pad + Fore.CYAN + f"Replay: :probe adopt {name}" + Style.RESET_ALL)
+
+
+def print_probe_original_definition(pname, probes, probe_dir=None, tuner=None):
+    """Display the original stored definition and contrastive framings for a probe."""
+    directory = probe_dir or os.path.join(ROOT, "invariants", "out", "probes")
+    pdata = (probes or {}).get(pname)
+    is_disk_fallback = False
+    if pdata is None:
+        disk_path = os.path.join(directory, f"{pname}.pt")
+        if not os.path.exists(disk_path):
+            disk_path = os.path.join(directory, pname)
+        if os.path.exists(disk_path):
+            try:
+                pdata = torch.load(disk_path, weights_only=False)
+                is_disk_fallback = True
+            except Exception:
+                pdata = None
+    if pdata is None:
+        print(Fore.YELLOW + f"[Probe] no active or stored probe named '{pname}'.{did_you_mean(pname, probes or {})}" + Style.RESET_ALL)
+        return
+
+    cname = console_probe_name(pname) if pname in (probes or {}) else pname
+    print(Fore.CYAN + Style.BRIGHT + f"[Probe Definition] {cname}" + Style.RESET_ALL)
+    if is_disk_fallback:
+        print(Fore.YELLOW + f"  (Loaded from disk: {pname}.pt; probe is not active in current session)" + Style.RESET_ALL)
+
+    origin_info = resolve_probe_origin_hierarchy(pname, pdata, probes, directory)
+    _print_probe_origin_info(pname, origin_info)
+
+    dirs = pdata.get("direction") or {}
+    if dirs:
+        layers = sorted(int(l) for l in dirs.keys())
+        print(Fore.CYAN + f"  Direction: L{layers[0]}-L{layers[-1]} ({len(layers)} layers)" + Style.RESET_ALL)
+    pos_dict = pdata.get("position") if isinstance(pdata.get("position"), dict) else {}
+    scale_dict = pdata.get("scale") if isinstance(pdata.get("scale"), dict) else {}
+    if pos_dict:
+        p_layers = sorted(int(l) for l in pos_dict.keys())
+        norms = [float((pos_dict[l] if torch.is_tensor(pos_dict[l]) else torch.as_tensor(pos_dict[l])).float().norm().item()) for l in pos_dict]
+        mean_norm = sum(norms) / len(norms) if norms else 0.0
+        scale_vals = [float(v) for v in scale_dict.values()] if scale_dict else []
+        scale_str = f", mean pole separation={sum(scale_vals)/len(scale_vals):.3f}" if scale_vals else ""
+        tok_off = pdata.get("peak_token_offset")
+        tok_str = f", peak token offset={int(tok_off):+d}" if tok_off is not None else ""
+        print(Fore.CYAN + f"  Position:  L{p_layers[0]}-L{p_layers[-1]} (midpoint ||m||={mean_norm:.3f}{scale_str}{tok_str})" + Style.RESET_ALL)
+    prof = pdata.get("last_profile") if isinstance(pdata.get("last_profile"), dict) else None
+    if prof:
+        p_bits = []
+        if prof.get("slab_coord") is not None:
+            p_bits.append(f"slab={prof['slab_coord']:+.3f}")
+        if prof.get("normalized_distance") is not None:
+            p_bits.append(f"norm_dist={prof['normalized_distance']:.3f}")
+        if prof.get("peak_token") is not None:
+            p_bits.append(f"peak_tok={prof['peak_token']} ({prof.get('peak_score', 0.0):+.3f})")
+        by_l = prof.get("by_layer") or {}
+        if by_l:
+            best_l = max(by_l, key=lambda k: abs(by_l[k]))
+            p_bits.append(f"peak_layer=L{best_l} ({by_l[best_l]:+.3f})")
+        if p_bits:
+            print(Fore.CYAN + f"  Latest profile: {', '.join(p_bits)}" + Style.RESET_ALL)
+
+    status_flags = []
+    if pdata.get("exposed"):
+        status_flags.append("exposed to model")
+    if probe_is_released(pdata):
+        status_flags.append("released (read-only)")
+    if pdata.get("frozen"):
+        status_flags.append("frozen")
+    if pdata.get("mass") is not None:
+        ms = pdata["mass"]
+        if isinstance(ms, dict):
+            mval = ms.get("value")
+            status_flags.append(f"mass={float(mval):g}" if mval is not None else f"mass={ms.get('kind', 'dict')}")
+        else:
+            try:
+                status_flags.append(f"mass={float(ms):g}")
+            except (ValueError, TypeError):
+                status_flags.append(f"mass={ms}")
+    if status_flags:
+        print(Fore.CYAN + f"  Status: {', '.join(status_flags)}" + Style.RESET_ALL)
+
+    if tuner and hasattr(tuner, "triggers"):
+        trig = tuner.triggers.get(f"probe_{pname}")
+        if trig:
+            st = trig.outcome_stats()
+            n = st.get("n_credited", len(trig.outcomes))
+            lift = st.get("lift")
+            lift_str = f", lift={lift:+.3f}" if lift is not None else ""
+            print(Fore.CYAN + f"  Observed: {n} credited turns{lift_str}" + Style.RESET_ALL)
 
 
 def resolve_expose_choice_target(raw, command_options, model=None, config=None, action_name=":expose command"):
@@ -5197,6 +7558,32 @@ def resolve_expose_choice_target(raw, command_options, model=None, config=None, 
         return None
     word = str(picked).lstrip(":").lower()
     return f":{word}" if word else None
+
+
+def choose_calibration_target(tuner, candidates, refs=None):
+    """Pick a target for calibration from candidates using trigger evidence or guidance."""
+    if refs:
+        ref_tokens = []
+        for r in refs:
+            t = r.lstrip("+-").strip()
+            if t:
+                ref_tokens.append(t)
+        for cand in sorted(candidates):
+            base = cand[len("probe_"):] if cand.startswith("probe_") else cand
+            if base in ref_tokens or cand in ref_tokens:
+                return base, f"selected {base} following reference guidance ({' '.join(refs)})"
+        return None, "no matching target from reference guidance"
+
+    for cand in sorted(candidates):
+        base = cand[len("probe_"):] if cand.startswith("probe_") else cand
+        trig = tuner.triggers.get(f"probe_{base}") or tuner.triggers.get(base)
+        if trig and trig.observed > 0:
+            fire_rate = trig.fired / trig.observed
+            if fire_rate == 0.0 or fire_rate == 1.0:
+                return base, f"deterministic fire rate ({fire_rate:.1%}) over {trig.observed} observations"
+            elif fire_rate <= 0.05 or fire_rate >= 0.95:
+                return base, f"extreme fire rate ({fire_rate:.1%}) over {trig.observed} observations"
+    return None, "no targets with extreme fire rate needing calibration"
 
 
 # --- :figures -- draw the state-output figures ------------------------------
@@ -6154,11 +8541,12 @@ def _run_shell_benchmark(model, config, tuner, probes, prioritize_pin, req, agen
 
 
 KNOWN_COMMANDS = (
-    ":context", ":memory", ":methodmap", ":claimmap", ":steermap", ":steer", ":slice",
+    ":context", ":memory", ":remember", ":methodmap", ":claimmap", ":steermap", ":steer", ":slice",
     ":group", ":list", ":figure", ":figures", ":benchmark",
     ":probe", ":label", ":calibrate", ":suggest", ":tune", ":doc", ":sandbox",
     ":experts", ":impact", ":clock", ":prioritize", ":release", ":listen",
     ":timestamps", ":history", ":queue", ":relations", ":clean", ":accept", ":reject", ":help", ":expose", ":hide",
+    ":plasticity", ":relate", ":other", ":travel", ":cen", ":awake", ":lookahead", ":trajectory", ":startup",
 )
 
 # Bare command words that are BUILT IN -- a macro alias by one of these names is
@@ -6167,6 +8555,7 @@ KNOWN_COMMANDS = (
 BUILTIN_COMMANDS = {c[1:] for c in KNOWN_COMMANDS} | {
     "macro", "run", "game", "solve", "refresh", "place", "install", "consider", "spawn",
     "exit", "quit", "timestamps", "listen", "history", "accept", "reject", "help", "expose", "hide", "show",
+    "travel", "cen", "awake", "remember",
 }
 
 # Single source of truth for the command reference: the shell prints these lines
@@ -6177,12 +8566,15 @@ COMMAND_HELP_LINES = [
     "Commands: :help [model]           (this list + your solve-macros; ':help model' shows what",
     "                the MODEL can run on its own; ':help expose [off]' lets it call <<HELP>>)",
     "          :context, :context on, :context off, :context clear",
-    "          :memory, :memory all|act|talk on|off|status, :memory act|talk use [sentence [+probe -probe]]",
+    "          :memory, :memory all|act|talk on|off|status, :memory shift, :memory act|talk use [sentence [+probe -probe]]",
     "                :memory use/search [optional args] uses enabled lanes; empty reflects",
     "                via :prioritize/farthest-from-0; :expose off memory hides model access;",
     "                model-made definitions persist with linked accept/reject/label/place feedback",
+    "          :remember [thoughts|<text>], :remember stage <text>, :remember list [n]",
+    "                record a fact, or snapshot and consolidate the model's recent thoughts and",
+    "                friction trajectories via CEN/DMN into episodic memory and plastic synaptic weights",
     "          :methodmap <query>",
-    "          :claimmap <first text> || <second text>",
+    "          :claimmap <first text> || <second text>, :claimmap auto on|off, :claimmap clear, :claimmap status",
     "          :consider <trigger_metric> <tool_name> <positive text> || <negative text>",
     "                (mint a custom activation-triggered steering tool from a contrastive pair;",
     "                set <tool_name>_alpha with :tune before it can steer)",
@@ -6288,17 +8680,26 @@ COMMAND_HELP_LINES = [
     "          :probe backfill <name> [n]  (retro-score up to n archived replies in order:",
     "                a name scores/rebuilds only that probe; 'all' explicitly scores every active",
     "                probe into joint rows; both rebuild credit and seed rolling history)",
+    "          :probe recalc [all|<name>]  (recalculate probes from their creation definitions:",
+    "                minted re-runs forward passes on wordings; composed re-evaluates recipes",
+    "                dynamically over constituent probes; adopted re-links to targets)",
     "          :probe values [name|all] [n]  (show the latest centered probe readings;",
     "                aliases: :probe recent, :probe last)",
     "          :probe show|hide talk|act|all  (toggle whether probe readings print during",
     "                main conversation, background actions, or both)",
-    "          :probe define <name>        (share its initial breakdown -- the WITH/WITHOUT framings",
-    "                it was minted from; name accepts choose/auto)",
-    "          :probe explain <name> [alpha|choose] [prompt]  (default = activation ping sanity check:",
-    "                briefly steer along the probe's direction, envelope-capped, baseline frozen, and",
-    "                print what the nudge evokes -- it may be generic/off-target. Add 'prompt' for the",
-    "                stored WITH/WITHOUT definition-grounded explanation; :probe define shows that",
-    "                saved definition directly. name accepts choose/auto)",
+    "          :probe define <name> | :probe <name> define  (show the original stored definition",
+    "                and contrastive framings; resolves adopted and composed root sources)",
+    "          :probe define-experiment <name>  (run the activation-only definition experiment",
+    "                selected by probe_define_process; requires observed examples)",
+    "          :probe defining [show|on|off]  (inspect the owning tuner's saved defining profile;",
+    "                toggle reuse of settings and learned activation changes; tracking stays on)",
+    "          :probe define2 <name or opaque alias> [align|watch [N]|off]",
+    "                (inspect per-layer vocabulary and paired behavior without generation;",
+    "                watch updates a separate lexical conception ledger every N fresh samples)",
+    "          :probe explain <name> [activation|logits|evidence|prompt|ping [alpha]] | :probe <name> explain",
+    "                (activation explanation candidate by default: blank native continuation, no request or prefix;",
+    "                independent subject/operation/reference gains; evidence uses measured examples; accepts [p_...] IDs; candidate meaning is unverified)",
+    "                (logits measures directional next-token distance at the blank native assistant decision without generation; predictive geometry does not establish a definition)",
     "          :probe match <probe> <knob> | auto | drive [mult] | validate | check | off",
     "                (tie a probe to its same-concept knob: drive = servo the knob from the",
     "                probe each turn; validate = correlate knob value vs reading (check to read",
@@ -6321,21 +8722,25 @@ COMMAND_HELP_LINES = [
     "          :label <probe|stream> pos|neg  (judge the MOST RECENT turn on that axis:",
     "                credits its last signal with a human outcome -- supervised evidence",
     "                alongside the automatic sense credit, so lift can reflect your judgment)",
-    "          :suggest  (scan the accrued state for ready moves, then show a one-line",
-    "                launcher of ALL visible user-facing commands; computed, never applied.",
-    "                :suggest apply auto-queues only the safe measurement/calibration ones)",
-    "          :suggest [what you want] [:prefix]  (with words after it, ask for exactly one",
-    "                runnable command toward a free-form goal; optional :prefix constrains",
-    "                the command family; stages it for :accept using the live command reference)",
+    "          :suggest [domain|entity|goal] [...]  (scan the accrued state and suggest",
+    "                concrete, runnable commands to run; arguments narrow the scope progressively",
+    "                (e.g. :suggest steer, :suggest steer band, :suggest steer band <node>,",
+    "                :suggest calibrate <name>, :suggest probe <name>, :suggest <entity>);",
+    "                free-form goals ask the model for a command toward that goal and stage it",
+    "                for :accept. Computed, never applied. :suggest apply auto-queues safe calibrations)",
     "          :suggest commands [filter]  (show the full one-line launcher for every",
     "                visible user-facing command/macro; optional filter narrows by command text)",
-    "          :suggest gravity|field|physics  (shortcut launcher for the whole steer/field",
-    "                command family: Gs, families, clocks, shapes, qualities, sets, exclusions)",
     "          :suggest :<command prefix>  (complete one operator command from the live",
     "                command reference; isolated from conversation history and cognitive cache)",
     "          :suggest because <reason>  (same goal-directed command suggestion, with the",
     "                reason supplied through the normal because-clause)",
     "          :tune, :tune <name> <value>, :tune <name> auto [percentile]",
+    "          :tune probe_explain_subject <0..1> | :tune probe_explain_operation <-1..1> | :tune probe_explain_reference <-1..1>",
+    "                (independent activation explanation gains; defaults .02/.12/.04; 0 disables a channel; operation and reference accept signed subtraction)",
+    "          :tune probe_explain_map <0|1> | :tune probe_explain_map_tokens <3..64>",
+    "                (sustained operation as a current-state map; default off; calibration tokens per trajectory default 24)",
+    "          :tune probe_explain_logits_epsilon <positive value <=0.1>",
+    "                (directional logit measurement step, default .01; set deliberately, no automatic calibration)",
     "          :tune <knob|probe> dynamic <signed mix> [mult]  (each turn set the target",
     "                to mult * a signed mix of live streams, e.g. +ambiguity-consensus; a",
     "                probe-only target drives its own firing threshold; a name that is both",
@@ -6345,19 +8750,22 @@ COMMAND_HELP_LINES = [
     "                (derive band from outcomes; conversations count as evidence)",
     "          :tune steer_layer_sweep 1    (isolate steers by layer: each steer pushes",
     "                ONE least-tested band layer; per-layer outcomes accrue, transfer-free)",
-    "          :doc <path> [because <why>]  (share a document into the conversation)",
+    "          :tune routing_depth <N>  (maximum sequential ToT branch/select stages per",
+    "                routing event; 0 disables routing, default 1 preserves one stage;",
+    "                continue while selected entropy exceeds routing_entropy)",
+    "          :tune routing_layer_span <N>  (replay the last N layers of the detected",
+    "                plateau-to-boundary region, clamped to that region; default 0 replays it all)",
+    "          :doc <path> [because <why>]  (load and read a full pass for the current questions)",
     "          :doc <path> rewrite [new_name] [because <why>]  (rewrite a text file",
     "                better and save a sibling in the same folder; omitted name uses *_rewritten)",
-    "          :doc next | :doc status      (stage the next chunk / show progress)",
-    "          :doc read [n] [order|interleave|reply|updated] [satisfied|<stop_probe>]",
+    "          :doc next | :doc status      (read one unread passage / show current-pass progress)",
+    "          :doc read [n] [state|order|interleave|reply|updated] [satisfied|<stop_probe>]",
     "                [+probe -probe ...]  (signed probes rank up to 160 unread candidates:",
     "                toward + probes and away from - probes, using a bounded 600-char read;",
     "                scores are read-only and cached.",
     "                A bare probe name is instead an early-stop threshold)",
-    "                (reading as dialogue: the document speaks each turn, the model",
-    "                replies. order/interleave/updated advance on the documents' own",
-    "                course -- updated = by file mtime, newest first; reply follows",
-    "                overlap. 'satisfied' stops early once sense settles)",
+    "                (default: full pass in state mode; internal reader thoughts; explicit n caps at 20)",
+    "          :doc reread [modifiers]      (fresh pass for changed context; keeps reading history)",
     "          :doc inject                  (stage the whole library for one turn, budget-bounded)",
     "          :doc stop                    (interrupt auto-read)",
     "          :sandbox on|off|status       (run the model's ```python blocks for real)",
@@ -6394,6 +8802,15 @@ COMMAND_HELP_LINES = [
     "                VRAM on GPU, process RAM on CPU-only, both sensed every turn",
     "                as generation_seconds / vram_gb streams)",
     "          :timestamps on|off|status     (toggle timestamps on the prompt and resumed history)",
+    "          :lookahead status|on [alpha]|off  (context-local future predictions; off pauses steering only)",
+    "          :lookahead k <n>              (positive future horizon, scaled by degree horizon)",
+    "          :lookahead degree diff|horizon|direction|distance|logits|factor <value>",
+    "          :lookahead combine linear|sinusoidal  (sum corrections or compose their sine phases)",
+    "          :lookahead claimmap [detach]  (inspect or detach the active tension axis)",
+    "          :lookahead init / :trajectory (run init_lookahead.txt; resets travel settings)",
+    "          :startup list|on|off|run      (explicit startup/*.txt macros; sorted before initial prompt)",
+    "          :startup add <path.txt> / :startup remove <filename>  (paths with spaces are supported)",
+    "          :cen status|on|off           (background executive networks; default off)",
     "          :history                      (legacy pointer: use :context for session transcript",
     "                controls and :memory for long-term memory)",
     "          :prioritize [choose|auto|<probe> [alpha]|pin <probe> [alpha]|mix <p...> [alpha]]",
@@ -6510,10 +8927,11 @@ def build_command_autocomplete_reference(prefix, hidden_commands=None):
     """
     visible_lines = visible_command_help_lines(hidden_commands)
     matches = find_command_help_entries(prefix, visible_lines)
-    spec_matches = spec_help_entries(prefix, hidden_commands)
+    spec_matches = automatic_command_help_entries(prefix, hidden_commands=hidden_commands)
     if matches or spec_matches:
         parts = [line for entry in matches for line in entry]
         parts.extend(line for entry in spec_matches for line in entry)
+        parts.append("Note: Examples are grammar samples, not defaults.")
         return macro_safe_block("\n".join(parts))
     return macro_safe_block("\n".join(visible_lines))
 
@@ -6603,6 +9021,22 @@ def suggest_command_catalog(hidden_commands=None, macro_aliases=None, solve_macr
         seen.add(key)
         catalog.append({"kind": "command", "command": command, "summary": summary})
 
+    hidden = _hidden_command_words(hidden_commands)
+    for path in sorted(COMMAND_SPECS):
+        words = {w.lstrip(":").lower() for w in path.split()}
+        if words & hidden:
+            continue
+        spec = COMMAND_SPECS[path]
+        command = spec.usage()
+        summary = spec.summary
+        key = ("command", command)
+        if key in seen or any(c.startswith(path) for (k, c) in seen):
+            continue
+        if not wanted(command, summary):
+            continue
+        seen.add(key)
+        catalog.append({"kind": "command", "command": command, "summary": summary})
+
     macro_names = []
     if isinstance(macro_aliases, dict):
         macro_names = list(macro_aliases.keys())
@@ -6631,23 +9065,45 @@ def suggest_command_catalog(hidden_commands=None, macro_aliases=None, solve_macr
     return catalog
 
 
-def build_goal_command_reference(hidden_commands=None, macro_aliases=None, solve_macros=None):
+def build_goal_command_reference(hidden_commands=None, macro_aliases=None, solve_macros=None, goal_text=None, max_chars=None):
     """Macro-safe one-line launcher catalog for goal-directed command choice.
 
     Unlike `:suggest commands [filter]`, this is not a deterministic text
     filter. It is reference material for a low-memory autocomplete turn whose
     job is to choose exactly one runnable command toward a stated goal.
+    Ranked by relevance to goal_text and budgeted to avoid context overflow.
     """
-    lines = []
-    for item in suggest_command_catalog(
+    raw_catalog = suggest_command_catalog(
         hidden_commands=hidden_commands,
         macro_aliases=macro_aliases,
         solve_macros=solve_macros,
-    ):
+    )
+    stopwords = {"a", "an", "the", "and", "or", "to", "for", "in", "on", "of", "with", "from", "by", "is", "it", "this", "that", "me", "you", "my", "we"}
+    terms = [t for t in re.findall(r"[a-z0-9_]+", (goal_text or "").lower()) if len(t) > 1 and t not in stopwords]
+
+    def _score(item):
+        if not terms:
+            return 0
+        cmd_text = f"{item['command']} {item.get('summary', '')}".lower()
+        return sum(1 for term in terms if term in cmd_text)
+
+    ranked = sorted(raw_catalog, key=_score, reverse=True) if terms else raw_catalog
+
+    lines = []
+    total_chars = 0
+    for item in ranked:
         prefix = "macro" if item["kind"] == "macro" else "cmd"
         summary = item.get("summary") or ""
+        if summary:
+            short_s = summary.split(";")[0].split(".")[0].strip()
+            summary = short_s[:60]
         suffix = f" -- {summary}" if summary else ""
-        lines.append(f"{item['command']}  [{prefix}]{suffix}")
+        line = f"{item['command']}  [{prefix}]{suffix}"
+        if max_chars is not None and total_chars + len(line) + 1 > max_chars and lines:
+            break
+        lines.append(line)
+        total_chars += len(line) + 1
+
     return macro_safe_block("\n".join(lines))
 
 
@@ -6712,6 +9168,24 @@ def render_commands_md(lines=COMMAND_HELP_LINES):
 
 def render_visible_commands_md(hidden_commands=None, lines=COMMAND_HELP_LINES):
     return render_commands_md(visible_command_help_lines(hidden_commands, lines)) + render_specs_md(hidden_commands)
+
+
+def compact_spawn_command_reference(hidden_commands=None, max_chars=12000):
+    """Bound the authoring reference while keeping discovery of every command."""
+    hidden = set(hidden_commands or ())
+    visible = sorted(word for word in KNOWN_COMMANDS if word.lstrip(':') not in hidden)
+    parts = ['Command index: ' + ' '.join(visible),
+             'Use :help :command for full syntax. This is a compact authoring reference.']
+    priority = ('probe', 'tune', 'calibrate', 'steer', 'expose', 'hide', 'doc', 'queue', 'relate')
+    specs = sorted(COMMAND_SPECS.values(), key=lambda spec: (spec.path.split()[0].lstrip(':') not in priority, spec.path))
+    for spec in specs:
+        if spec.path.split()[0].lstrip(':') in hidden:
+            continue
+        line = spec.usage()
+        if sum(len(p) + 1 for p in parts) + len(line) > max_chars:
+            break
+        parts.append(line)
+    return '\n'.join(parts)
 
 
 def write_commands_md(path=None, lines=COMMAND_HELP_LINES):
@@ -6790,7 +9264,7 @@ def build_model_help_text(
         "  <<CLAIMMAP: A || B>>       weigh two framings against each other",
         "  <<PROBE: name>>            read one exposed probe sensor or knob",
         "  <<PROBE: name || words>>   score candidate words on an exposed probe sensor",
-        "  <<HELP>>                   show this help",
+        "  <<HELP>> / <<HELP: :command args>>  show this help or inspect command syntax",
     ]
     if memory_tool_exposed and memory_lanes:
         lane_text = ", ".join(memory_lanes)
@@ -6842,6 +9316,74 @@ def build_model_help_text(
         lines.append("Operator solve-macros (also operator-run): "
                      + ", ".join(f":{n}" for n, _d, _a in visible_solve_macros) + ".")
     return "\n".join(lines)
+
+
+def explain_command(candidate, hidden_commands=None):
+    """Explain a command using its registered CommandSpec contract or fallback help."""
+    candidate = (candidate or "").strip()
+    lines = ["[Command Explanation]"]
+
+    hidden = _hidden_command_words(hidden_commands)
+    words = {w.lstrip(":").lower() for w in candidate.split()}
+    if words & hidden:
+        lines.append(f"{candidate} is hidden from the current model-facing reference.")
+        return "\n".join(lines)
+
+    stripped, because_clause = split_because(candidate)
+    spec, spec_tail = matching_command_spec(stripped)
+
+    if spec is not None:
+        lines.append(f"Plain-language effect: {spec.summary}")
+        if because_clause:
+            lines.append(f"Stated reason: {because_clause}")
+        _passthrough = lambda tok: tok
+        try:
+            parsed = spec.parse(spec_tail, probe_resolver=_passthrough, choice_resolver=_passthrough)
+            lines.append("Check: valid under this command's registered parser")
+            lines.append("Parsed arguments:")
+            for k, v in vars(parsed).items():
+                if v is not None:
+                    lines.append(f"  - {k}: {v}")
+        except CommandUsageError as exc:
+            lines.append(f"Check: not valid ({exc})")
+            lines.append(f"Expected form: {spec.usage()}")
+    else:
+        matches = find_command_help_entries(stripped)
+        if matches:
+            effect = " ".join(line.strip() for line in matches[0])
+        else:
+            effect = f"Execute operator command {stripped}"
+        lines.append(f"Plain-language effect: {effect}")
+        if because_clause:
+            lines.append(f"Stated reason: {because_clause}")
+        lines.append("Check: no registered parser contract yet")
+
+    return "\n".join(lines)
+
+
+def command_help_tool_result(
+    query="",
+    *,
+    macros=None,
+    exposed_commands=None,
+    exposed_knobs=None,
+    hidden_commands=None,
+    memory_tool_exposed=True,
+    memory_lanes=None,
+):
+    """Serve <<HELP>> or <<HELP: :command args>> tool responses."""
+    q = (query or "").strip()
+    if not q:
+        return build_model_help_text(
+            solve_macros=macros,
+            exposed_commands=exposed_commands,
+            exposed_knobs=exposed_knobs,
+            hidden_commands=hidden_commands,
+            memory_tool_exposed=memory_tool_exposed,
+            memory_lanes=memory_lanes,
+        )
+    explanation = explain_command(q, hidden_commands=hidden_commands)
+    return f"{HELP_TOOL_HEADER}\n{explanation}"
 
 
 def calibratable_names(tuner):
@@ -6983,6 +9525,67 @@ def load_stored_direction(model, stem, layers=None):
     return direction, os.path.basename(src_path), exposed, dim_mismatch
 
 
+def load_stored_probe_geometry(model, stem, layers=None):
+    """Load any stored positional metadata (position, scale, poles, token_salience,
+    peak_token_offset) alongside a stored direction for `stem`, restricted to
+    `layers` when given."""
+    want = set(int(x) for x in layers) if layers is not None else None
+    src_path = next(
+        (p for p in (
+            os.path.join(ROOT, "invariants", f"{stem}_d{model.d_model}_vector.pt"),
+            os.path.join(ROOT, "invariants", f"{stem}_d{model.d_model}.pt"),
+            os.path.join(ROOT, "invariants", "out", "probes", f"{stem}_d{model.d_model}.pt"),
+            os.path.join(ROOT, "invariants", f"{stem}_vector.pt"),
+            os.path.join(ROOT, "invariants", f"{stem}.pt"),
+            os.path.join(ROOT, "invariants", "out", "probes", f"{stem}.pt"),
+        ) if os.path.isfile(p)),
+        None,
+    )
+    if src_path is None:
+        return {}
+    try:
+        payload = torch.load(src_path, map_location="cpu", weights_only=True)
+    except Exception:
+        try:
+            payload = torch.load(src_path, map_location="cpu")
+        except Exception:
+            return {}
+    if not isinstance(payload, dict):
+        return {}
+    geom = {}
+    if isinstance(payload.get("position"), dict):
+        pos = {}
+        for L, v in payload["position"].items():
+            if want is not None and int(L) not in want:
+                continue
+            vt = (v if torch.is_tensor(v) else torch.as_tensor(v)).to(model.device).float().reshape(-1)
+            if vt.shape[0] == model.d_model:
+                pos[int(L)] = vt
+        if pos:
+            geom["position"] = pos
+    if isinstance(payload.get("scale"), dict):
+        sc = {
+            int(L): float(s)
+            for L, s in payload["scale"].items()
+            if want is None or int(L) in want
+        }
+        if sc:
+            geom["scale"] = sc
+    if isinstance(payload.get("poles"), dict):
+        pl = {}
+        for L, pair in payload["poles"].items():
+            if want is not None and int(L) not in want:
+                continue
+            if isinstance(pair, (tuple, list)) and len(pair) == 2:
+                pl[int(L)] = pair
+        if pl:
+            geom["poles"] = pl
+    for k in ("token_salience", "peak_token_offset", "token_mode", "frozen", "mass"):
+        if k in payload:
+            geom[k] = payload[k]
+    return geom
+
+
 def parse_compose_expr(expr):
     """Parse a signed weighted mix of named dimensions into (terms, error):
     terms = [(weight, name), ...]. Grammar: terms joined by + or -, each
@@ -7013,6 +9616,66 @@ def parse_compose_expr(expr):
     if not terms:
         return [], expr or "(empty)"
     return terms, None
+
+
+def parse_probe_backfill_tail(tail, probes):
+    """Parse trailing arguments to :probe backfill: [limit] [outcome <signed-mix>].
+    Returns (limit, terms, label, error)."""
+    toks = (tail or "").strip().split()
+    if not toks:
+        return None, None, None, None
+
+    limit = None
+    if toks[0].isdigit():
+        limit = int(toks[0])
+        toks = toks[1:]
+
+    if not toks:
+        return limit, None, None, None
+
+    if toks[0].lower() == "outcome":
+        expr_str = " ".join(toks[1:])
+        raw_terms, perr = parse_compose_expr(expr_str)
+        if perr:
+            return limit, None, None, f"invalid outcome expression near {perr!r}"
+
+        terms = []
+        label_parts = []
+        for weight, raw_name in raw_terms:
+            name = raw_name[len("probe_"):] if raw_name.startswith("probe_") else raw_name
+            if name not in probes and f"probe_{name}" not in probes:
+                return limit, None, None, f"unknown outcome probe {raw_name!r}"
+            actual_name = name if name in probes else f"probe_{name}"
+            terms.append((weight, actual_name))
+
+            sign = "+" if weight >= 0 else "-"
+            abs_w = abs(weight)
+            if abs_w == 1.0:
+                w_str = ""
+            elif abs_w == int(abs_w):
+                w_str = f"{int(abs_w)}*"
+            else:
+                w_str = f"{abs_w:g}*"
+            label_parts.append(f"{sign}{w_str}{actual_name}")
+
+        label = " ".join(label_parts)
+        return limit, terms, label, None
+
+    return None, None, None, f"unexpected argument {toks[0]!r}"
+
+
+def backfill_outcome_from_terms(per_probe, terms, stored_sense=None):
+    """Compute remapped outcome score from per-probe centered signals across terms."""
+    if not terms:
+        return stored_sense
+    total = 0.0
+    for weight, name in terms:
+        if name not in per_probe:
+            return None
+        val = per_probe[name]
+        centered = val[1] if isinstance(val, (tuple, list)) else val
+        total += weight * centered
+    return total / len(terms)
 
 
 OPT_IN_CAPABILITY = {"claimmap_alpha", "memory_alpha", "expert_proof_weight", "steer_layer_sweep"}
@@ -7237,6 +9900,596 @@ def suggest_actions(tuner, rows, probes=None, archive_size=0, max_paired=6):
     return out
 
 
+def suggest_targeted_actions(args, tuner, rows, probes=None, archive_size=0, max_results=12):
+    """Generate flexible, context-grounded command suggestions that become
+    increasingly specific as arguments are supplied.
+
+    Supports:
+    - Domain narrowing: 'steer', 'field', 'band', 'calibrate', 'probe', 'tune', 'memory', 'doc', 'clean'
+    - Sub-domain narrowing: 'steer band', 'steer mass', 'steer quality', 'steer family', 'calibrate paired'
+    - Target narrowing: 'steer band accuracy', 'calibrate accuracy', 'probe accuracy', 'tune claimmap_alpha'
+    - Entity-centric queries: passing a probe or knob name directly generates actions across systems for it
+
+    Returns a list of (category, evidence_line, command) tuples, or None if the input represents
+    a free-form goal that should be handled by model synthesis.
+    """
+    probes = probes or {}
+    probe_names = sorted(probes.keys())
+    if isinstance(args, str):
+        tokens = [t.lower().lstrip(":") for t in args.strip().split() if t.strip()]
+    else:
+        tokens = [t.lower().lstrip(":") for t in args if str(t).strip()]
+
+    if not tokens:
+        return suggest_actions(tuner, rows, probes=probes, archive_size=archive_size)
+
+    # 1. Detect matching probe or knob entities in arguments
+    def _clean_entity_token(tok):
+        raw = str(tok).lower().strip().lstrip(":")
+        if raw.startswith("[") and raw.endswith("]"):
+            raw = raw[1:-1].strip()
+        if raw.startswith("probe:"):
+            raw = raw[len("probe:"):].strip()
+        elif raw.startswith("knob:"):
+            raw = raw[len("knob:"):].strip()
+        elif raw.startswith("probe_"):
+            raw = raw[len("probe_"):].strip()
+        return raw
+
+    disk_probes = set()
+    pdir = PROBE_DIR if "PROBE_DIR" in globals() else os.path.join(ROOT, "invariants", "out", "probes")
+    if os.path.isdir(pdir):
+        try:
+            disk_probes = {f[:-3] for f in os.listdir(pdir) if f.endswith(".pt")}
+        except Exception:
+            pass
+
+    matched_probes = []
+    for t in tokens:
+        c = _clean_entity_token(t)
+        if not c:
+            continue
+        if c in probes:
+            if c not in matched_probes:
+                matched_probes.append(c)
+        elif c in disk_probes:
+            if c not in matched_probes:
+                matched_probes.append(c)
+        else:
+            for p in probe_names:
+                if c == p.lower():
+                    if p not in matched_probes:
+                        matched_probes.append(p)
+                    break
+    matched_probe = matched_probes[0] if matched_probes else None
+
+    matched_knob = None
+    if tuner and hasattr(tuner, "triggers"):
+        for t in tokens:
+            c = _clean_entity_token(t)
+            if c in tuner.triggers:
+                matched_knob = c
+                break
+            for k in tuner.triggers:
+                if c == k.lower() or c == k.lower().replace("probe_", ""):
+                    matched_knob = k
+                    break
+            if matched_knob:
+                break
+
+    is_down = any(t in ("down", "lower", "reduce", "suppress", "decrease", "negative", "repel") for t in tokens)
+    is_up = any(t in ("up", "raise", "increase", "boost", "elevate", "positive", "attract") for t in tokens)
+
+    # 2. Check domain keywords
+    is_band = any(t in ("band", "bands", "tether", "tethers", "spring", "hooke") for t in tokens)
+    is_steer = any(t in ("steer", "field", "physics", "gravity", "mass", "quality", "family", "anchor", "law", "exclude") for t in tokens) or is_band
+    is_calibrate = any(t in ("calibrate", "calibration", "calibrations", "cal", "threshold", "paired", "cut", "cuts") for t in tokens)
+    is_probe = any(t in ("probe", "probes", "sensor", "sensors", "backfill", "expose", "mint") for t in tokens)
+    is_tune = any(t in ("tune", "tuning", "knob", "knobs", "dynamic", "explore") for t in tokens)
+    is_remember = any(t in ("remember", "rem", "thought", "thoughts", "cen", "dmn") for t in tokens)
+    is_memory = any(t in ("memory", "cache", "slice", "doc", "context", "history") for t in tokens) or is_remember
+    is_clean = any(t in ("clean", "cleanup", "reset") for t in tokens)
+
+    bodies = steer_bodies() if callable(globals().get("steer_bodies")) else {}
+    active_bands = bodies.get("bands", {}) if isinstance(bodies, dict) else {}
+    out = []
+
+    # A. HOOKE BANDS
+    if is_band:
+        target_p = matched_probe or (probe_names[0] if probe_names else "accuracy")
+        out.append((
+            "Hooke band tethers",
+            "list active restoring band tethers and their state",
+            ":steer band",
+        ))
+        if target_p:
+            out.append((
+                "Hooke band tethers",
+                f"pull restoring tether for '{target_p}' when stretched beyond rest distance",
+                f":steer band {target_p}_pull pull {target_p} rest 0.4 give 0.2 strength 0.3",
+            ))
+            out.append((
+                "Hooke band tethers",
+                f"two-sided Hooke spring for '{target_p}' active across all distances",
+                f":steer band {target_p}_spring spring {target_p} rest 0.5 give 0.2 strength 0.2",
+            ))
+            out.append((
+                "Hooke band tethers",
+                f"push tether for '{target_p}' when compressed inside rest distance",
+                f":steer band {target_p}_push push {target_p} rest 0.2 give 0.1 strength 0.4",
+            ))
+            out.append((
+                "Hooke band tethers",
+                f"conditional Hooke tether active when .{target_p} falls below threshold",
+                f":steer band {target_p}_gated pull {target_p} rest 0.4 give 0.2 strength 0.3 when .{target_p} below 0.0",
+            ))
+        for bname, bcfg in list(active_bands.items())[:3]:
+            out.append((
+                "Hooke band tethers",
+                f"inspect active band '{bname}' ({bcfg.get('mode', 'pull')} on {bcfg.get('node', '?')})",
+                f":steer band {bname}",
+            ))
+            out.append((
+                "Hooke band tethers",
+                f"drop active band '{bname}'",
+                f":steer band {bname} drop",
+            ))
+        return out[:max_results]
+
+    # B. STEER
+    if is_steer:
+        out.append(("Hooke band tethers", "manage and inspect restoring Hooke tethers", ":steer band"))
+        out.append(("Gravity / field mechanics", "inspect physical bodies, masses, and current fields", ":steer bodies"))
+        out.append(("Field couplings", "inspect live field couplings and time couplings", ":relations fields"))
+        out.append(("Continuous physics", "initialize continuous linear gravity field", ":steer field init 0.10"))
+        if probe_names:
+            p0 = probe_names[0]
+            out.append(("Gravity / field mechanics", f"assign positive attractor mass to '{p0}'", f":steer mass {p0} 0.20"))
+        out.append(("Field couplings", "couple claimmap knob to system load", ":steer g knob:claimmap_alpha status:ram_pct 0.0002"))
+        return out[:max_results]
+
+    # C. CALIBRATE
+    if is_calibrate:
+        target = matched_probe or matched_knob
+        if target:
+            clean_target = target[len("probe_"):] if target.startswith("probe_") else target
+            p_data = probes.get(clean_target) if probes else None
+            if p_data and isinstance(p_data, dict):
+                p_framings = p_data.get("framings")
+                if p_framings and isinstance(p_framings, dict):
+                    f_a = p_framings.get("a", "")
+                    if f_a:
+                        a_disp = f_a[:30] + ("..." if len(f_a) > 30 else "")
+                        out.append((
+                            "Calibrations ready",
+                            f"calibrate '{clean_target}' against anchor framing '{a_disp}'",
+                            f":calibrate {clean_target} {a_disp}",
+                        ))
+            t_trig = tuner.triggers.get(target) if tuner and hasattr(tuner, "triggers") else None
+            if t_trig and getattr(t_trig, "kind", None) == "threshold":
+                out.append(("Calibrations ready", f"calibrate '{clean_target}' threshold to own distribution median", f":calibrate {clean_target} 50"))
+            if target in OUTCOME_CALIBRATABLE:
+                out.append(("Calibrations ready", f"calibrate circular knob '{clean_target}' to best outcome", f":calibrate {clean_target} outcome"))
+            if not out:
+                out.append(("Calibrations ready", f"calibrate '{clean_target}' to 50th percentile", f":calibrate {clean_target} 50"))
+            return out[:max_results]
+
+        all_sugg = suggest_actions(tuner, rows, probes=probes, archive_size=archive_size)
+        cal_sugg = [s for s in all_sugg if s[0] in ("calibrate", "commit")]
+        if cal_sugg:
+            return cal_sugg[:max_results]
+        if probe_names:
+            out.append(("Calibrations ready", f"calibrate probe '{probe_names[0]}' threshold to observed median", f":calibrate {probe_names[0]} 50"))
+        for k in ("claimmap_alpha", "steer_cap_fraction"):
+            if tuner and hasattr(tuner, "triggers") and k in tuner.triggers:
+                out.append(("Calibrations ready", f"calibrate {k} from observed outcomes", f":calibrate {k} outcome"))
+        return out[:max_results]
+
+    # D. PROBE
+    if is_probe:
+        target = matched_probe or (probe_names[0] if probe_names else None)
+        if target:
+            out.append(("Probe management", f"inspect probe '{target}' baseline and recent readings", f":probe {target}"))
+            out.append(("Probe management", f"pre-load observations for '{target}' across archived turns", f":probe backfill {target}"))
+            out.append(("Probe management", f"re-center projection baseline for '{target}'", f":probe center {target}"))
+            out.append(("Probe management", f"expose '{target}' so model can observe its readings", f":probe expose {target}"))
+            out.append(("Probe management", f"ping model and explain activation for probe '{target}'", f":probe explain {target} ping"))
+            return out[:max_results]
+
+        if probe_names:
+            for p in probe_names[:3]:
+                out.append(("Probe management", f"inspect probe '{p}' baseline and status", f":probe {p}"))
+        else:
+            out.append(("Probe management", "initialize baseline awareness and standard probes", ":awake"))
+        out.append(("Probe management", "mint contrastive probe from positive and negative anchors", ":probe <name> <anchor_a> || <anchor_b>"))
+        return out[:max_results]
+
+    # E. TUNE
+    if is_tune:
+        target = matched_knob or (probe_names[0] if probe_names else None)
+        if target:
+            k = target
+            cur = float(tuner.get(k, 0.0)) if tuner else 0.0
+            out.append(("Tuner controls", f"explore new value for '{k}' (currently {cur:g})", f":tune {k} {_explore_value(k, cur)}"))
+            out.append(("Tuner controls", f"bind '{k}' dynamically to live stream mix", f":tune {k} dynamic +ambiguity-consensus 1.0"))
+            out.append(("Calibrations ready", f"calibrate '{k}' to best observed outcome", f":calibrate {k} outcome"))
+            return out[:max_results]
+
+        out.append(("Tuner controls", "inspect all tunable knobs, thresholds, and bindings", ":tune"))
+        out.append(("Tuner controls", "enable claimmap contrastive steering with safe alpha", ":tune claimmap_alpha 0.02"))
+        out.append(("Tuner controls", "tune memory-need threshold for state retrieval", ":tune memory_need 0.05"))
+        out.append(("Tuner controls", "bind knob dynamically to live streams", ":tune claimmap_alpha dynamic +ambiguity-consensus 1.0"))
+        return out[:max_results]
+
+    # F. MEMORY / CACHE / DOC / REMEMBER
+    if is_memory:
+        out.append(("Memory & context", "consolidate recent thoughts & trajectories via CEN/DMN", ":remember thoughts"))
+        out.append(("Memory & context", "record fact into memory & plastic synaptic weights", ":remember <fact or rule>"))
+        out.append(("Memory & context", "record fact and stage for immediate next turn", ":remember stage <context>"))
+        out.append(("Memory & context", "show recent DMN consolidated thought episodes", ":remember episodes"))
+        out.append(("Memory & context", "list recent remembered records", ":remember list"))
+        out.append(("Memory & context", "enable assistant action memory lane", ":memory act on"))
+        out.append(("Memory & context", "enable conversational speech memory lane", ":memory talk on"))
+        out.append(("Memory & context", "search and inject relevant episodic memories", ":memory act use <topic>"))
+        out.append(("Memory & context", "inspect cognitive cache memory slice summary", ":slice"))
+        out.append(("Memory & context", "enable session context carryover across turns", ":context on"))
+        out.append(("Memory & context", "read documentation into context buffer", ":doc docs/COMMANDS.md"))
+        return out[:max_results]
+
+    # G. CLEAN
+    if is_clean:
+        out.append(("Cleanup", "preview cleanup of pending turn retries", ":clean queue"))
+        out.append(("Cleanup", "preview cleanup of dynamic stream tuner bindings", ":clean bindings"))
+        out.append(("Cleanup", "preview cleanup of priority steer targets", ":clean priority"))
+        out.append(("Cleanup", "apply all safe non-destructive cleanup actions", ":clean all apply"))
+        return out[:max_results]
+
+    # H. DIRECT ENTITY MATCH (e.g. user typed ':suggest accuracy' or ':suggest probe:illeism')
+    if matched_probes:
+        for p in matched_probes:
+            is_disk = p in disk_probes and p not in probes
+            m_val = -0.3 if is_down else 1.0
+            if is_disk:
+                out.append(("Probe management", f"adopt stored probe '{p}' into active session", f":probe adopt {p}"))
+                out.append(("Probe management", f"inspect original definition and framings for '{p}'", f":probe {p} define"))
+                out.append(("Gravity / field mechanics", f"configure gravity mass for probe '{p}' ({m_val:g})", f":steer mass {p} {m_val:g}"))
+                out.append(("Probe management", f"inspect stored probe '{p}' vector and layers", f":probe {p}"))
+            else:
+                out.append(("Probe management", f"inspect original definition and framings for '{p}'", f":probe {p} define"))
+                out.append(("Probe management", f"generate model-perceived definition from measured behavior for '{p}'", f":probe {p} explain"))
+                out.append(("Probe management", f"inspect probe '{p}' baseline and live status", f":probe {p}"))
+                out.append(("Gravity / field mechanics", f"adjust probe '{p}' gravity mass ({'negative/down' if is_down else 'positive/up'})", f":steer mass {p} {m_val:g}"))
+                out.append(("Probe management", f"pre-load evidence for '{p}' from archive", f":probe backfill {p}"))
+                out.append(("Hooke band tethers", f"create a Hooke restoring tether for '{p}'", f":steer band {p}_pull pull {p} rest 0.4 give 0.2 strength 0.3"))
+                out.append(("Calibrations ready", f"calibrate '{p}' firing threshold to its own median", f":calibrate {p} 50"))
+                out.append(("Probe management", f"expose '{p}' to model view", f":probe expose {p}"))
+        return out[:max_results]
+
+    if matched_knob:
+        k = matched_knob
+        cur = float(tuner.get(k, 0.0)) if tuner else 0.0
+        out.append(("Tuner controls", f"explore new value for '{k}' (currently {cur:g})", f":tune {k} {_explore_value(k, cur)}"))
+        out.append(("Tuner controls", f"bind '{k}' to dynamic live stream mix", f":tune {k} dynamic +ambiguity-consensus 1.0"))
+        out.append(("Calibrations ready", f"calibrate '{k}' to outcome", f":calibrate {k} outcome"))
+        return out[:max_results]
+
+    # None indicates unparsed free-form goal for model completion
+    return None
+
+
+def ensure_cen_active(main_fn, probes=None, synaptic_engine=None, layer=16, layers=None):
+    """Ensure CentralExecutiveNetwork, DefaultModeNetwork, and ProbeExecutiveAdapter are active."""
+    try:
+        from invariants.central_executive import (
+            CentralExecutiveNetwork,
+            DefaultModeNetwork,
+            SharedSubstrateMemory,
+            ProbeExecutiveAdapter,
+        )
+    except Exception:
+        return None, None, None, None
+
+    if not hasattr(main_fn, "_cen_substrate") or getattr(main_fn, "_cen_substrate", None) is None:
+        main_fn._cen_substrate = SharedSubstrateMemory(buffer_size=1000)
+        main_fn._cen_network = CentralExecutiveNetwork(substrate=main_fn._cen_substrate, gamma=0.08)
+        main_fn._dmn_network = DefaultModeNetwork(
+            substrate=main_fn._cen_substrate,
+            consolidation_window=4,
+            synaptic_engine=synaptic_engine,
+        )
+        main_fn._dmn_network.start()
+    elif synaptic_engine is not None and getattr(main_fn, "_dmn_network", None) is not None:
+        if getattr(main_fn._dmn_network, "synaptic_engine", None) is None:
+            main_fn._dmn_network.synaptic_engine = synaptic_engine
+
+    active_probes = dict(probes or {})
+    if not active_probes:
+        inv_dir = os.path.join(ROOT, "invariants")
+        for fname in ("ambiguity", "disagreement", "validated_flow", "warranted_confidence", "urgency", "time_awareness"):
+            pt_path = os.path.join(inv_dir, f"{fname}_vector.pt")
+            if os.path.isfile(pt_path):
+                try:
+                    active_probes[fname] = torch.load(pt_path, map_location="cpu")
+                except Exception:
+                    pass
+
+    target_layers = layers if layers is not None else [12, 14, 16, 18, 20]
+
+    if active_probes and (not hasattr(main_fn, "_cen_adapter") or getattr(main_fn, "_cen_adapter", None) is None):
+        try:
+            main_fn._cen_adapter = ProbeExecutiveAdapter(
+                cen=main_fn._cen_network,
+                probes=active_probes,
+                layer=layer,
+                layers=target_layers,
+            )
+        except Exception:
+            main_fn._cen_adapter = None
+    elif active_probes and getattr(main_fn, "_cen_adapter", None) is not None:
+        adp = main_fn._cen_adapter
+        for name, p in active_probes.items():
+            if name not in adp.layer_probe_vectors:
+                adp.layer_probe_vectors[name] = {}
+                if isinstance(p, dict):
+                    for l in adp.layers:
+                        vec = p.get(l)
+                        if vec is not None and hasattr(vec, "squeeze"):
+                            vec = vec.squeeze().float()
+                            norm = float(vec.norm())
+                            if norm > 1e-8:
+                                adp.layer_probe_vectors[name][l] = vec / norm
+                elif p is not None and hasattr(p, "squeeze"):
+                    vec = p.squeeze().float()
+                    norm = float(vec.norm())
+                    if norm > 1e-8:
+                        unit_v = vec / norm
+                        for l in adp.layers:
+                            adp.layer_probe_vectors[name][l] = unit_v
+            if name not in adp.probe_names and adp.mode != "disaggregated":
+                adp.probe_names.append(name)
+
+    return (
+        getattr(main_fn, "_cen_substrate", None),
+        getattr(main_fn, "_cen_network", None),
+        getattr(main_fn, "_dmn_network", None),
+        getattr(main_fn, "_cen_adapter", None),
+    )
+
+
+def handle_remember_command(
+    tail: str,
+    memory: Any,
+    model: Optional[Any] = None,
+    cen_substrate: Optional[Any] = None,
+    cen_network: Optional[Any] = None,
+    dmn_network: Optional[Any] = None,
+    cen_adapter: Optional[Any] = None,
+    synaptic_engine: Optional[Any] = None,
+    stage_callback: Optional[Callable[[str], None]] = None,
+    config: Optional[Any] = None,
+) -> Tuple[bool, Optional[Any], str]:
+    """Execute the :remember command across episodic memory, CEN/DMN, and synaptic engine.
+
+    Supports:
+      - :remember [thoughts|turn|last]  -> consolidate recent thought trajectory from CEN/DMN
+      - :remember <text>                -> record explicit fact/thought into memory & compile weights
+      - :remember stage <text>          -> record and stage for next turn
+      - :remember list [n] / episodes   -> list recent remembered records and consolidated episodes
+      - :remember search <query>        -> search remembered records
+    """
+    raw_tail = (tail or "").strip()
+    norm = raw_tail.lower()
+
+    if norm == 'neural' or norm.startswith('neural '):
+        from invariants.activation_memory import activation_memory_command
+        try:
+            message = activation_memory_command(raw_tail[len('neural'):].strip(), synaptic_engine, config)
+            return True, None, message
+        except (ValueError, KeyError) as exc:
+            return False, None, f'[Neural memory] {exc}'
+
+    # 1. Help
+    if norm in ("help", "-h", "--help"):
+        help_msg = (
+            Fore.CYAN + "[Remember] Usage:\n"
+            "  :remember [thoughts]     - Consolidate model's recent thoughts and friction trajectory via CEN/DMN\n"
+            "  :remember <text>         - Store fact in memory & compile into plastic synaptic weights (zero prompt injection)\n"
+            "  :remember stage <text>   - Store fact and stage immediately for the next model turn\n"
+            "  :remember list [n]       - Show recent remembered records (default 5)\n"
+            "  :remember episodes [n]   - Show DMN consolidated thought episodes\n"
+            "  :remember search <query> - Search remembered records" + Style.RESET_ALL
+            + "\n  :remember neural        - Inspect/control activation associations and individual strengths"
+        )
+        return True, None, help_msg
+
+    # 2. List / Recent / Episodes
+    if norm.startswith("list") or norm.startswith("recent") or norm.startswith("episodes"):
+        parts = raw_tail.split()
+        n = 5
+        if len(parts) > 1 and parts[1].isdigit():
+            n = int(parts[1])
+
+        lines = []
+        if norm.startswith("episodes"):
+            eps = getattr(cen_substrate, "consolidated_repository", []) if cen_substrate else []
+            if not eps:
+                lines.append(Fore.YELLOW + "[Remember] No consolidated thought episodes in DMN yet. Generate turns or run ':remember thoughts'." + Style.RESET_ALL)
+            else:
+                lines.append(Fore.CYAN + f"[Remember] Last {min(n, len(eps))} consolidated thought episode(s):" + Style.RESET_ALL)
+                for ep in eps[-n:]:
+                    zc = Fore.RED if ep.get("state_zone") == "high_friction_boundary" else Fore.GREEN
+                    lines.append(
+                        Fore.CYAN + f"  {ep.get('episode_id', 'EP')} | Steps {ep.get('start_step')}..{ep.get('end_step')} | "
+                        + zc + f"Zone: {ep.get('state_zone')} " + Fore.CYAN
+                        + f"| Mean Friction: {ep.get('mean_friction', 0.0):.5f} | Coherence: {ep.get('trajectory_coherence', 0.0):+.3f}"
+                        + Style.RESET_ALL
+                    )
+        else:
+            recs = [r for r in getattr(memory, "records", []) if "remember" in (getattr(r, "tags", []) or []) or getattr(r, "kind", "") in ("fact", "thought_episode")]
+            if not recs:
+                lines.append(Fore.YELLOW + "[Remember] No remembered records found yet. Use ':remember <text>' or ':remember thoughts'." + Style.RESET_ALL)
+            else:
+                lines.append(Fore.CYAN + f"[Remember] Last {min(n, len(recs))} remembered record(s):" + Style.RESET_ALL)
+                for r in recs[-n:]:
+                    prev = (getattr(r, "text", "") or "")[:80].replace("\n", " ")
+                    lines.append(Fore.CYAN + f"  [{r.kind}] {r.record_id[:8]} | {prev}..." + Style.RESET_ALL)
+        return True, None, "\n".join(lines)
+
+    # 3. Search
+    if norm.startswith("search ") or norm == "search":
+        query = raw_tail[len("search"):].strip()
+        if not query:
+            return False, None, Fore.YELLOW + "Usage: :remember search <query>" + Style.RESET_ALL
+        if hasattr(memory, "search"):
+            recs = memory.search(query, max_records=10)
+        else:
+            recs = [r for r in getattr(memory, "records", []) if query.lower() in (getattr(r, "text", "") or "").lower()]
+        if not recs:
+            return True, None, Fore.YELLOW + f"[Remember] No memory records matching '{query}'." + Style.RESET_ALL
+        lines = [Fore.CYAN + f"[Remember] Records matching '{query}' ({len(recs)}):" + Style.RESET_ALL]
+        for r in recs:
+            prev = (getattr(r, "text", "") or "")[:80].replace("\n", " ")
+            lines.append(Fore.CYAN + f"  [{r.kind}] {r.record_id[:8]} | {prev}..." + Style.RESET_ALL)
+        return True, None, "\n".join(lines)
+
+    # 4. Remember Thoughts / Trajectories via CEN
+    is_thought_req = norm in ("", "thoughts", "thought", "turn", "last", "cen", "dmn")
+    if is_thought_req:
+        episode = None
+        # Drain any snapshots from substrate into DMN buffer
+        if cen_substrate is not None and dmn_network is not None:
+            while not cen_substrate.activation_buffer.empty():
+                try:
+                    s = cen_substrate.activation_buffer.get_nowait()
+                    dmn_network.window_buffer.append(s)
+                except Exception:
+                    break
+
+        if dmn_network is not None and getattr(dmn_network, "window_buffer", None):
+            snaps = list(dmn_network.window_buffer)
+            episode = dmn_network.consolidate_window(snaps, inflection_trigger=True)
+            dmn_network.window_buffer.clear()
+        elif cen_substrate is not None and getattr(cen_substrate, "consolidated_repository", None):
+            episode = cen_substrate.consolidated_repository[-1]
+
+        if episode:
+            tok_str = " ".join(episode.get("tokens", []))
+            rec_text = (
+                f"Consolidated thoughts ({episode.get('episode_id', 'EP')}): {tok_str} | "
+                f"friction={episode.get('mean_friction', 0.0):.4f} | coherence={episode.get('trajectory_coherence', 0.0):+.3f}"
+            )
+            from invariants.memory_engine import MemoryRecord
+            record = memory.append(
+                MemoryRecord(
+                    kind="thought_episode",
+                    scope=getattr(memory, "scope", "interactive_phenomenality"),
+                    role="model",
+                    text=rec_text,
+                    tags=["remember", "thought_episode", "cen_dmn", episode.get("state_zone", "viscous_flow")],
+                    provenance=episode,
+                )
+            )
+            if synaptic_engine is not None and hasattr(synaptic_engine, "save_synaptic_weights"):
+                try:
+                    synaptic_engine.save_synaptic_weights()
+                except Exception:
+                    pass
+
+            msg = (
+                Fore.GREEN + f"[Remember] Consolidated thoughts via CEN into {episode.get('episode_id', 'EP')} (id={record.record_id[:8]}):\n"
+                + Fore.CYAN + f"  Tokens: {tok_str or '(latent activations)'}\n"
+                + f"  Dynamic Friction: {episode.get('mean_friction', 0.0):.6f} (max={episode.get('max_friction', 0.0):.6f})\n"
+                + f"  Trajectory Coherence: {episode.get('trajectory_coherence', 0.0):+.3f} | Zone: {episode.get('state_zone')}\n"
+                + Fore.GREEN + "  Persisted to episodic memory log and plastic synaptic weights (synaptic_weights.pt)." + Style.RESET_ALL
+            )
+            return True, record, msg
+        else:
+            return True, None, Fore.YELLOW + "[Remember] No active thought snapshots in CEN buffer yet. Type a turn to generate thoughts, or provide text: ':remember <text>'." + Style.RESET_ALL
+
+    # 5. Remember Explicit Fact / Text
+    stage_flag = False
+    text = raw_tail
+    if norm.startswith("stage "):
+        stage_flag = True
+        text = raw_tail[len("stage "):].strip()
+
+    if not text:
+        return False, None, Fore.YELLOW + "Usage: :remember <text to remember>" + Style.RESET_ALL
+
+    # Step CEN if adapter & model available
+    cen_snap = None
+    if cen_adapter is not None and model is not None:
+        try:
+            from invariants.engine import _inputs as _rem_inputs, _hidden_states as _rem_hs
+            ids = _rem_inputs(model, text[:512])
+            hs = _rem_hs(model, ids["input_ids"], ids.get("attention_mask"))
+            cen_snap = cen_adapter.step_with_activation(
+                hs,
+                token_string=text[:25],
+                extra_metadata={"source": "remember_command", "text": text[:200]},
+            )
+        except Exception:
+            pass
+
+    # Record in MemoryEngine
+    from invariants.memory_engine import MemoryRecord
+    prov = {"source": "operator_command", "command": ":remember", "staged": stage_flag}
+    if cen_snap is not None:
+        prov["cen_step"] = cen_snap.step
+        prov["friction"] = float(cen_snap.friction_gradient)
+        prov["derivative"] = float(cen_snap.derivative_magnitude)
+
+    record = memory.append(
+        MemoryRecord(
+            kind="fact",
+            scope=getattr(memory, "scope", "interactive_phenomenality"),
+            role="operator",
+            text=text,
+            tags=["remember", "fact", "operator_injected"],
+            provenance=prov,
+        )
+    )
+
+    # Plastic synaptic integration
+    syn_traces = []
+    if synaptic_engine is not None and getattr(synaptic_engine, "hooks", None):
+        try:
+            syn_traces = synaptic_engine.integrate_text_memory(
+                text,
+                learning_rate=0.04,
+                metadata={"source": "remember_command", "record_id": record.record_id},
+            )
+            if syn_traces:
+                synaptic_engine.save_synaptic_weights()
+        except Exception:
+            pass
+
+    # Stage callback if requested
+    if stage_flag and stage_callback is not None:
+        try:
+            stage_callback(memory.format_tool_result([record]))
+        except Exception:
+            pass
+
+    lines = [
+        Fore.GREEN + f"[Remember] Stored in episodic memory (id={record.record_id[:8]}):" + Style.RESET_ALL,
+        Fore.CYAN + f"  \"{text}\"" + Style.RESET_ALL,
+    ]
+    if cen_snap is not None:
+        lines.append(
+            Fore.CYAN + f"  [CEN] Trajectory step {cen_snap.step}: dynamic friction={cen_snap.friction_gradient:.6f} (|d|={cen_snap.derivative_magnitude:.4f})" + Style.RESET_ALL
+        )
+    if syn_traces:
+        lines.append(
+            Fore.GREEN + f"  [Synaptic] Integrated {len(syn_traces)} plastic traces on layers {list(synaptic_engine.hooks.keys())} (synaptic_weights.pt saved)." + Style.RESET_ALL
+        )
+    if stage_flag:
+        lines.append(Fore.YELLOW + "  [Stage] Staged for immediate inclusion in next model turn." + Style.RESET_ALL)
+
+    return True, record, "\n".join(lines)
+
+
+
 def strip_band_suffix(text):
     """Pop a trailing 'band <lo> <hi>' (inclusive layer indices) off a probe
     argument string: the explicit reading depth for adopt/compose/mint.
@@ -7296,6 +10549,14 @@ def _sync_steer_tunables(tuner, config):
     config.max_loops = max(
         0, int(_sane_fraction(tuner.get("routing_loops", config.max_loops), config.max_loops))
     )
+    config.routing_depth = max(
+        0, int(_sane_fraction(tuner.get("routing_depth", getattr(config, "routing_depth", 1)),
+                              getattr(config, "routing_depth", 1)))
+    )
+    config.routing_layer_span = max(
+        0, int(_sane_fraction(tuner.get("routing_layer_span", getattr(config, "routing_layer_span", 0)),
+                              getattr(config, "routing_layer_span", 0)))
+    )
     config.entropy_threshold = _sane_fraction(
         tuner.get("routing_entropy", config.entropy_threshold), config.entropy_threshold
     )
@@ -7314,6 +10575,9 @@ def _sync_steer_tunables(tuner, config):
     config.routing_probe_weight = _sane_fraction(
         tuner.get("routing_probe_weight", getattr(config, "routing_probe_weight", 1.0)),
         getattr(config, "routing_probe_weight", 1.0),
+    )
+    config.repetition_penalty = float(
+        tuner.get("repetition_penalty", getattr(config, "repetition_penalty", 1.05)) or 1.05
     )
     config.max_synthesis_events = max(
         0, int(_sane_fraction(tuner.get("synthesis_events", config.max_synthesis_events), config.max_synthesis_events))
@@ -7362,6 +10626,264 @@ def get_hardware_appropriate_model():
     else:
         return "Qwen/Qwen2.5-1.5B-Instruct"
 
+@contextmanager
+def suspend_owned_investigation_memory_hooks(model):
+    """Temporarily withhold known synaptic hooks without detaching their banks."""
+    from invariants.synaptic_memory import SynapticMemoryEngine, _ACTIVE_ENGINE
+    owner = _ACTIVE_ENGINE.get() or SynapticMemoryEngine._INSTANCE
+    if owner is not None and not (owner.model is model or
+            getattr(owner.model, 'model', owner.model) is getattr(model, 'model', model)):
+        owner = None
+    saved = {}
+    try:
+        for hook in (owner.hooks.values() if owner is not None else []):
+            module, handle = hook.module, hook.hook_handle
+            if handle is not None and handle.id in module._forward_hooks:
+                saved.setdefault(module, list(module._forward_hooks.items()))
+                module._forward_hooks.pop(handle.id)
+        if saved:
+            print(f'[Investigation] Temporarily withheld owned synaptic hooks on {len(saved)} modules.', flush=True)
+        yield
+    finally:
+        for module, hooks in saved.items():
+            module._forward_hooks.clear()
+            module._forward_hooks.update(hooks)
+
+
+def handle_replay_investigation_command(args, controller, probes, model, memory):
+    """Run operator experiments outside conversation history and live evidence."""
+    from invariants.replay_investigation import model_identity, run_investigation, select_archive_cases
+    action, *tokens = args
+    if action == 'import':
+        if len(tokens) != 1:
+            raise ValueError('Usage: :relate indirect import <summary.json or run directory>')
+        path = Path(tokens[0])
+        if path.is_dir():
+            path = path / 'summary.json'
+        return controller.import_investigation(path, probes, model_identity=model_identity(model))
+    if action != 'investigate':
+        raise ValueError('Expected investigate or import')
+    options = dict(limit=4, helpers=3, tokens=64, alpha=.25, cap=.02,
+                   seed=0, context=8, resume=True, random=True)
+    output, layers = None, None
+    while tokens:
+        key = tokens.pop(0)
+        if key == 'layers':
+            if len(tokens) < 2:
+                raise ValueError('layers requires inclusive FIRST LAST indices')
+            first, last = int(tokens.pop(0)), int(tokens.pop(0))
+            if first > last:
+                raise ValueError('layers FIRST must be no greater than LAST')
+            layers = list(range(first, last + 1))
+            continue
+        if key not in {*options, 'output'} or not tokens:
+            raise ValueError('Options: limit N helpers N tokens N alpha N cap N layers FIRST LAST seed N context N output PATH resume on|off random on|off')
+        value = tokens.pop(0)
+        if key == 'output':
+            output = Path(value)
+        elif key in {'resume', 'random'}:
+            if value not in {'on', 'off'}:
+                raise ValueError(f'{key} requires on or off')
+            options[key] = value == 'on'
+        else:
+            options[key] = float(value) if key in {'alpha', 'cap'} else int(value)
+    routes = {name: route for name, route in controller.routes.items() if route.get('enabled', True)}
+    if not routes:
+        raise ValueError('Configure indirect maximize/minimize objectives before investigating')
+    controls = None
+    if all(route['controls'] is not None for route in routes.values()):
+        signed, extras = {}, {}
+        for route in routes.values():
+            for helper in route['controls']:
+                name, sign = helper['name'], helper.get('sign')
+                signed[name] = sign if name not in signed else (sign if signed[name] == sign else None)
+                meta = extras.setdefault(name, {})
+                if helper.get('prior_weight') is not None and 'prior_weight' not in meta:
+                    meta['prior_weight'] = helper['prior_weight']
+                if helper.get('layer_weights') and 'layer_weights' not in meta:
+                    meta['layer_weights'] = dict(helper['layer_weights'])
+        controls = [{'name': name, 'sign': sign, **extras.get(name, {})} for name, sign in signed.items()]
+    cases = select_archive_cases(memory.records, limit=options['limit'],
+                                 context_turns=options['context'], scope=memory.scope)
+    if output is None:
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+        output = Path(ROOT) / 'invariants' / 'out' / 'replay_investigation' / stamp
+    specifications = {name: dict(payload, role=controller.roles.get(name, 'unclassified'))
+                      for name, payload in probes.items()}
+    with suspend_owned_investigation_memory_hooks(model):
+        summary = run_investigation(model, specifications,
+            {name: route['direction'] for name, route in routes.items()}, controls=controls,
+            cases=cases, output_dir=output, alpha=options['alpha'], cap_fraction=options['cap'],
+            layers=layers, seed=options['seed'], max_new_tokens=options['tokens'],
+            max_helpers=options['helpers'], random_control=options['random'], resume=options['resume'],
+            progress=lambda message: print(f'[Replay] {message}', flush=True))
+    imported = controller.import_investigation(summary, probes, model_identity=model_identity(model))
+    return {'source': summary['source'], 'output': str(output.resolve()),
+            'completed_trials': summary['completed_trials'], 'expected_trials': summary['expected_trials'],
+            'effects': summary['effects'], 'import': imported}
+
+
+def handle_continuation_investigation_command(args, controller, probes, model, memory, *, include_history=True):
+    """Commit an adaptively selected answer; keep all discarded branches private."""
+    from invariants.continuation_investigation import (
+        ALLOWED_CONTINUATION_DISTRIBUTIONS, run_continuation_investigation)
+    from invariants.replay_investigation import _get
+    tokens = list(args)
+    if tokens and tokens[0] == 'continue':
+        tokens.pop(0)
+    if '--' not in tokens:
+        raise ValueError('Usage: :relate indirect continue [tokens N stride N horizon N helpers N] -- <prompt>')
+    split = tokens.index('--')
+    prompt = ' '.join(tokens[split + 1:]).strip()
+    tokens = tokens[:split]
+    if not prompt:
+        raise ValueError('Supply a prompt after --')
+    options = dict(tokens=64, stride=8, horizon=12, helpers=2, joint=2, candidates=33, mix=4, alpha=.25, cap=.02,
+                   seed=0, context=8, decisions=None, candidate_tokens=None,
+                   distribution=None, temperature=None, novel=None, layer_tilt=None)
+    output, layers = None, None
+    while tokens:
+        key = tokens.pop(0)
+        if key == 'layers':
+            if len(tokens) < 2:
+                raise ValueError('layers requires FIRST LAST')
+            first, last = int(tokens.pop(0)), int(tokens.pop(0))
+            if first > last:
+                raise ValueError('layers FIRST must be no greater than LAST')
+            layers = list(range(first, last + 1))
+            continue
+        if key not in {*options, 'output'} or not tokens:
+            raise ValueError('Options: tokens N stride N horizon N helpers N joint N candidates N mix N distribution MODE temperature N novel on|off layer_tilt N alpha N cap N layers FIRST LAST seed N context N decisions N candidate_tokens N output PATH')
+        value = tokens.pop(0)
+        if key == 'output':
+            output = Path(value)
+        elif key == 'distribution':
+            val_str = str(value).strip().lower()
+            if val_str not in ALLOWED_CONTINUATION_DISTRIBUTIONS:
+                raise ValueError(f'distribution must be one of {", ".join(ALLOWED_CONTINUATION_DISTRIBUTIONS)}')
+            options[key] = val_str
+        elif key == 'novel':
+            val_str = str(value).strip().lower()
+            if val_str not in {'on', 'off', 'true', 'false', '1', '0'}:
+                raise ValueError('novel requires on or off')
+            options[key] = val_str in {'on', 'true', '1'}
+        elif key == 'layer_tilt':
+            val_str = str(value).strip().lower()
+            if val_str in {'on', 'off'}:
+                options[key] = 0.35 if val_str == 'on' else 0.0
+            else:
+                options[key] = float(value)
+        else:
+            options[key] = float(value) if key in {'alpha', 'cap', 'temperature'} else int(value)
+    if options['context'] < 1:
+        raise ValueError('context must be positive')
+    routes = {name: route for name, route in controller.routes.items() if route.get('enabled', True)}
+    if not routes:
+        raise ValueError('Configure indirect objectives before continuing')
+    if any(route.get('when') for route in routes.values()):
+        raise ValueError('Continuation investigation currently requires unguarded objectives; conditional route execution is not supported here')
+    controls = None
+    if all(route['controls'] is not None for route in routes.values()):
+        signed, extras = {}, {}
+        for route in routes.values():
+            for helper in route['controls']:
+                name, sign = helper['name'], helper.get('sign')
+                signed[name] = sign if name not in signed else (sign if sign == signed[name] else None)
+                meta = extras.setdefault(name, {})
+                if helper.get('prior_weight') is not None and 'prior_weight' not in meta:
+                    meta['prior_weight'] = helper['prior_weight']
+                if helper.get('layer_weights') and 'layer_weights' not in meta:
+                    meta['layer_weights'] = dict(helper['layer_weights'])
+        controls = [{'name': name, 'sign': sign, **extras.get(name, {})} for name, sign in signed.items()]
+    history = [record for record in memory.records
+               if _get(record, 'scope') == memory.scope
+               and _get(record, 'session_id') == memory.session_id
+               and _get(record, 'kind') == 'turn'
+               and _get(record, 'role') in {'system', 'user', 'assistant'}
+               and isinstance(_get(record, 'text'), str) and _get(record, 'text').strip()]
+    excerpt = history[-options['context']:] if include_history else []
+    while excerpt and _get(excerpt[0], 'role') == 'assistant':
+        excerpt.pop(0)
+    messages = [{'role': _get(record, 'role'), 'content': _get(record, 'text')} for record in excerpt]
+    messages.append({'role': 'user', 'content': prompt})
+    if output is None:
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+        output = Path(ROOT) / 'invariants' / 'out' / 'continuation_investigation' / stamp
+    specs = {name: dict(payload, role=controller.roles.get(name, 'unclassified'))
+             for name, payload in probes.items()}
+    extra_kwargs = {}
+    if options['distribution'] is not None:
+        extra_kwargs['distribution'] = options['distribution']
+    if options['temperature'] is not None:
+        extra_kwargs['temperature'] = options['temperature']
+    if options['novel'] is not None:
+        extra_kwargs['compose_novel'] = options['novel']
+    if options['layer_tilt'] is not None:
+        extra_kwargs['layer_tilt'] = options['layer_tilt']
+    with suspend_owned_investigation_memory_hooks(model):
+        result = run_continuation_investigation(model, specs,
+            {name: route['direction'] for name, route in routes.items()}, controls=controls,
+            prompt_messages=messages, output_dir=output, max_new_tokens=options['tokens'],
+            stride=options['stride'], horizon=options['horizon'], max_helpers=options['helpers'],
+            max_joint_helpers=options['joint'], max_candidates=options['candidates'],
+            mixture_resolution=options['mix'],
+            alpha=options['alpha'], cap_fraction=options['cap'], layers=layers, seed=options['seed'],
+            max_decisions=options['decisions'], candidate_token_budget=options['candidate_tokens'],
+            progress=lambda message: print(f'[Continuation] {message}', flush=True),
+            **extra_kwargs)
+    provenance = {'source': result['source'], 'artifact_path': str(output.resolve()),
+                  'fingerprint': result['fingerprint']}
+    for role, text in (('user', prompt), ('assistant', result['response'])):
+        memory.append_turn(role, text, tags=['indirect_continuation'], provenance=provenance)
+    return result
+
+
+def handle_continuation_mode_command(args, controller, probes, model):
+    """Configure one controller owner's multi-turn branching session."""
+    from invariants.continuation_mode import ContinuationMode
+    tokens = list(args)
+    if tokens and tokens[0] == 'continue':
+        tokens.pop(0)
+    if tokens and tokens[0] == 'on':
+        routes = {name: route for name, route in controller.routes.items() if route.get('enabled', True)}
+        if not routes:
+            raise ValueError('Configure indirect objectives before enabling continuation mode')
+        if any(route.get('when') for route in routes.values()):
+            raise ValueError('Continuation mode currently requires unguarded objectives')
+        if any(name not in probes for name in routes):
+            raise ValueError('Every active objective must name an available probe')
+    mode = getattr(controller, '_continuation_mode', None)
+    if mode is None:
+        staged = ContinuationMode()
+        status = staged.configure(tokens, n_layers=model.n_layers)
+        controller._continuation_mode = staged
+        return status
+    return mode.configure(tokens, n_layers=model.n_layers)
+
+
+def run_enabled_continuation_turn(user_input, controller, probes, model, memory, *,
+        reading_turn=False, utility_turn=False, session_context=None,
+        active_u_name='user', active_assistant='assistant', history_enabled=True):
+    """Route ordinary turns through an enabled owner's selected-only generator."""
+    mode = getattr(controller, '_continuation_mode', None)
+    if (mode is None or not mode.enabled or reading_turn or utility_turn
+            or not user_input.strip() or user_input.lstrip().startswith((':', '@'))):
+        return None
+    try:
+        result = handle_continuation_investigation_command(
+            mode.arguments(user_input), controller, probes, model, memory,
+            include_history=history_enabled)
+    except Exception as exc:
+        mode.record_failure(exc)
+        raise
+    mode.record_result(result)
+    if session_context is not None:
+        session_context.append(('user', active_u_name, user_input, 0.0))
+        session_context.append(('assistant', active_assistant, result['response'], 0.0))
+        del session_context[:-MAX_SESSION_TURNS * 2]
+    return result
+
+
 def main():
     global _last_completion, _pending_expect, _shell_vars
     os.chdir(ROOT)
@@ -7382,6 +10904,21 @@ def main():
 
     print(Fore.YELLOW + f"[System] Loading {model_name}..." + Style.RESET_ALL)
     model = load_model(model_name, local_files_only=is_default)
+
+    synaptic_engine = None
+    try:
+        from invariants.synaptic_memory import SynapticMemoryEngine
+        synaptic_engine = SynapticMemoryEngine.get_instance(model)
+        loaded = synaptic_engine.load_synaptic_weights()
+        if synaptic_engine and synaptic_engine.hooks:
+            print(
+                Fore.GREEN
+                + f"[Synaptic] Attached plastic weight hooks to reasoning layers: {list(synaptic_engine.hooks.keys())} (zero prompt injection)."
+                + (f" Loaded persisted synaptic weights." if loaded else "")
+                + Style.RESET_ALL
+            )
+    except Exception as _syn_err:
+        print(Fore.YELLOW + f"[Synaptic] Weight integration disabled: {_syn_err}" + Style.RESET_ALL)
 
     config = AgenticConfig()
     organic_path = os.path.join(ROOT, "invariants", f"organic_correction_vector_d{model.d_model}.pt")
@@ -7423,9 +10960,14 @@ def main():
     config.interactive_disambiguation = False
 
     memory = MemoryEngine(scope="interactive_phenomenality")
+    from invariants.conversation_shift import ConversationShiftTracker
+    shift_tracker = ConversationShiftTracker()
+    memory.attach_shift_tracker(shift_tracker)
     self_concept = SelfConceptController()
     steer_map = SteerMapStore()
     tuner = TriggerTuner()
+    from invariants.hebbian_plasticity import PlasticityOwners, handle_plasticity_command
+    plasticity_owners = PlasticityOwners()
     # Every trigger is born tunable. Persisted values win over these defaults.
     tuner.register("claimmap_tension", 0.18, kind="threshold", comparator=">=")
     # Steering is OFF by default (0). The raw A-B delta is large; any nonzero
@@ -7492,11 +11034,14 @@ def main():
     # reply. Budgets, not truths -- live-tunable like every other number here.
     tuner.register("routing_events", config.max_routing_events, kind="coefficient")
     tuner.register("routing_loops", config.max_loops, kind="coefficient")
+    tuner.register("routing_depth", config.routing_depth, kind="coefficient")
+    tuner.register("routing_layer_span", config.routing_layer_span, kind="coefficient")
     tuner.register("routing_entropy", config.entropy_threshold, kind="coefficient")
     tuner.register("routing_entropy_weight", getattr(config, "routing_entropy_weight", 1.0), kind="coefficient")
     tuner.register("routing_collapse_margin", getattr(config, "routing_collapse_margin", 0.75), kind="coefficient")
     tuner.register("routing_collapse_penalty", getattr(config, "routing_collapse_penalty", 1.25), kind="coefficient")
     tuner.register("routing_probe_weight", getattr(config, "routing_probe_weight", 1.0), kind="coefficient")
+    tuner.register("repetition_penalty", getattr(config, "repetition_penalty", 1.05), kind="coefficient")
     # Proven-expert routing: how hard the ToT winner is nudged toward experts
     # with a good accrued route success rate. 0 = pure entropy (default);
     # earn it from outcomes (:calibrate expert_proof_weight outcome).
@@ -7524,6 +11069,26 @@ def main():
     # concept, a harmful one pushes away). 0 = off; idle until those probes accrue
     # credited lift. :tune exposed_probe_alpha <small>, or :calibrate from outcomes.
     tuner.register("exposed_probe_alpha", 0.0, kind="coefficient")
+    tuner.register("probe_alpha", 0.0, kind="coefficient")
+    tuner.register("probe_text_inject", 0.0, kind="coefficient")
+    from invariants.probe_definition_task import DEFINITION_TASK_GAINS
+    for definition_axis, definition_gain in DEFINITION_TASK_GAINS.items():
+        tuner.register("probe_define_" + definition_axis, definition_gain, kind="coefficient")
+    tuner.register("probe_define_subtract", 0.0, kind="coefficient")
+    from invariants.probe_activation_explain import EXPLAIN_GAINS
+    for explain_axis, explain_gain in EXPLAIN_GAINS.items():
+        tuner.register("probe_explain_" + explain_axis, explain_gain, kind="coefficient")
+    tuner.register("probe_explain_map", 0.0, kind="coefficient")
+    tuner.register("probe_explain_map_tokens", 24.0, kind="coefficient")
+    tuner.register("probe_explain_logits_epsilon", 0.01, kind="coefficient")
+    from invariants.probe_definition_steps import STEP_GAINS
+    tuner.register("probe_define_process", 1.0, kind="coefficient")
+    for definition_step, step_gain in STEP_GAINS.items():
+        tuner.register("probe_define_step_" + definition_step, step_gain, kind="coefficient")
+    from invariants.probe_definition_schema import SCHEMA_GAINS
+    tuner.register("probe_define_schema_prefill", 1.0, kind="coefficient")
+    for definition_part, part_gain in SCHEMA_GAINS.items():
+        tuner.register("probe_define_schema_" + definition_part, part_gain, kind="coefficient")
     # Synthesis schedule, same shape: events per reply, optimizer steps per
     # event, and the plateau-velocity trigger that starts one.
     tuner.register("synthesis_events", config.max_synthesis_events, kind="coefficient")
@@ -7549,6 +11114,66 @@ def main():
     tuner.register("intent_settling", 0.0, kind="threshold", comparator=">=")
     # EOT Urgency: Tracks the model's internal probability of finishing its turn.
     tuner.register("eot_urgency", 0.05, kind="threshold", comparator="<=")
+    # Lookahead Trajectory degree scale knobs (anisotropic, uneven certainty)
+    tuner.register("degree_scale_diff", 1.0, kind="coefficient")
+    tuner.register("degree_scale_horizon", 1.0, kind="coefficient")
+    tuner.register("degree_scale_distance", 2.0, kind="coefficient")
+    tuner.register("degree_scale_direction", 1.0, kind="coefficient")
+    tuner.register("degree_scale_logits", 1.0, kind="coefficient")
+    tuner.register("lookahead_alpha", 0.0, kind="coefficient")
+    tuner.register("lookahead_max_k", 5, kind="coefficient")
+    tuner.register("lookahead_alpha_self", 0.15, kind="coefficient")
+    tuner.register("lookahead_alpha_ext", 0.10, kind="coefficient")
+    tuner.register("lookahead_claimmap_weight", 0.50, kind="coefficient")
+    tuner.register("lookahead_default_k", 5, kind="coefficient")
+    # Startup macro execution control
+    tuner.register("startup_enabled", 1.0, kind="coefficient")
+    tuner.register("memory_shift_gate", 0.85, kind="coefficient")
+
+    from invariants.lookahead_predictor import LookaheadApparatus
+    _la_d_model = getattr(model, "d_model", getattr(getattr(model, "config", None), "hidden_size", 4096))
+    _la_embed_mat = None
+    if hasattr(model, "get_input_embeddings"):
+        _la_embed_mat = model.get_input_embeddings().weight.detach()
+    elif hasattr(getattr(model, "model", None), "get_input_embeddings"):
+        _la_embed_mat = model.model.get_input_embeddings().weight.detach()
+    lookahead_apparatus = LookaheadApparatus(
+        d_model=int(_la_embed_mat.shape[1]) if _la_embed_mat is not None else _la_d_model,
+        hidden_dim=512,
+        tuner=tuner,
+        embedding_matrix=_la_embed_mat,
+        device=str(_la_embed_mat.device if _la_embed_mat is not None else getattr(model, "device", "cpu")),
+    )
+    # Keep learned forecasts across launches, isolated by model identity and width.
+    import hashlib
+    _la_model_name = str(getattr(getattr(model.model, "config", None), "_name_or_path", "local"))
+    _la_key = hashlib.sha256(f"{_la_model_name}:{lookahead_apparatus.d_model}:512".encode()).hexdigest()[:16]
+    _la_checkpoint = Path(__file__).resolve().parent.parent / "invariants" / "out" / f"lookahead_{_la_key}.pt"
+    if _la_checkpoint.exists():
+        try:
+            lookahead_apparatus.load_checkpoint(_la_checkpoint)
+            print(f"[Lookahead] Restored {lookahead_apparatus.learning_updates} evidence observations.")
+        except Exception as exc:
+            print(f"[Lookahead] Could not restore checkpoint: {exc}")
+
+    def _save_lookahead():
+        if lookahead_apparatus.learning_updates:
+            try:
+                lookahead_apparatus.save_checkpoint(_la_checkpoint)
+            except (RuntimeError, OSError) as exc:
+                print(f"[Lookahead] Could not save learned forecasts: {exc}")
+
+    def _ingest_lookahead(*texts):
+        # Only newly arrived material is evidence. Replaying the entire prompt
+        # would count old conversation, system instructions and self-output again.
+        for text in texts:
+            if text:
+                lookahead_apparatus.ingest_external_sequence(
+                    model.tok.encode(str(text), add_special_tokens=False)
+                )
+
+
+
 
     def _sweep_layers_for(channel, steer_vecs=None):
         """Pick the steer_layer_sweep least-tested band layers (width 1 =
@@ -7623,6 +11248,8 @@ def main():
         return score, ((a, b) if a is not None else None)
 
     def _memory_detect(text, state=None):
+        if not _enabled_memory_lanes():
+            return 0.0, None
         # Memory-gap footprint (STATE, not text): the model is unsettled (ambiguity
         # / disagreement up) and not flowing (validated_flow / warranted confidence
         # down) -- an unresolved reference it may need to retrieve. Complex,
@@ -7640,6 +11267,8 @@ def main():
         return gap, (tail or None)
 
     def _memory_act(query, m):
+        if not _enabled_memory_lanes():
+            return []
         records = memory.search(query, max_records=3, scope=memory.scope)
         if not records:
             return []
@@ -7691,6 +11320,84 @@ def main():
         print(Fore.MAGENTA + f"\n[ClaimMap] mid-thought: sensed a tension, {msg}" + Style.RESET_ALL, flush=True)
         return handles
 
+    def _syntax_detect(text, state=None):
+        stripped = (text or "").strip()
+        last_line = stripped.splitlines()[-1] if stripped else ""
+        if last_line.startswith(":") and len(last_line) > 1:
+            cmd_token = last_line.split()[0].lstrip(":")
+            if cmd_token:
+                return 1.0, cmd_token
+        return 0.0, None
+
+    def _syntax_act(cmd_token, m, tool_sense=None):
+        spec = COMMAND_SPECS.get(f":{cmd_token}")
+        syntax_hint = ""
+        if spec:
+            syntax_hint = f"\n[Syntax guidance: {spec.usage()} -- {spec.summary}]\n"
+        else:
+            matches = find_command_help_entries(cmd_token, COMMAND_HELP_LINES)
+            if matches:
+                syntax_hint = f"\n[Syntax guidance: {' '.join(matches[0][:2])}]\n"
+        if syntax_hint and tool_sense is not None:
+            tool_sense.internal_injected_text = syntax_hint
+            print(Fore.MAGENTA + f"\n[Syntax] command ':{cmd_token}' syntax retrieved mid-pass -> directed execution." + Style.RESET_ALL, flush=True)
+        return []
+
+    def _probe_detect(text, state=None):
+        target = text or ""
+        target_lower = target.lower()
+        for p in list(probes.keys()):
+            p_lower = p.lower()
+            if (
+                f"probe:{p_lower}" in target_lower
+                or f"?{p_lower}" in target_lower
+                or re.search(rf"\b{re.escape(p)}\b", target, re.IGNORECASE)
+            ):
+                return 1.0, p
+        pdir = PROBE_DIR if "PROBE_DIR" in globals() else os.path.join(ROOT, "invariants", "out", "probes")
+        if os.path.isdir(pdir):
+            try:
+                for f in os.listdir(pdir):
+                    if f.endswith(".pt"):
+                        stem = f[:-3]
+                        stem_lower = stem.lower()
+                        if (
+                            f"probe:{stem_lower}" in target_lower
+                            or f"?{stem_lower}" in target_lower
+                            or re.search(rf"\b{re.escape(stem)}\b", target, re.IGNORECASE)
+                        ):
+                            return 1.0, stem
+            except Exception:
+                pass
+        return 0.0, None
+
+    def _probe_act(pname, m, tool_sense=None):
+        pdata = probes.get(pname)
+        handles = []
+        if pdata is None:
+            pdir = PROBE_DIR if "PROBE_DIR" in globals() else os.path.join(ROOT, "invariants", "out", "probes")
+            pt_path = os.path.join(pdir, f"{pname}.pt")
+            if os.path.isfile(pt_path):
+                try:
+                    loaded = torch.load(pt_path, map_location="cpu")
+                    if isinstance(loaded, dict):
+                        probes[pname] = loaded
+                        pdata = loaded
+                except Exception:
+                    pass
+        if pdata is not None and "direction" in pdata:
+            dirs = pdata["direction"]
+            alpha = float(tuner.get("probe_alpha", 0.0) or 0.0)
+            if alpha != 0.0:
+                from invariants.engine import _steer_handles
+                handles = list(_steer_handles(m, dirs, list(dirs.keys()), alpha))
+        if tool_sense is not None:
+            p_desc = f"[Probe retrieved: {pname} | status={'active' if pname in probes else 'stored'}]"
+            if float(tuner.get("probe_text_inject", 0.0) or 0.0) > 0.0:
+                tool_sense.internal_injected_text = f"\n{p_desc}\n"
+            print(Fore.MAGENTA + f"\n[Probe] '{pname}' state retrieved mid-pass -> directed execution." + Style.RESET_ALL, flush=True)
+        return handles
+
     tool_sense.register(Tool(
         "claimmap_tension",
         _claimmap_detect,
@@ -7705,6 +11412,20 @@ def main():
         comparator=">=",
         activation_criteria="phenomenality memory-gap score crosses :tune memory_need",
         steer_magnitude=":tune memory_alpha",
+    ))
+    tool_sense.register(Tool(
+        "syntax_need",
+        _syntax_detect,
+        _syntax_act,
+        activation_criteria="command token emitted mid-generation",
+        steer_magnitude="internal syntax guidance injection",
+    ))
+    tool_sense.register(Tool(
+        "probe_need",
+        _probe_detect,
+        _probe_act,
+        activation_criteria="probe entity reference detected mid-generation",
+        steer_magnitude="latent direction steer + internal orientation injection",
     ))
     imported_methodologies = memory.import_methodologies(
         _global_cache.memory,
@@ -7745,6 +11466,9 @@ def main():
     pending_claimmap_tool_result = None
     pending_claimmap_steer_delta = None
     pending_claimmap_credit = None  # last turn's tension, credited by this turn's sense
+    claimmap_auto_enabled = (
+        os.environ.get("CLAIMMAP_AUTO_TRIGGER", "0").strip() not in {"0", "false", "no"}
+    )
     pending_methodmap_tool_result = None
     pending_document_tool_result = None
     pending_sandbox_tool_result = None
@@ -7855,6 +11579,8 @@ def main():
         hits = sum(1 for term in terms if term in haystack)
         if hits <= 0:
             return 0.0
+        if shift_tracker is not None:
+            return shift_tracker.modulate_score(float(hits), record.text or "", idx, total, query=query)
         return float(hits) + (0.15 * (idx / max(1, total)))
 
     def _memory_parse_selector(arg):
@@ -7926,7 +11652,7 @@ def main():
             if pairs:
                 relation /= pairs
             recency = 0.05 * (idx / max(1, len(source)))
-            score = text_score + magnitude + relation + recency
+            score = shift_tracker.modulate_score(text_score + magnitude + relation, record.text or "", idx, len(source), query=sentence) if shift_tracker is not None else (text_score + magnitude + relation + recency)
             if sentence and not resolved and text_score <= 0:
                 continue
             scored.append((score, score, record))
@@ -7945,6 +11671,10 @@ def main():
         ranked_probes = rank_probes(probes, tuner)
         usable = [r for r in ranked_probes if r["name"] in probes and probes[r["name"]].get("direction")]
         if not candidates or not usable:
+            if shift_tracker is not None and shift_tracker.active_regime in ("hard_jump", "topic_return"):
+                sh_src = candidates[-160:]
+                sh_scored = sorted([(shift_tracker.modulate_score(0.0, r.text or "", i, len(sh_src)), r) for i, r in enumerate(sh_src)], key=lambda x: x[0], reverse=True)
+                return [t[1] for t in sh_scored[:max_records]], f"{lane_note}:reflect:shift_{shift_tracker.active_regime}", [(t[0], t[0], t[1]) for t in sh_scored[:max_records]]
             return candidates[-max_records:], f"{lane_note}:reflect:recent", []
         has_priority = any(float(r.get("priority") or 0.0) > 0 for r in usable)
         top = [r for r in usable if (float(r.get("priority") or 0.0) > 0 or not has_priority)][:5]
@@ -7966,7 +11696,7 @@ def main():
                         score += max(float(weight), 0.0001) * abs(raw)
             except Exception:
                 continue
-            score += 0.05 * (idx / max(1, len(source)))
+            score = shift_tracker.modulate_score(score, record.text or "", idx, len(source)) if shift_tracker is not None else (score + 0.05 * (idx / max(1, len(source))))
             scored.append((score, score, record))
         scored.sort(key=lambda item: item[0], reverse=True)
         desc = f"{lane_note}:reflect:prioritize:" + ",".join(weights)
@@ -8025,7 +11755,7 @@ def main():
     _ACTIVE_MODEL = model
     _ACTIVE_TUNER = tuner
     PROBE_DIR = os.path.join(ROOT, "invariants", "out", "probes")
-    stored_probe_histories = load_probe_raw_histories()
+    stored_probe_histories = load_probe_raw_histories(measurement_source=GENERATION_PROBE_SOURCE)
     restored_probe_histories = 0
     try:
         if os.path.isdir(PROBE_DIR):
@@ -8036,11 +11766,29 @@ def main():
                     prior_raw = stored_probe_histories.get(pname, [])
                     probes[pname] = {
                         "direction": pdata["direction"],
-                        "history": deque(prior_raw, maxlen=40),
+                        "history": deque(maxlen=40),
                         "framings": pdata.get("framings", ("", "")),
                         "exposed": bool(pdata.get("exposed", False)),
                         "released": bool(pdata.get("released", False)),
+                        **{
+                            key: pdata[key]
+                            for key in (
+                                'position', 'scale', 'poles', 'mean_direction',
+                                'token_salience', 'peak_token_offset', 'token_mode',
+                                'frozen', 'mass',
+                                'other_related', 'other_binding', 'other_directions',
+                                'other_composition', 'other_histories',
+                                'measurement_source', 'measurement_histories',
+                                'measurement_trigger_histories',
+                                'components', 'composed_from', 'composition_mode',
+                                'orthogonal_to', 'projection_weights', 'layer_weights', 'role',
+                            )
+                            if key in pdata
+                        },
                     }
+                    prepare_probe_measurements({pname: probes[pname]}, tuner, GENERATION_PROBE_SOURCE)
+                    probes[pname]["history"] = deque(prior_raw, maxlen=40)
+                    probes[pname]["_measurement_seed_pending"] = not bool(prior_raw)
                     if prior_raw:
                         restored_probe_histories += 1
                     tuner.register(f"probe_{pname}", 0.0, kind="threshold", comparator=">=")
@@ -8066,10 +11814,63 @@ def main():
             + Style.RESET_ALL
         )
 
+    # CEN & DMN default OFF on boot (clean thread mode, zero GIL contention; :cen on to enable)
+    cen_enabled = False
+    print(
+        Fore.CYAN
+        + "[CEN] Central Executive & Default Mode Networks: OFF (clean thread mode; :cen on to enable)."
+        + Style.RESET_ALL
+    )
+
     doc_probe_score_cache = {}
+    document_readers = {}
+    document_reader_contexts = {}
+
+    def _document_reader():
+        key = id(tuner)
+        if key not in document_readers:
+            document_readers[key] = IntrinsicDocumentReader(model)
+        return document_readers[key]
+
+    def _reader_context():
+        return document_reader_contexts.setdefault(id(tuner), [])
+
+    def _reader_should_stop(control, response, records=None, generation_telemetry=None):
+        signal = None
+        if control and control.get("until_probe"):
+            name = control["until_probe"]
+            if name in probes:
+                observed = {}
+                score_generation_probes({name: probes[name]}, tuner, generation_telemetry,
+                                        turn_row=observed, label_prefix="Reader Stop Probe")
+                signal = observed.get(f"probe_{name}")
+        return document_reading_should_stop(control, tuner, sense_score(records), signal)
+
+    def _pause_swapped_reader(restore):
+        nonlocal tuner, probes, tuner_bindings, prioritize_pin, queued_calibrations, queued_commands
+        nonlocal doc_session, doc_library, pending_document_tool_result, doc_autoread
+        if restore is None:
+            return False
+        agent = restore["agent"]
+        agent.tuner, agent.probes = tuner, probes
+        agent.tuner_bindings, agent.prioritize_pin = tuner_bindings, prioritize_pin
+        agent.queued_calibrations, agent.queued_commands = queued_calibrations, queued_commands
+        agent.doc_session, agent.doc_library = doc_session, doc_library
+        agent.pending_document_tool_result = None
+        agent.doc_autoread = None
+        tuner, probes = restore["tuner"], restore["probes"]
+        tuner_bindings, prioritize_pin = restore["tuner_bindings"], restore["prioritize_pin"]
+        queued_calibrations, queued_commands = restore["queued_calibrations"], restore["queued_commands"]
+        doc_session, doc_library = restore["doc_session"], restore["doc_library"]
+        pending_document_tool_result, doc_autoread = restore["pending_document_tool_result"], restore["doc_autoread"]
+        print(Fore.YELLOW + f"[Doc] Reader for {agent.name} paused; main shell state restored." + Style.RESET_ALL)
+        return True
 
     def _select_autoread_chunk(library, autoread, last_thought="", earlier_thoughts=""):
-        mode = (autoread or {}).get("mode", "order")
+        mode = (autoread or {}).get("mode", "state")
+        targets = (autoread or {}).get("target_shas")
+        indices = [i for i, doc in enumerate(library) if targets is None or doc["sha256"] in targets]
+        library = [library[i] for i in indices]
         signed_specs = list((autoread or {}).get("probe_specs") or [])
         probe_scores = None
         if signed_specs:
@@ -8098,14 +11899,23 @@ def main():
                     + f"[Doc] Could not score unread chunks by {terms}; falling back to {mode}."
                     + Style.RESET_ALL
                 )
-        return select_next_chunk(
+        state_scores = None
+        if mode == "state" and not probe_scores:
+            state_scores, newly_encoded, candidates = _document_reader().rank(library)
+            if newly_encoded:
+                print(Fore.CYAN + f"[Doc] Matched {candidates} unread passages to the current model state." + Style.RESET_ALL)
+        pick = select_next_chunk(
             library,
             last_thought,
             mode,
             earlier_thoughts=earlier_thoughts,
             probe_scores=probe_scores,
             probe_terms=signed_specs,
+            state_scores=state_scores,
         )
+        if pick is not None:
+            pick["session_index"] = indices[pick["session_index"]]
+        return pick
 
     # Purge stray shadow triggers: never-fed bare thresholds that duplicate a
     # probe (an accidental `:tune <probe-name> <value>` registers one, and it
@@ -8159,7 +11969,7 @@ def main():
             save_watch_groups(watch_groups)
         except Exception as e:
             print(Fore.RED + f"[Error] Could not save groups: {e}" + Style.RESET_ALL)
-    MAX_AUTOREAD = 20           # per :doc read command; reading stays a deliberate act
+    MAX_AUTOREAD = 20           # explicit count/early-stop cap; full passes cover all chunks
     sandbox_enabled = False     # deliberate opt-in, like every intervention here
     joined_agents = []
     replace_agent = None
@@ -8396,7 +12206,7 @@ def main():
 
         return runnable, skipped
 
-    def _spawn_state_report(agent_name, active_tuner=None, active_probes=None, *, max_macros=40):
+    def _spawn_state_report(agent_name, active_tuner=None, active_probes=None, *, max_macros=40, compact=False):
         """Compact hook map for spawn workers/agents: what exists and what has evidence."""
         active_tuner = active_tuner or tuner
         active_probes = active_probes if active_probes is not None else probes
@@ -8411,6 +12221,9 @@ def main():
         lines.append("Known tunable hooks (exact names for :tune/:calibrate; value=current, history=what has been observed/tried):")
         for name in sorted(n for n in active_tuner.triggers if not n.startswith("probe_") and n not in SPAWN_FAKE_KNOBS):
             trig = active_tuner.triggers[name]
+            if compact:
+                lines.append(f'- {name}={trig.value:g}')
+                continue
             st = trig.stats()
             tried = _vals((sig for sig, _out in trig.outcomes))
             parts = [
@@ -8429,22 +12242,21 @@ def main():
             lines.append(" ".join(parts))
 
         if active_probes:
-            lines.append("Active probe hooks (bare name drives probe_<name>; framings show what each sensor means):")
+            lines.append("Active probe hooks (stable identifiers; meaning is inferred from measured behavior):")
             ranked = {r["name"]: r for r in rank_probes(active_probes, active_tuner)}
             for pname in sorted(active_probes):
+                if compact:
+                    lines.append(f'- {probe_alias(pname)}: released={probe_is_released(active_probes[pname])}')
+                    continue
                 pdata = active_probes[pname]
                 trig = active_tuner.triggers.get(f"probe_{pname}")
                 st = trig.stats() if trig else {}
                 r = ranked.get(pname, {})
-                framings = pdata.get("framings") or ("", "")
-                a = " ".join(str(framings[0] if len(framings) > 0 else "").split())[:90]
-                b = " ".join(str(framings[1] if len(framings) > 1 else "").split())[:90]
                 lines.append(
-                    f"- {pname}: trigger=probe_{pname} value={st.get('value')} "
+                    f"- {probe_alias(pname)}: trigger={probe_alias(pname)} value={st.get('value')} "
                     f"signals={st.get('n_signals')} credited={st.get('n_credited')} "
                     f"lift={r.get('lift')} priority={round(float(r.get('priority') or 0.0), 4)} "
-                    f"exposed={bool(pdata.get('exposed'))} released={probe_is_released(pdata)} "
-                    f"framings={a} || {b}"
+                    f"exposed={bool(pdata.get('exposed'))} released={probe_is_released(pdata)}"
                 )
         else:
             lines.append("Active probe hooks: none in this agent yet; mint/adopt/compose probes in the profile if needed.")
@@ -8476,7 +12288,7 @@ def main():
             lines.append("Hidden from model-facing discovery: " + ", ".join(f":{c}" for c in hidden[:40]))
         lines.append("Runtime tools exposed with :expose: " + (", ".join(exposed[:40]) if exposed else "none"))
         if exposed_probe_names or exposed_knobs:
-            lines.append("Model-readable probes/knobs: " + ", ".join(exposed_probe_names + sorted(exposed_knobs)))
+            lines.append("Model-readable probes/knobs: " + ", ".join([probe_alias(name) for name in exposed_probe_names] + sorted(exposed_knobs)))
         else:
             lines.append("Model-readable probes/knobs: none")
         macros = sorted(m for m in macro_aliases if m not in hidden_commands)
@@ -8486,12 +12298,69 @@ def main():
             lines.append(field_context)
         return "\n".join(lines)
 
+    def _other_mint(frames, layers=None):
+        from invariants.engine import _inputs, _hidden_states, probe_direction, steer_band_layers
+        prefix = 'I/me/my refer to the agent owning this probe. You/your refer to its addressed interlocutor. Statement: '
+        states = []
+        for text in frames:
+            ids = _inputs(model, prefix + text[:600])
+            states.append(_hidden_states(model, ids['input_ids'], ids.get('attention_mask')))
+        return probe_direction(states[0], states[1], layers if layers is not None else list(range(states[0].shape[0])))
+
+    def _select_other(label):
+        reference = plasticity_owners.for_tuner(tuner)[0].other_reference
+        previous = reference.current
+        reference.select(None if label == 'clear' else label)
+        try:
+            changed = reference.activate(probes, _other_mint)
+        except Exception:
+            reference.current = previous
+            raise
+        for name in changed:
+            trigger = tuner.triggers.get('probe_' + name)
+            if trigger is not None:
+                trigger.signals.clear()
+                trigger.outcomes.clear()
+            payload = {key: value for key, value in probes[name].items() if key != 'history'}
+            torch.save(payload, os.path.join(PROBE_DIR, name + '.pt'))
+        reference.save()
+        return reference.context()
+
     def _build_live_prompt(*args, **kwargs):
         """Every conversational/follow-up prompt gets the current active
         agent's factual field state; callers can explicitly pass None to omit."""
+        if getattr(config, 'activation_memory_isolate', False):
+            # A paired activation-memory test must not quote archived replies
+            # through probe descriptions, reader history, or staged tool prose.
+            for key in ('field_context', 'probe_tool_result', 'orientation_tool_result',
+                        'methodmap_tool_result', 'command_tool_result', 'help_tool_result',
+                        'reader_context', 'memory_tool_result', 'document_tool_result',
+                        'sandbox_tool_result', 'game_tool_result', 'session_context'):
+                kwargs[key] = None
+            return build_prompt(*args, **kwargs)
+        prepare_probe_measurements(probes, tuner, GENERATION_PROBE_SOURCE)
+        if "field_context" in kwargs and kwargs["field_context"] is None:
+            from invariants.exposure_language import obscure_probe_identifiers
+            return obscure_probe_identifiers(build_prompt(*args, **kwargs), probes)
         if "field_context" not in kwargs:
             kwargs["field_context"] = format_field_prompt_context(tuner, probes)
-        return build_prompt(*args, **kwargs)
+        kwargs.setdefault("reader_context", _reader_context())
+        from invariants.exposure_language import obscure_probe_identifiers
+        owner_matrix = plasticity_owners.for_tuner(tuner)[0]
+        owner_matrix.other_reference.activate(probes, _other_mint)
+        language = owner_matrix.exposure_language
+        language.sync(probes, tuner)
+        for key in ('field_context', 'probe_tool_result', 'orientation_tool_result',
+                    'methodmap_tool_result', 'command_tool_result', 'help_tool_result', 'reader_context'):
+            if isinstance(kwargs.get(key), str):
+                kwargs[key] = obscure_probe_identifiers(kwargs[key], probes)
+        description = language.context(behavior=owner_matrix.probe_behavior, probes=probes)
+        description += '\n' + plasticity_owners.for_tuner(tuner)[0].other_reference.context()
+        language_marker = '__EXPOSURE_LANGUAGE_BLOCK_91a745__'
+        if description:
+            kwargs['field_context'] = (kwargs.get('field_context') or '') + '\n' + language_marker
+        prompt = obscure_probe_identifiers(build_prompt(*args, **kwargs), probes)
+        return prompt.replace(language_marker, description)
 
     def _priority_steer_handles(active_probes, active_tuner, active_pin):
         handles = []
@@ -8685,6 +12554,7 @@ def main():
         from invariants.mesa import Committee, MesaObjective
 
         committee = Committee()
+        control_probes = steering_probe_view(probes, tuner)
         added = set()
         cap = max(0, int(getattr(config, "max_committee_size", 6) or 0))
 
@@ -8705,13 +12575,13 @@ def main():
             tuner.get("routing_probe_weight", getattr(config, "routing_probe_weight", 1.0)),
             getattr(config, "routing_probe_weight", 1.0),
         )
-        ranked = rank_probes(probes, tuner)
+        ranked = rank_probes(control_probes, tuner)
         for row in ranked:
             lift = row.get("lift")
             if lift is None or float(row.get("priority") or 0.0) <= 0.0:
                 continue
             pname = row["name"]
-            pdata = probes.get(pname) or {}
+            pdata = control_probes.get(pname) or {}
             direction = pdata.get("direction")
             if direction is None or (isinstance(direction, dict) and not direction):
                 continue
@@ -8734,13 +12604,13 @@ def main():
         mix = prioritize_pin.get("mix")
         pin = prioritize_pin.get("probe")
         if mix:
-            md = build_priority_mix_direction(model, mix, probes, tuner)
+            md = build_priority_mix_direction(model, mix, control_probes, tuner)
             if md:
                 add_route("mix_" + "_".join(mix), md, born="steer_mix")
-        elif pin and pin in probes and not probe_is_released(probes[pin]):
+        elif pin and pin in control_probes and not probe_is_released(control_probes[pin]):
             add_route(
                 f"probe_{pin}",
-                probes[pin].get("direction"),
+                control_probes[pin].get("direction"),
                 sign=float(prioritize_pin.get("sign", 1.0) or 1.0),
                 born="steer_pin",
             )
@@ -8751,19 +12621,19 @@ def main():
             if float(row.get("priority") or 0.0) <= 0:
                 continue
             pname = row["name"]
-            if pname not in probes:
+            if pname not in control_probes:
                 continue
             lift = row.get("lift")
             sign = 1.0 if lift is None or float(lift) >= 0 else -1.0
-            add_route(f"probe_{pname}", probes[pname].get("direction"), sign=sign, born="calibrated_probe")
+            add_route(f"probe_{pname}", control_probes[pname].get("direction"), sign=sign, born="calibrated_probe")
 
         for pname in sorted(
-            n for n, pdata in probes.items()
+            n for n, pdata in control_probes.items()
             if pdata.get("exposed") and not probe_is_released(pdata)
         ):
             if cap and len(committee.members) >= cap:
                 break
-            add_route(f"probe_{pname}", probes[pname].get("direction"), born="exposed_probe")
+            add_route(f"probe_{pname}", control_probes[pname].get("direction"), born="exposed_probe")
 
         config.committee = committee
         config.use_expert_vectors = False
@@ -8800,14 +12670,18 @@ def main():
                 + Style.RESET_ALL
             )
     
-    input_queue = []
-    if startup_user_input:
-        input_queue.append(startup_user_input)
+    startup_enabled = bool(tuner.get("startup_enabled", 1.0) > 0)
+    input_queue = startup_input_queue(macro_aliases, startup_user_input, startup_enabled)
+    if startup_enabled:
+        for name in startup_macro_files():
+            print(Fore.CYAN + f"[Startup] Queuing launch macro: startup/{name}" + Style.RESET_ALL)
+
 
     _shell_vars = {}
     _inline_capture = None
     _saved_stdout = sys.stdout
     _target_restore = None
+    _agent_generation_restore = None
 
     while True:
         try:
@@ -8861,6 +12735,8 @@ def main():
 
             reading_turn_source = None  # set when the turn is the model reading, not the operator speaking
             silent_echo = False
+            if doc_autoread and listener.active:
+                input_queue.extend(listener.drain())
             if input_queue:
                 q_item = input_queue.pop(0)
                 if isinstance(q_item, tuple):
@@ -8870,60 +12746,34 @@ def main():
                 if not silent_echo:
                     print(Fore.YELLOW + f"\nYou: {user_input}" + Style.RESET_ALL)
             elif doc_autoread and doc_autoread["remaining"] > 0:
-                # Reading as dialogue, minimally: the framed chunk IS the user
-                # turn -- no synthesized question, no cue, no words put in
-                # anyone's mouth. The model responds to the text natively, and
-                # the turn is sense-labeled, channel-accounted, and remembered
-                # like any other conversation turn.
-                staged_reading = pending_document_tool_result  # consume a manual :doc stage first
-                pending_document_tool_result = None
+                listener.start()
+                earlier_reflections = " ".join(list(recent_responses)[:-1])
+                reading_focus = doc_autoread.pop("focus", "") or last_assistant_response
+                staged_reading = pending_document_tool_result
                 if staged_reading is None:
-                    earlier_reflections = " ".join(list(recent_responses)[:-1])
                     pick = _select_autoread_chunk(
-                        doc_library,
-                        doc_autoread,
-                        last_assistant_response,
+                        doc_library, doc_autoread, reading_focus,
                         earlier_thoughts=earlier_reflections,
                     )
                     if pick is None:
-                        print(Fore.CYAN + "[Doc] Library fully read; auto-read finished." + Style.RESET_ALL)
+                        print(Fore.CYAN + "[Doc] Reading pass complete; every passage was read." + Style.RESET_ALL)
                         doc_autoread = None
                         continue
                     doc_session = doc_library[pick["session_index"]]
-                    doc_session["cursor"] = pick["chunk_index"]
-                    doc_session.setdefault("read", set()).add(pick["chunk_index"])
-                    record_chunk_read(memory, doc_session, pick["chunk_index"])
                     if pick["mode"] in ("reply", "reply_thread"):
-                        # Only the echo-following mode is word-contingent; the
-                        # order/interleave course is deliberately not.
-                        impact_state["pending"].append(
-                            {
-                                "cause": "reply steered the reading",
-                                "effect": f"next chunk chosen by shared ground: {', '.join(pick['overlap'])}",
-                            }
-                        )
-                    staged_reading = stage_chunk(
-                        doc_session,
-                        index=pick["chunk_index"],
-                        reply_note=reading_reply_note(pick),
+                        impact_state["pending"].append({
+                            "cause": "reply steered the reading",
+                            "effect": f"next passage chosen by shared ground: {', '.join(pick['overlap'])}",
+                        })
+                    staged_reading = stage_document_read(
+                        doc_session, pick["chunk_index"], reply_note=reading_reply_note(pick),
                     )
-                    picked_note = (
-                        f"chunk {pick['chunk_index'] + 1}/{doc_session['chunk_count']} of "
-                        f"{doc_session['source_name']} ({pick['mode']}"
-                        + (f": {', '.join(pick['overlap'])}" if pick.get("overlap") else "")
-                        + ")"
-                    )
-                    print(Fore.CYAN + f"[Doc] Reading {picked_note}." + Style.RESET_ALL)
-                doc_autoread["remaining"] -= 1
-                if doc_autoread["remaining"] <= 0:
-                    doc_autoread = None
-                user_input = staged_reading
-                # A reading turn is the model's own act -- the frame literally
-                # begins "I'm reading ..." -- so the console says "Me:", not
-                # "You:". The operator didn't speak; it is reading to itself.
+                    print(Fore.CYAN + f"[Doc] Reading {doc_session['source_name']}, "
+                          + f"part {pick['chunk_index'] + 1}/{doc_session['chunk_count']} ({pick['mode']})."
+                          + Style.RESET_ALL)
+                pending_document_tool_result = staged_reading
+                user_input = ""
                 reading_turn_source = doc_session["source_name"] if doc_session else "reading"
-                preview = " ".join(staged_reading.split())[:160]
-                print(Fore.CYAN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL + preview + " [...]")
 
             elif replace_turns_remaining > 0 and replace_agent:
                 # Agent replaces user
@@ -8938,6 +12788,13 @@ def main():
                 _sys_doc_library = doc_library
                 _sys_pending_doc = pending_document_tool_result
                 _sys_doc_autoread = doc_autoread
+                _agent_generation_restore = {
+                    "agent": replace_agent, "tuner": tuner, "probes": probes,
+                    "tuner_bindings": tuner_bindings, "prioritize_pin": prioritize_pin,
+                    "queued_calibrations": queued_calibrations, "queued_commands": queued_commands,
+                    "doc_session": doc_session, "doc_library": doc_library,
+                    "pending_document_tool_result": pending_document_tool_result, "doc_autoread": doc_autoread,
+                }
                 tuner = replace_agent.tuner
                 probes = replace_agent.probes
                 tuner_bindings = replace_agent.tuner_bindings
@@ -8951,37 +12808,36 @@ def main():
 
                 agent_document_tool_result = pending_document_tool_result
                 pending_document_tool_result = None
+                agent_reading_focus = (doc_autoread or {}).pop("focus", "") or last_assistant_response
                 if agent_document_tool_result is None and doc_autoread and doc_autoread.get("remaining", 0) > 0:
-                    pick = _select_autoread_chunk(doc_library, doc_autoread)
+                    pick = _select_autoread_chunk(doc_library, doc_autoread, agent_reading_focus)
                     if pick is not None:
                         doc_session = doc_library[pick["session_index"]]
-                        doc_session["cursor"] = pick["chunk_index"]
-                        doc_session.setdefault("read", set()).add(pick["chunk_index"])
-                        record_chunk_read(memory, doc_session, pick["chunk_index"])
-                        agent_document_tool_result = stage_chunk(doc_session, index=pick["chunk_index"])
-                        doc_autoread["remaining"] -= 1
-                        if doc_autoread["remaining"] <= 0:
-                            doc_autoread = None
+                        agent_document_tool_result = stage_document_read(doc_session, pick["chunk_index"])
 
                 # Generate user input autonomously
                 agent_state_report = _spawn_state_report(replace_agent.name, tuner, probes)
                 r_prompt = _build_live_prompt(
-                    agent_state_report + "\n\n[Your turn to respond]",
+                    "" if agent_document_tool_result else agent_state_report + "\n\n[Your turn to respond]",
                     document_tool_result=agent_document_tool_result,
                     session_context=session_context if session_context_enabled else None,
                     field_context=None,  # already present in agent_state_report
                 )
                 _r_handles, _r_prio = _priority_steer_handles(probes, tuner, prioritize_pin)
                 try:
-                    r_response = generate_agentic_text(
+                    r_response, r_telemetry = generate_agentic_text(
                         model,
                         instruction=r_prompt,
+                        document_reader=_document_reader(),
+                        generation_channel="reader" if agent_document_tool_result else "speech",
                         config=config,
                         max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
                         synthesis_recorder=None,
                         chatty_log=False,
                         pre_formatted=True,
-                        return_telemetry=False,
+                        return_telemetry=True,
+                        generation_probes=probes,
+                        generation_probe_tuner=tuner,
                     )
                 finally:
                     for _h in _r_handles:
@@ -8989,6 +12845,13 @@ def main():
                             _h.remove()
                         except Exception:
                             pass
+                doc_autoread = complete_document_reading(
+                    memory, doc_library, agent_document_tool_result, r_response, doc_autoread,
+                )
+                if agent_document_tool_result:
+                    retain_document_thought(memory, _reader_context(), doc_session, agent_document_tool_result, r_response, _document_reader())
+                    if _reader_should_stop(doc_autoread, r_response, None, r_telemetry):
+                        doc_autoread = None
                 user_input = r_response.strip() if r_response else "..."
 
                 # Restore
@@ -9012,6 +12875,9 @@ def main():
                 doc_library = _sys_doc_library
                 pending_document_tool_result = _sys_pending_doc
                 doc_autoread = _sys_doc_autoread
+                _agent_generation_restore = None
+                if agent_document_tool_result:
+                    continue
                 replace_turns_remaining -= 1
                 _last_replace_name = replace_agent.name
                 if replace_turns_remaining <= 0:
@@ -9019,12 +12885,12 @@ def main():
                 print(Fore.MAGENTA + Style.BRIGHT + f"\n[{_last_replace_name} replacing You]: " + Style.RESET_ALL + user_input)
             else:
                 _last_replace_name = None
-                if getattr(config, "auto_probe_readings", False) and _sys_probes:
+                if getattr(config, "auto_probe_readings", False) and probes:
                     recent = []
                     for row in reversed(list(turn_log)):
                         v = {}
-                        for p in _sys_probes:
-                            if f"probe_{p}" in row:
+                        for p in probes:
+                            if f"probe_{p}" in row and probe_row_matches_source(row, probes[p]):
                                 try:
                                     v[p] = float(row[f"probe_{p}"])
                                 except (TypeError, ValueError):
@@ -9035,7 +12901,7 @@ def main():
                     if recent:
                         print(Fore.CYAN + "[Auto Probe Readings]" + Style.RESET_ALL)
                         for pname, val in recent[0].items():
-                            print(Fore.CYAN + f"  {pname}: {val:+.3f}" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  {console_probe_name(pname)}: {val:+.3f}" + Style.RESET_ALL)
 
                 prefix = f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] You: " if show_timestamps else "\nYou: "
                 prompt_str = Fore.MAGENTA + Style.BRIGHT + prefix + Style.RESET_ALL
@@ -9046,6 +12912,8 @@ def main():
 
 
             user_input = user_input.strip()
+            if user_input.startswith("#"):
+                continue
 
             if "{:" in user_input and "}" in user_input and _inline_capture is None:
                 m = re.search(r"\{:(.*?)\}", user_input)
@@ -9071,18 +12939,26 @@ def main():
                 for vname, vval in _shell_vars.items():
                     # Safely replace $vname if it's not part of a larger word
                     user_input = re.sub(r"\$" + re.escape(vname) + r"\b", lambda _m, v=vval: v, user_input)
-            if user_input.startswith(":") and not command_keeps_semicolons(user_input):
-                cmds = _split_macro_commands(
-                    user_input,
-                    split_colon_commands=not command_takes_colon_command_arg(user_input),
-                )
-                if len(cmds) > 1:
-                    user_input = cmds[0]
-                    input_queue.extend([(c, silent_echo) for c in cmds[1:]])
-                elif cmds and "\\:" in user_input and cmds[0] != user_input:
-                    # a '\:' escape suppressed the split; keep the unescaped
-                    # form so handlers see ':cmd' and not a literal backslash
-                    user_input = cmds[0]
+            if (user_input.startswith(":") or user_input.startswith("@")) and not command_keeps_semicolons(user_input):
+                agent_prefix = ""
+                to_split = user_input
+                if user_input.startswith("@"):
+                    parts = user_input.split(maxsplit=1)
+                    if len(parts) == 2 and (parts[1].startswith(":") or ";" in parts[1]):
+                        agent_prefix = parts[0] + " "
+                        to_split = parts[1]
+                if to_split.startswith(":"):
+                    cmds = _split_macro_commands(
+                        to_split,
+                        split_colon_commands=False,
+                    )
+                    if len(cmds) > 1:
+                        user_input = agent_prefix + cmds[0]
+                        input_queue.extend([(agent_prefix + c, silent_echo) for c in cmds[1:]])
+                    elif cmds and "\\:" in user_input and cmds[0] != to_split:
+                        # a '\:' escape suppressed the split; keep the unescaped
+                        # form so handlers see ':cmd' and not a literal backslash
+                        user_input = agent_prefix + cmds[0]
 
             # A trailing ' because <reason>' on any command is provenance, not an
             # argument: peel it off, log it, and hand the handler a clean line.
@@ -9364,21 +13240,21 @@ def main():
                         print(Fore.CYAN + "[Spawn] Passing your 'because' rationale to the model." + Style.RESET_ALL)
 
                     valid_knobs = ", ".join(sorted(k for k in tuner.triggers if not k.startswith("probe_") and k not in SPAWN_FAKE_KNOBS))
-                    command_reference = render_visible_commands_md(hidden_commands, COMMAND_HELP_LINES)
-                    spawn_state_report = _spawn_state_report(a_name, new_agent.tuner, new_agent.probes)
+                    command_reference = compact_spawn_command_reference(hidden_commands)
+                    spawn_state_report = _spawn_state_report(a_name, new_agent.tuner, new_agent.probes, compact=True)
 
                     default_spawn_prompt = (
                         ":expect file invariants/out/macros/$a_name.txt\n"
-                        "# SPAWN_PROFILE_V7_LINE_GRAMMAR\n"
+                        "# SPAWN_PROFILE_V8_BOUNDED_REFERENCE\n"
                         ":probe profile_author I am generating a tuning profile composed of exact shell configuration commands || I am generating conversational text\n"
                         ":probe release profile_author off\n"
-                        ":probe backfill profile_author\n"
+                        ":probe backfill profile_author 120\n"
                         ":steer profile_author 1.5\n"
                         "You are generating an executable spawn calibration profile for an agent named '$a_name'. "
                         f"{because_ctx}"
-                        "The visible shell command reference is loaded below so you can reason from the actual writing surface, not guesses.\n"
+                        "A compact visible command index and syntax reference is loaded below; use :help for details.\n"
                         "$command_reference\n\n"
-                        "The live hook/evidence report is loaded below. It includes tunable hooks, active probes, macros, command exposure, documents, queued work, and the complete factual field context (families, qualities, formulas, sets, compliance/time vectors, and exclusions).\n"
+                        "A compact live state report is loaded below, including current tunable values, probe names, macros, exposure and field context.\n"
                         "$spawn_state_report\n\n"
                         "Output ONLY runnable shell commands or macro invocations, one per line. "
                         "Profile line grammar is strict: a line beginning with ':' is executed as a command; "
@@ -9410,7 +13286,7 @@ def main():
                         "spawn",
                         default_spawn_prompt,
                         required_substring=(
-                            "# SPAWN_PROFILE_V7_LINE_GRAMMAR",
+                            "# SPAWN_PROFILE_V8_BOUNDED_REFERENCE",
                             "Profile line grammar is strict",
                             "$valid_knobs",
                             "shown inline so it is NOT executed",
@@ -9743,6 +13619,93 @@ def main():
                         print(Fore.RED + f"[Error] Could not write macro file: {e}" + Style.RESET_ALL)
                 continue
 
+            if user_input.strip() == ":awake" or user_input.strip().startswith(":awake"):
+                user_input = ":run init_awareness.txt"
+
+            if user_input.strip() in (":trajectory", ":lookahead init") or user_input.strip().startswith(":trajectory"):
+                user_input = ":run init_lookahead.txt"
+
+            if user_input == ":startup" or user_input.startswith(":startup "):
+                startup_dir = os.path.join(ROOT, "startup")
+                os.makedirs(startup_dir, exist_ok=True)
+                s_tail = user_input[len(":startup"):].strip()
+                s_tok = s_tail.split(maxsplit=1)
+                sub = s_tok[0].lower() if s_tok else "list"
+
+                if sub in ("list", "status", ""):
+                    enabled = bool(tuner.get("startup_enabled", 1.0) > 0)
+                    state_str = "ENABLED" if enabled else "DISABLED"
+                    files = startup_macro_files()
+                    print(Fore.CYAN + f"[Startup] Launch macro directory: startup/ (Auto-run: {state_str})" + Style.RESET_ALL)
+                    if not files:
+                        print(Fore.YELLOW + "  No launch macros currently in startup/. Use ':startup add <file.txt>' or drop macros into startup/." + Style.RESET_ALL)
+                    else:
+                        print(Fore.CYAN + f"  Declared launch macros ({len(files)}):" + Style.RESET_ALL)
+                        for idx, fn in enumerate(files, 1):
+                            fpath = os.path.join(startup_dir, fn)
+                            try:
+                                with open(fpath, "r", encoding="utf-8", errors="replace") as rf:
+                                    line_count = len(rf.readlines())
+                            except Exception:
+                                line_count = 0
+                            print(Fore.CYAN + f"    [{idx:02d}] {fn} ({line_count} line(s))" + Style.RESET_ALL)
+                    continue
+
+                if sub == "on":
+                    tuner.set("startup_enabled", 1.0)
+                    tuner.save()
+                    print(Fore.GREEN + "[Startup] Auto-run of startup/ directory on launch is now ENABLED." + Style.RESET_ALL)
+                    continue
+
+                if sub == "off":
+                    tuner.set("startup_enabled", 0.0)
+                    tuner.save()
+                    print(Fore.YELLOW + "[Startup] Auto-run of startup/ directory on launch is now DISABLED." + Style.RESET_ALL)
+                    continue
+
+                if sub == "add":
+                    if len(s_tok) < 2:
+                        print(Fore.YELLOW + "[Startup] Usage: :startup add <file_path_or_name>" + Style.RESET_ALL)
+                        continue
+                    try:
+                        dest_path = declare_startup_macro(s_tok[1])
+                    except (ValueError, OSError) as exc:
+                        print(Fore.RED + f"[Startup] {exc}" + Style.RESET_ALL)
+                        continue
+                    base_name = os.path.basename(dest_path)
+                    print(Fore.GREEN + f"[Startup] Declared launch macro: copied '{base_name}' into startup/ directory." + Style.RESET_ALL)
+                    continue
+
+                if sub in ("remove", "rm", "delete"):
+                    if len(s_tok) < 2:
+                        print(Fore.YELLOW + "[Startup] Usage: :startup remove <filename>" + Style.RESET_ALL)
+                        continue
+                    target_name = s_tok[1]
+                    try:
+                        target_path = startup_macro_path(target_name)
+                    except ValueError as exc:
+                        print(Fore.RED + f"[Startup] {exc}" + Style.RESET_ALL)
+                        continue
+                    if os.path.isfile(target_path):
+                        os.remove(target_path)
+                        print(Fore.GREEN + f"[Startup] Removed '{os.path.basename(target_path)}' from startup/." + Style.RESET_ALL)
+                    else:
+                        print(Fore.RED + f"[Startup] Macro '{target_name}' not found in startup/." + Style.RESET_ALL)
+                    continue
+
+                if sub in ("run", "now"):
+                    files = startup_macro_files()
+                    if not files:
+                        print(Fore.YELLOW + "[Startup] No macros found in startup/." + Style.RESET_ALL)
+                        continue
+                    print(Fore.CYAN + f"[Startup] Executing {len(files)} startup macro(s) immediately..." + Style.RESET_ALL)
+                    input_queue.extend(startup_input_queue(macro_aliases))
+                    continue
+
+                print(Fore.YELLOW + "Usage: :startup [list | on | off | add <macro> | remove <macro> | run]" + Style.RESET_ALL)
+                continue
+
+
             if user_input.startswith(":run "):
                 raw_target = user_input[len(":run "):].strip()
                 if not raw_target:
@@ -10051,6 +14014,268 @@ def main():
                     print(Fore.YELLOW + f"[System] Timestamps are currently {'on' if show_timestamps else 'off'}." + Style.RESET_ALL)
                 continue
 
+            if user_input.startswith(":travel"):
+                try:
+                    from invariants.vector_travel import VectorTravelEngine
+                    v_eng = VectorTravelEngine.get_instance()
+                    args = user_input[len(":travel"):].strip().split()
+                    if not args:
+                        print(Fore.CYAN + "[Vector Travel] Kinematics & Persisting Transformation:" + Style.RESET_ALL)
+                        print(Fore.CYAN + f"  speed={v_eng.kinematics.speed():.4f} momentum={v_eng.kinematics.momentum_magnitude():.4f} persisting_alignment={v_eng.kinematics.persisting_alignment():.3f} steps={v_eng.kinematics.step_count}" + Style.RESET_ALL)
+                        comp = v_eng.compressor.compress()
+                        print(Fore.CYAN + f"  compression_ratio={comp['compression_ratio']:.3f} travel_entropy={comp['travel_entropy']:.3f} coherence={comp['coherence']:.3f} history_len={comp['trajectory_length']}" + Style.RESET_ALL)
+                        if comp.get('self_label_vector') is not None:
+                            sl_norm = comp['self_label_vector'].norm().item()
+                            print(Fore.CYAN + f"  self-label travel vector: active (norm={sl_norm:.2f})" + Style.RESET_ALL)
+                        print(Fore.CYAN + "  chemical reservoirs (stored biological states):" + Style.RESET_ALL)
+                        mods = v_eng.chemicals.effective_physics_modifiers()
+                        for ch, lvl in v_eng.chemicals.levels.items():
+                            desc = v_eng.chemicals.CHANNELS.get(ch, {}).get("desc", "")
+                            print(Fore.CYAN + f"    {ch}: level={lvl:.3f} ({desc})" + Style.RESET_ALL)
+                        print(Fore.CYAN + f"    field modifiers: G_mult={mods['g_multiplier']:.2f}x eff_friction={mods['effective_friction']:.3f}" + Style.RESET_ALL)
+                        print(Fore.CYAN + f"  reinforced neural pathways: n={len(v_eng.pathways.pathways)}" + Style.RESET_ALL)
+                        for pname, pdata in list(v_eng.pathways.pathways.items())[:8]:
+                            print(Fore.CYAN + f"    {pname}: conductance={pdata['conductance']:.3f} utility={pdata['utility']:+.2f} hits={pdata['hits']}" + Style.RESET_ALL)
+                        continue
+                    subcmd = args[0].lower()
+                    if subcmd == "reset":
+                        v_eng.kinematics.reset()
+                        v_eng.compressor.clear()
+                        v_eng.chemicals.reset()
+                        print(Fore.GREEN + "[Vector Travel] Kinematics, trajectory history, and chemical reservoirs reset." + Style.RESET_ALL)
+                        continue
+                    if subcmd == "chem":
+                        if len(args) >= 2 and args[1].lower() == "reset":
+                            v_eng.chemicals.reset()
+                            print(Fore.GREEN + "[Vector Travel] All chemical reservoirs reset to 0.0." + Style.RESET_ALL)
+                            continue
+                        if len(args) >= 4 and args[1].lower() == "set":
+                            ch, amt = args[2], float(args[3])
+                            v_eng.chemicals.set_level(ch, amt)
+                            print(Fore.GREEN + f"[Vector Travel] Set chemical reservoir '{ch}' to {v_eng.chemicals.levels.get(ch, 0.0):.2f}." + Style.RESET_ALL)
+                            continue
+                    if subcmd == "reinforce" and len(args) >= 2:
+                        pname = args[1]
+                        util = float(args[2]) if len(args) > 2 else 1.0
+                        v_eng.pathways.reinforce(pname, v_eng.kinematics.persisting_transformation, util)
+                        print(Fore.GREEN + f"[Vector Travel] Reinforced pathway '{pname}' (utility={util:+.2f})." + Style.RESET_ALL)
+                        continue
+                    if subcmd == "decay":
+                        decay_rate = float(args[1]) if len(args) > 1 else 0.05
+                        v_eng.pathways.decay_all(decay_rate)
+                        print(Fore.GREEN + f"[Vector Travel] Applied {decay_rate:.0%} synaptic decay across all pathways." + Style.RESET_ALL)
+                        continue
+                    print(Fore.YELLOW + "Usage: :travel [reset | chem reset | chem set <name> <val> | reinforce <name> [util] | decay [rate]]" + Style.RESET_ALL)
+                except Exception as e:
+                    print(Fore.RED + f"[Vector Travel] Error: {e}" + Style.RESET_ALL)
+                continue
+
+            if user_input == ':other' or user_input.startswith(':other '):
+                try:
+                    label = user_input[len(':other'):].strip()
+                    print(_select_other(label) if label else plasticity_owners.for_tuner(tuner)[0].other_reference.context())
+                except (ValueError, OSError) as exc:
+                    print(f'[Other] {exc}')
+                continue
+
+            if user_input == ':relate' or user_input.startswith(':relate '):
+                try:
+                    from invariants.target_relations import handle_target_command
+                    matrix, _signals = plasticity_owners.for_tuner(tuner)
+                    import shlex
+                    relation_args = shlex.split(user_input[len(':relate'):], posix=False)
+                    relation_args = [arg[1:-1] if len(arg) > 1 and arg[0] == arg[-1] and arg[0] in {'"', "'"} else arg for arg in relation_args]
+                    if relation_args and relation_args[0] == 'indirect':
+                        from invariants.indirect_steering import handle_indirect_command
+                        if len(relation_args) > 1 and relation_args[1] == 'continue':
+                            if len(relation_args) == 2 or relation_args[2] in {'on', 'off', 'status'}:
+                                result = handle_continuation_mode_command(
+                                    relation_args[1:], matrix.indirect_controller, probes, model)
+                                print(json.dumps(result, indent=2, ensure_ascii=False))
+                                continue
+                            result = handle_continuation_investigation_command(
+                                relation_args[1:], matrix.indirect_controller, probes, model, memory)
+                            present_continuation_result(result, probes, tuner)
+                            continue
+                        if len(relation_args) > 1 and relation_args[1] in {'investigate', 'import'}:
+                            result = handle_replay_investigation_command(
+                                relation_args[1:], matrix.indirect_controller, probes, model, memory)
+                        else:
+                            before_probe_names = set(probes)
+                            result = handle_indirect_command(relation_args[1:], matrix.indirect_controller, probes, tuner)
+                            for new_pname in sorted(set(probes) - before_probe_names):
+                                probes[new_pname].setdefault("history", deque(maxlen=40))
+                                probes[new_pname].setdefault("exposed", False)
+                                probes[new_pname].setdefault("released", False)
+                                prepare_probe_measurements({new_pname: probes[new_pname]}, tuner, GENERATION_PROBE_SOURCE)
+                                if (len(relation_args) > 2 and relation_args[1] == 'compose'
+                                        and re.fullmatch(r"[A-Za-z_][A-Za-z_0-9_-]*", new_pname)):
+                                    try:
+                                        os.makedirs(PROBE_DIR, exist_ok=True)
+                                        save_payload = {
+                                            k: v for k, v in probes[new_pname].items()
+                                            if k not in {"history"} and not str(k).startswith("_")
+                                        }
+                                        torch.save(save_payload, os.path.join(PROBE_DIR, f"{new_pname}.pt"))
+                                    except Exception:
+                                        pass
+                        print(json.dumps(result, indent=2, ensure_ascii=False))
+                    else:
+                        print(handle_target_command(relation_args, matrix.target_controller, probes, tuner))
+                except (ValueError, OSError) as exc:
+                    print(f'[Relations] {exc}')
+                continue
+
+            if user_input == ":plasticity" or user_input.startswith(":plasticity "):
+                try:
+                    matrix, _signals = plasticity_owners.for_tuner(tuner)
+                    args = user_input.split()[1:]
+                    message = handle_plasticity_command(args, matrix, probes)
+                    if args and args[0] in {"on", "off", "set", "reset"} and not matrix.save():
+                        raise OSError(f"Could not save plasticity to {matrix.path}")
+                    print(Fore.CYAN + message + Style.RESET_ALL)
+                except (ValueError, OSError) as exc:
+                    print(Fore.YELLOW + f"[Plasticity] {exc}" + Style.RESET_ALL)
+                continue
+
+            if user_input.startswith(":cen"):
+                try:
+                    from invariants.central_executive import CentralExecutiveNetwork, DefaultModeNetwork, SharedSubstrateMemory
+                    args = user_input[len(":cen"):].strip().split()
+                    subcmd = args[0].lower() if args else "status"
+
+                    if subcmd in ("status", "summary"):
+                        status_str = Fore.GREEN + "ON" if cen_enabled else Fore.YELLOW + "OFF"
+                        print(Fore.CYAN + f"[CEN/DMN] Central Executive & Default Mode Networks: {status_str}" + Style.RESET_ALL)
+                        if hasattr(main, "_cen_substrate") and main._cen_substrate is not None:
+                            sub = main._cen_substrate
+                            c_net = getattr(main, "_cen_network", None)
+                            tel = sub.get_telemetry()
+                            print(Fore.CYAN + f"  Snapshots: emitted={tel['total_emitted']} consumed={tel['total_consumed']} buffer_depth={tel['buffer_depth']} drops={tel['dropped_snapshots']}" + Style.RESET_ALL)
+                            gamma_val = c_net.gamma if c_net else 0.08
+                            print(Fore.CYAN + f"  Dynamic Friction: recent_avg={tel['average_recent_friction']:.6f} (gamma={gamma_val})" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  Consolidated Episodes: {tel['consolidated_episodes_count']}" + Style.RESET_ALL)
+                        else:
+                            print(Fore.CYAN + "  Background threads: dormant (clean thread mode). Type :cen on to enable." + Style.RESET_ALL)
+                        continue
+                    if subcmd == "on":
+                        cen_sub, cen_net, dmn_net, cen_adp = ensure_cen_active(main, probes=probes, synaptic_engine=synaptic_engine)
+                        cen_enabled = True
+                        print(Fore.GREEN + "[CEN] Central Executive & Default Mode Networks activated (ON)." + Style.RESET_ALL)
+                        continue
+                    if subcmd == "off":
+                        cen_enabled = False
+                        if hasattr(main, "_dmn_network") and main._dmn_network is not None:
+                            try:
+                                main._dmn_network.stop()
+                            except Exception:
+                                pass
+                        if hasattr(main, "_cen_network") and main._cen_network is not None:
+                            try:
+                                main._cen_network.stop()
+                            except Exception:
+                                pass
+                        print(Fore.YELLOW + "[CEN] Central Executive & Default Mode Networks deactivated (OFF)." + Style.RESET_ALL)
+                        continue
+                    if subcmd in ("episodes", "dmn", "repo"):
+                        if hasattr(main, "_cen_substrate") and main._cen_substrate is not None:
+                            sub = main._cen_substrate
+                            print(Fore.CYAN + f"[DMN Repository] {len(sub.consolidated_repository)} consolidated episode(s):" + Style.RESET_ALL)
+                            for ep in sub.consolidated_repository[-8:]:
+                                print(Fore.CYAN + f"  {ep['episode_id']} | Steps {ep['start_step']}..{ep['end_step']} | Zone: {ep['state_zone']} | Mean Friction: {ep['mean_friction']:.5f} | Coherence: {ep['trajectory_coherence']:+.3f}" + Style.RESET_ALL)
+                        else:
+                            print(Fore.YELLOW + "[CEN] No active substrate repository (CEN is OFF)." + Style.RESET_ALL)
+                        continue
+                    if subcmd == "gamma" and len(args) > 1:
+                        if hasattr(main, "_cen_network") and main._cen_network is not None:
+                            main._cen_network.gamma = float(args[1])
+                            print(Fore.GREEN + f"[CEN] Gamma friction scaling coefficient set to {main._cen_network.gamma}." + Style.RESET_ALL)
+                        else:
+                            print(Fore.YELLOW + "[CEN] CEN is not active. Turn on with :cen on first." + Style.RESET_ALL)
+                        continue
+                    print(Fore.YELLOW + "Usage: :cen [status | on | off | episodes | gamma <val>]" + Style.RESET_ALL)
+                except Exception as e:
+                    print(Fore.RED + f"[CEN] Error: {e}" + Style.RESET_ALL)
+                continue
+
+            if user_input.startswith(":lookahead"):
+                try:
+                    proc = lookahead_apparatus
+                    args = user_input[len(":lookahead"):].strip().split()
+                    if not args or args[0].lower() in ("status", "summary"):
+                        print(Fore.CYAN + "[Lookahead Apparatus] Down-the-Line Future Waypoint Predictor:" + Style.RESET_ALL)
+                        alpha_self = tuner.get("lookahead_alpha_self", 0.15)
+                        alpha_ext = tuner.get("lookahead_alpha_ext", 0.10)
+                        claim_w = tuner.get("lookahead_claimmap_weight", 0.50)
+                        default_k = int(tuner.get("lookahead_default_k", 5))
+                        has_claimmap = "ATTACHED" if proc.claimmap_context else "NONE"
+                        status_str = f"ON (self={alpha_self:.3f}, ext={alpha_ext:.3f})" if (alpha_self > 0 or alpha_ext > 0) else "OFF"
+                        print(Fore.CYAN + f"  Status: {status_str} | Mode: {proc.current_mode} | ClaimMap Coupling: {has_claimmap}" + Style.RESET_ALL)
+                        print(Fore.CYAN + f"  ClaimMap Weight: {claim_w:.3f} | Default Horizon K: {default_k}" + Style.RESET_ALL)
+                        print(Fore.CYAN + f"  Pending Waypoint Tickets: {sum(len(ts) for ts in proc.ledger.values())} across {len(proc.ledger)} time steps" + Style.RESET_ALL)
+                        print(Fore.CYAN + f"  Evidence observations: {proc.learning_updates} | Device: {proc.device} | Checkpoint: {_la_checkpoint.name}" + Style.RESET_ALL)
+                        print(Fore.CYAN + f"  Composition: {proc.composition} | Semantic similarity: {tuner.get('lookahead_environment_similarity', .9):.3f} | Evidence: every hit/miss has weight 1" + Style.RESET_ALL)
+                        if proc.latest_telemetry:
+                            telem = proc.latest_telemetry
+                            print(Fore.CYAN + f"  Latest Telemetry: step={telem.get('step')} mode={telem.get('mode')} match_rate={telem.get('match_rate')} mean_err={telem.get('mean_error_norm')} post_mature_norm={telem.get('post_mature_norm')} claimmap_drift={telem.get('claimmap_drift')}" + Style.RESET_ALL)
+                        continue
+                    subcmd = args[0].lower()
+                    if subcmd == "combine" and len(args) == 2:
+                        proc.set_composition(args[1])
+                        proc.save_checkpoint(_la_checkpoint)
+                        print(Fore.GREEN + f"[Lookahead] Correction composition: {proc.composition}." + Style.RESET_ALL)
+                        continue
+                    if subcmd == "on":
+                        new_alpha = float(args[1]) if len(args) > 1 else 0.15
+                        if not math.isfinite(new_alpha) or new_alpha < 0:
+                            raise ValueError("alpha must be a finite, nonnegative number")
+                        tuner.set("lookahead_alpha_self", new_alpha)
+                        tuner.set("lookahead_alpha_ext", new_alpha * 0.67)
+                        tuner.set("lookahead_alpha", new_alpha)
+                        tuner.save()
+                        print(Fore.GREEN + f"[Lookahead Apparatus] Activated post-mature layer adjustment (alpha_self={new_alpha:.3f}, alpha_ext={new_alpha * 0.67:.3f})." + Style.RESET_ALL)
+                        continue
+                    if subcmd == "off":
+                        tuner.set("lookahead_alpha_self", 0.0)
+                        tuner.set("lookahead_alpha_ext", 0.0)
+                        tuner.set("lookahead_alpha", 0.0)
+                        proc.active_post_mature_delta = None
+                        tuner.save()
+                        print(Fore.GREEN + "[Lookahead Apparatus] Disabled post-mature layer adjustment (passive observation only)." + Style.RESET_ALL)
+                        continue
+                    if subcmd in ("k", "horizon") and len(args) >= 2:
+                        k_val = int(args[1])
+                        if k_val < 1 or k_val > proc.predictor.max_horizon:
+                            raise ValueError(f"horizon must be between 1 and {proc.predictor.max_horizon}")
+                        tuner.set("lookahead_default_k", k_val)
+                        tuner.set("lookahead_max_k", k_val)
+                        tuner.save()
+                        print(Fore.GREEN + f"[Lookahead Apparatus] Set default lookahead horizon k = {k_val}." + Style.RESET_ALL)
+                        continue
+                    if subcmd == "claimmap":
+                        if len(args) > 1 and args[1].lower() == "detach":
+                            proc.detach_claimmap()
+                            print(Fore.GREEN + "[Lookahead Apparatus] Detached ClaimMap tension axis." + Style.RESET_ALL)
+                        else:
+                            print(Fore.CYAN + f"[Lookahead Apparatus] ClaimMap context: {proc.claimmap_context}" + Style.RESET_ALL)
+                        continue
+                    if subcmd in ("degree", "scale") and len(args) >= 3:
+                        scale_name = args[1].lower()
+                        scale_val = float(args[2])
+                        knob_key = scale_name if scale_name.startswith("degree_scale_") else f"degree_scale_{scale_name}"
+                        if knob_key not in {f"degree_scale_{key}" for key in ("diff", "horizon", "direction", "distance", "logits", "factor")}:
+                            raise ValueError("degree must be diff, horizon, direction, distance, logits, or factor")
+                        if not math.isfinite(scale_val) or scale_val < 0:
+                            raise ValueError("degree scale must be finite and nonnegative")
+                        tuner.set(knob_key, scale_val)
+                        tuner.save()
+                        print(Fore.GREEN + f"[Lookahead Apparatus] Set {knob_key} = {scale_val:.3f}." + Style.RESET_ALL)
+                        continue
+                    print(Fore.YELLOW + "Usage: :lookahead [status | on [alpha] | off | k <val> | claimmap [detach] | degree <param> <val> | combine linear|sinusoidal]" + Style.RESET_ALL)
+                except Exception as e:
+                    print(Fore.RED + f"[Lookahead Apparatus] Error: {e}" + Style.RESET_ALL)
+                continue
+
             if user_input.startswith(":listen"):
                 arg = user_input[len(":listen"):].strip().lower()
                 if arg == "off":
@@ -10090,6 +14315,7 @@ def main():
                     print(Fore.GREEN + "[Context] Current-session transcript ON." + Style.RESET_ALL)
                 elif cmd == ":context clear":
                     session_context.clear()
+                    _flush_process_memory()
                     print(Fore.YELLOW + "[Context] Cleared current-session transcript. Persistent memory was not changed." + Style.RESET_ALL)
                 elif cmd.startswith(":context resume"):
                     parts = raw_cmd.split()
@@ -10136,6 +14362,30 @@ def main():
                         )
                         + Style.RESET_ALL
                     )
+                continue
+            if user_input.startswith(":remember"):
+                raw_tail = user_input[len(":remember"):].strip()
+                def _stage_cb(res):
+                    nonlocal pending_memory_tool_result
+                    pending_memory_tool_result = res
+                cen_sub, cen_net, dmn_net, cen_adp = (
+                    ensure_cen_active(main, probes=probes, synaptic_engine=synaptic_engine)
+                    if cen_enabled
+                    else (None, None, None, None)
+                )
+                success, rec, msg = handle_remember_command(
+                    raw_tail,
+                    memory=memory,
+                    model=model,
+                    cen_substrate=cen_sub,
+                    cen_network=cen_net,
+                    dmn_network=dmn_net,
+                    cen_adapter=cen_adp,
+                    synaptic_engine=synaptic_engine,
+                    stage_callback=_stage_cb,
+                    config=config,
+                )
+                print(msg)
                 continue
             if user_input.startswith(":memory"):
                 cmd = user_input.strip()
@@ -10248,6 +14498,16 @@ def main():
                     if lanes:
                         records, desc, ranked = _memory_select_records("", lanes)
                         _stage_memory_records(records, desc, ranked=ranked)
+                elif tail in ("shift", "shift status") or tail.startswith("shift"):
+                    st = shift_tracker.status()
+                    print(Fore.CYAN + "[Memory Shift Tracker] Kinematics & Regime State:" + Style.RESET_ALL)
+                    print(Fore.CYAN + f"  regime={st['regime']} delta={st['last_delta']:.4f} alignment={st['last_alignment']:+.4f}" + Style.RESET_ALL)
+                    print(Fore.CYAN + f"  turns={st['total_turns']} clusters={st['total_clusters']} active_cluster=#{st['active_cluster_id']} ('{st['active_cluster_label']}')" + Style.RESET_ALL)
+                    if st['clusters']:
+                        print(Fore.CYAN + "  recent topic clusters:" + Style.RESET_ALL)
+                        for c in st['clusters'][-5:]:
+                            print(Fore.CYAN + f"    #{c['id']} '{c['label']}': {c['turns']} turn(s) kw=[{', '.join(c['keywords'][:5])}]" + Style.RESET_ALL)
+                    continue
                 elif tail in ("boundary", "clear"):
                     memory.mark_session_boundary("operator_request")
                     pending_memory_tool_result = None
@@ -10295,10 +14555,33 @@ def main():
                             print(Fore.YELLOW + "Invalid selection." + Style.RESET_ALL)
                         except ValueError:
                             print(Fore.YELLOW + "Please enter a number." + Style.RESET_ALL)
+                elif tail == "remember" or tail.startswith("remember "):
+                    rem_tail = tail[len("remember"):].strip()
+                    def _stage_cb(res):
+                        nonlocal pending_memory_tool_result
+                        pending_memory_tool_result = res
+                    cen_sub, cen_net, dmn_net, cen_adp = (
+                        ensure_cen_active(main, probes=probes, synaptic_engine=synaptic_engine)
+                        if cen_enabled
+                        else (None, None, None, None)
+                    )
+                    success, rec, msg = handle_remember_command(
+                        rem_tail,
+                        memory=memory,
+                        model=model,
+                        cen_substrate=cen_sub,
+                        cen_network=cen_net,
+                        dmn_network=dmn_net,
+                        cen_adapter=cen_adp,
+                        synaptic_engine=synaptic_engine,
+                        stage_callback=_stage_cb,
+                        config=config,
+                    )
+                    print(msg)
                 else:
                     print(
                         Fore.YELLOW
-                        + "[Memory] Commands: :memory all|act|talk on|off|status, :memory act|talk use [sentence [+probe -probe]]|search [sentence [+probe -probe]], :memory use/search [optional args] (enabled lanes; empty reflects via :prioritize), :memory all use, :memory choice [query|probe <name>], :memory boundary"
+                        + "[Memory] Commands: :memory all|act|talk on|off|status, :memory shift, :memory act|talk use [sentence [+probe -probe]]|search [sentence [+probe -probe]], :memory use/search [optional args] (enabled lanes; empty reflects via :prioritize), :memory all use, :memory choice [query|probe <name>], :memory boundary"
                         + Style.RESET_ALL
                     )
                 continue
@@ -10369,13 +14652,58 @@ def main():
 
             if user_input.startswith(":claimmap"):
                 payload = user_input[len(":claimmap"):].strip()
+                cmd_lower = payload.lower()
                 if not payload:
-                    print(Fore.YELLOW + "[ClaimMap] Usage: :claimmap <first text> || <second text>" + Style.RESET_ALL)
+                    print(
+                        Fore.YELLOW
+                        + "[ClaimMap] Usage: :claimmap <first text> || <second text>  |  :claimmap auto <on|off>  |  :claimmap clear  |  :claimmap status"
+                        + Style.RESET_ALL
+                    )
+                    continue
+                if cmd_lower in {"auto off", "off"}:
+                    claimmap_auto_enabled = False
+                    pending_claimmap_tool_result = None
+                    pending_claimmap_steer_delta = None
+                    print(Fore.YELLOW + "[ClaimMap] Auto-trigger disabled and pending deltas cleared." + Style.RESET_ALL)
+                    continue
+                if cmd_lower in {"auto on", "on"}:
+                    claimmap_auto_enabled = True
+                    print(Fore.GREEN + "[ClaimMap] Auto-trigger enabled." + Style.RESET_ALL)
+                    continue
+                if cmd_lower in {"clear", "reset"}:
+                    pending_claimmap_tool_result = None
+                    pending_claimmap_steer_delta = None
+                    if lookahead_apparatus is not None:
+                        lookahead_apparatus.detach_claimmap()
+                    print(Fore.YELLOW + "[ClaimMap] Cleared pending claimmap results and steering deltas." + Style.RESET_ALL)
+                    continue
+                if cmd_lower == "status":
+                    t_thresh = tuner.get("claimmap_tension", 0.18)
+                    t_alpha = tuner.get("claimmap_alpha", 0.0)
+                    print(
+                        Fore.CYAN
+                        + f"[ClaimMap] auto_enabled={claimmap_auto_enabled}, tension_threshold={t_thresh}, alpha={t_alpha}, "
+                        + f"pending_tool={'yes' if pending_claimmap_tool_result else 'no'}, "
+                        + f"pending_steer={'yes' if pending_claimmap_steer_delta else 'no'}"
+                        + Style.RESET_ALL
+                    )
+                    continue
+                if "||" not in payload:
+                    print(
+                        Fore.YELLOW
+                        + "[ClaimMap] Usage: :claimmap <first text> || <second text>  |  :claimmap auto <on|off>  |  :claimmap clear  |  :claimmap status"
+                        + Style.RESET_ALL
+                    )
                     continue
                 try:
                     cm = analyze_claim_pair(payload, model=model)
-                    pending_claimmap_tool_result = cm.felt            # felt only reaches the model
-                    pending_claimmap_steer_delta = cm.steer_delta     # nudges the next generation
+                    pending_claimmap_tool_result = None               # pure latent steering, zero prompt text
+                    pending_claimmap_steer_delta = cm.steer_delta     # nudges the next generation physically
+                    if lookahead_apparatus is not None:
+                        from invariants.claimmap import get_unified_tension_vector
+                        _c_axis = get_unified_tension_vector(cm)
+                        if _c_axis is not None:
+                            lookahead_apparatus.attach_claimmap(_c_axis, tension_score=cm.mean_sim, steer_delta=cm.steer_delta)
                     memory.append_event(
                         "claimmap_tool_staged",
                         text=cm.telemetry,                            # raw numbers logged, never in the prompt
@@ -10383,7 +14711,7 @@ def main():
                         provenance={"payload_chars": len(payload), "mean_sim": cm.mean_sim},
                     )
                     print(Fore.CYAN + cm.felt + Style.RESET_ALL)
-                    print(Fore.YELLOW + "[ClaimMap] Sensed. This will shape the next model turn only." + Style.RESET_ALL)
+                    print(Fore.YELLOW + "[ClaimMap] Sensed. Steering delta will physically shape the next turn (zero prompt injection)." + Style.RESET_ALL)
                 except Exception as exc:
                     print(Fore.RED + f"[ClaimMap] {exc}" + Style.RESET_ALL)
                 continue
@@ -10525,7 +14853,7 @@ def main():
                             unread = s["chunk_count"] - len(s.get("read") or ())
                             print(
                                 Fore.CYAN
-                                + f"[Doc] {s['source_name']}: {s['chunk_count']} chunks, {unread} unread."
+                                + f"[Doc] {s['source_name']}: {s['chunk_count']} chunks, {unread} unread in this pass."
                                 + Style.RESET_ALL
                             )
                         staged = "a chunk is staged for the next turn" if pending_document_tool_result else "nothing staged"
@@ -10538,11 +14866,11 @@ def main():
                             reading = f"auto-read {selector}, {doc_autoread['remaining']} turns left"
                         else:
                             reading = "auto-read off"
-                        print(Fore.CYAN + f"[Doc] {staged}; {reading}. ':doc next' | ':doc read [n] [order|interleave|updated] [+probe -probe]' | ':doc stop'" + Style.RESET_ALL)
+                        print(Fore.CYAN + f"[Doc] {staged}; {reading}. ':doc next' | ':doc read [n] [state|reply|order|interleave|updated] [+probe -probe]' | ':doc reread' | ':doc stop'" + Style.RESET_ALL)
                 elif dargs.lower() == "stop":
                     doc_autoread = None
                     print(Fore.CYAN + "[Doc] Auto-read stopped." + Style.RESET_ALL)
-                elif dargs.split()[0].lower() == "read":
+                elif dargs.split()[0].lower() in {"read", "reread"}:
                     # exact first-token match: ':doc readings' is a PATH, not auto-read
                     if not doc_library:
                         print(Fore.YELLOW + "[Doc] Nothing to read yet. :doc <path> first." + Style.RESET_ALL)
@@ -10555,6 +14883,12 @@ def main():
                         if read_parse_error:
                             print(Fore.YELLOW + f"[Doc] {read_parse_error}" + Style.RESET_ALL)
                             continue
+                        doc_autoread = configure_document_reading(
+                            memory, doc_library, doc_autoread,
+                            context=last_assistant_response,
+                            restart=dargs.split()[0].lower() == "reread",
+                        )
+                        pending_document_tool_result = None
                         count = doc_autoread["remaining"]
                         mode = doc_autoread["mode"]
                         signed_probe_specs = doc_autoread["probe_specs"]
@@ -10573,7 +14907,8 @@ def main():
                             how = {
                                 "order": "in document order -- the text advances on its own course",
                                 "interleave": "weaving between documents -- their course, not the model's echo",
-                                "reply": "chunks chosen by overlap with its replies (echo-following; deliberate use)",
+                                "state": "passages matched to the live model state",
+                                "reply": "passages matched to response words",
                                 "updated": "in the order the files were last written (newest first)",
                             }[mode]
                         stop_note = (
@@ -10585,15 +14920,10 @@ def main():
                                 if until_settled else ""
                             )
                         )
-                        staged_note = (
-                            " The chunk already staged by :doc goes first; signed ranking begins after it."
-                            if signed_probe_specs and pending_document_tool_result
-                            else ""
-                        )
+                        scope_note = "the full reading pass" if doc_autoread["until_complete"] else f"up to {count} passages"
                         print(
-                            Fore.CYAN
-                            + f"[Doc] Auto-read: up to {count} turn(s), {how}.{stop_note}{staged_note} "
-                            + "The document speaks next; the model replies each time. ':doc stop' interrupts."
+                            Fore.CYAN + f"[Doc] Reading {scope_note}: {how}.{stop_note} "
+                            + "Reader thoughts remain separate from speech. ':doc stop' pauses; ':doc reread' starts again."
                             + Style.RESET_ALL
                         )
                 elif dargs.lower() == "inject":
@@ -10622,10 +14952,15 @@ def main():
                     for doc in doc_library:
                         for index, chunk in enumerate(doc.get("chunks", [])):
                             full_text.append(f"--- {doc['source_name']}, part {index + 1}/{doc['chunk_count']} ---\n{chunk}")
-                            if index not in doc.get("read", set()):
-                                record_chunk_read(memory, doc, index)
-                        doc["read"] = set(range(doc.get("chunk_count", 0)))
                     pending_document_tool_result = "\n\n".join(full_text)
+                    doc_autoread = None
+                    for doc in doc_library:
+                        begin_reading_pass(memory, doc, context=last_assistant_response, restart=True)
+                        doc["_staged_read"] = {
+                            "text": pending_document_tool_result,
+                            "indices": list(range(doc["chunk_count"])),
+                            "pass_id": doc["reading_pass_id"],
+                        }
                     print(
                         Fore.CYAN
                         + f"[Doc] {len(doc_library)} document(s) ({total_chars} chars) staged in full for the next turn."
@@ -10635,18 +14970,13 @@ def main():
                 elif dargs.lower() == "next":
                     if doc_session is None:
                         print(Fore.YELLOW + "[Doc] No document loaded." + Style.RESET_ALL)
-                    elif doc_session["cursor"] + 1 >= doc_session["chunk_count"]:
-                        print(Fore.CYAN + f"[Doc] {doc_session['source_name']} is fully read ({doc_session['chunk_count']} chunks)." + Style.RESET_ALL)
                     else:
-                        doc_session["cursor"] += 1
-                        doc_session.setdefault("read", set()).add(doc_session["cursor"])
-                        record_chunk_read(memory, doc_session, doc_session["cursor"])
-                        pending_document_tool_result = stage_chunk(doc_session)
-                        print(
-                            Fore.CYAN
-                            + f"[Doc] Chunk {doc_session['cursor'] + 1}/{doc_session['chunk_count']} staged for the next turn."
-                            + Style.RESET_ALL
+                        request, _ = parse_doc_read_request("read 1 order", probes)
+                        doc_autoread = configure_document_reading(
+                            memory, [doc_session], request, context=last_assistant_response,
                         )
+                        pending_document_tool_result = None
+                        print(Fore.CYAN + "[Doc] Reading the next unread passage in this pass." + Style.RESET_ALL)
                 elif (rewrite_req := parse_doc_rewrite_request(dargs)) is not None:
                     rewrite_path = rewrite_req.get("source", "")
                     rewrite_name = rewrite_req.get("output")
@@ -10742,6 +15072,7 @@ def main():
                         continue
 
                     loaded_count = 0
+                    loaded_sessions = []
                     for p in paths_to_load:
                         file_why = why.strip()
                         if "{filename}" in file_why:
@@ -10759,7 +15090,10 @@ def main():
                         except (ValueError, OSError) as exc:
                             print(Fore.RED + f"[Doc] {exc}" + Style.RESET_ALL)
                             continue
+                        doc_library[:] = [doc for doc in doc_library if doc["sha256"] != doc_session["sha256"]]
+                        loaded_sessions[:] = [doc for doc in loaded_sessions if doc["sha256"] != doc_session["sha256"]]
                         doc_library.append(doc_session)
+                        loaded_sessions.append(doc_session)
                         memory.append_event(
                             "document_ingested",
                             text=f"{doc_session['source_name']} ({doc_session['chunk_count']} chunks)",
@@ -10776,38 +15110,19 @@ def main():
                         print(Fore.CYAN + f"[Doc] {doc_session['source_name']}: {doc_session['chunk_count']} chunk(s), {known}{progress}." + Style.RESET_ALL)
                         loaded_count += 1
 
-                    if loaded_count > 0:
-                        # Resume-aware staging: the first UNREAD chunk of the
-                        # first not-fully-read file in this batch. Prior
-                        # progress (restored from memory by sha) is respected,
-                        # and only what is actually staged gets marked read.
-                        staged_any = False
-                        for candidate in doc_library[-loaded_count:]:
-                            unread = [i for i in range(candidate["chunk_count"]) if i not in candidate.get("read", set())]
-                            if not unread:
-                                continue
-                            doc_session = candidate
-                            doc_session["cursor"] = unread[0]
-                            doc_session.setdefault("read", set()).add(unread[0])
-                            record_chunk_read(memory, doc_session, unread[0])
-                            pending_document_tool_result = stage_chunk(doc_session)
-                            print(
-                                Fore.CYAN
-                                + f"[Doc] Loaded {loaded_count} file(s). Staged: {doc_session['source_name']} "
-                                + f"part {unread[0] + 1}/{doc_session['chunk_count']}"
-                                + (" (resuming)" if unread[0] > 0 else "")
-                                + " -- ':doc read [n] [order|interleave|updated]' walks the rest."
-                                + Style.RESET_ALL
-                            )
-                            staged_any = True
-                            break
-                        if not staged_any:
-                            print(
-                                Fore.CYAN
-                                + f"[Doc] Loaded {loaded_count} file(s) -- all already fully read. "
-                                + "Nothing staged; ':doc read' would find nothing new."
-                                + Style.RESET_ALL
-                            )
+                    if loaded_sessions:
+                        # Loading starts/resumes a full pass; identical content remains deduplicated.
+                        for candidate in loaded_sessions:
+                            if len(candidate.get("read") or ()) >= candidate["chunk_count"]:
+                                begin_reading_pass(memory, candidate, context=last_assistant_response, restart=True)
+                        request, _ = parse_doc_read_request("read", probes)
+                        doc_autoread = configure_document_reading(
+                            memory, loaded_sessions, request, context=last_assistant_response,
+                        )
+                        pending_document_tool_result = None
+                        print(Fore.CYAN + f"[Doc] Loaded {loaded_count} file(s); reading all "
+                              + f"{doc_autoread['remaining']} remaining passages for the current questions."
+                              + Style.RESET_ALL)
                 continue
             _cmdword = user_input.strip().split()[0].lower() if user_input.strip() else ""
             if _cmdword in (":group", ":list"):
@@ -11261,6 +15576,17 @@ def main():
                                     "framings": pdata.get("framings", ("", "")),
                                     "exposed": bool(pdata.get("exposed", False)),
                                     "released": bool(pdata.get("released", False)),
+                                    **{
+                                        key: pdata[key]
+                                        for key in (
+                                            'position', 'scale', 'poles', 'mean_direction',
+                                            'token_salience', 'peak_token_offset', 'token_mode',
+                                            'frozen', 'mass',
+                                            'other_related', 'other_binding', 'other_directions',
+                                            'other_composition', 'other_histories',
+                                        )
+                                        if key in pdata
+                                    },
                                 }
                                 # Register a trigger for a probe that appeared on
                                 # disk since startup; leave existing thresholds and
@@ -11543,7 +15869,7 @@ def main():
                                 + Style.RESET_ALL
                             )
                     if exposed_probe_names:
-                        print(Fore.CYAN + "[Expose] probes: " + ", ".join(exposed_probe_names) + Style.RESET_ALL)
+                        print(Fore.CYAN + "[Expose] probes: " + ", ".join(console_probe_name(n) for n in exposed_probe_names) + Style.RESET_ALL)
                     if exposed_knobs:
                         print(Fore.CYAN + "[Expose] knobs: " + ", ".join(sorted(exposed_knobs)) + Style.RESET_ALL)
                     continue
@@ -11601,7 +15927,7 @@ def main():
                                 torch.save(data, pf)
                             except Exception:
                                 pass
-                        print(Fore.GREEN + f"[Expose] probe '{probe_name}' is now {'hidden from' if turn_off else 'exposed to'} the model's <<PROBE: {probe_name}>> tool." + Style.RESET_ALL)
+                        print(Fore.GREEN + f"[Expose] probe {console_probe_name(probe_name, color=Fore.GREEN)} is now {'hidden from' if turn_off else 'exposed to'} the model's <<PROBE: {probe_alias(probe_name)}>> tool." + Style.RESET_ALL)
                         continue
                     knob_name = target.strip()
                     if knob_name not in tuner.triggers and knob_name.lower() in tuner.triggers:
@@ -11951,8 +16277,19 @@ def main():
                             f"loss: {gcfg['loss'] or '(none)'}; prizes: {list(gcfg['prizes']) or '(none)'}."
                         )
                     continue
-            if user_input.startswith(":steer "):
-                sargs = user_input[len(":steer "):].strip().split()
+            if user_input == ":steer" or user_input.startswith(":steer ") or user_input == ":field" or user_input.startswith(":field "):
+                if user_input == ":field" or user_input.startswith(":field "):
+                    tail = user_input[len(":field"):].strip()
+                    sargs = ["field"] + (tail.split() if tail else [])
+                else:
+                    tail = user_input[len(":steer"):].strip()
+                    sargs = tail.split() if tail else ["field"]
+                if sargs and sargs[0] in ('space', 'rotate', 'impulse'):
+                    try:
+                        print(handle_geometry_command(sargs, probes, tuner))
+                    except (ValueError, TypeError) as error:
+                        print(f'[geometry] {error}')
+                    continue
                 # :steer auto | off  -> back to the ranking.
                 if sargs and sargs[0].lower() in ("auto", "off", "none", "unpin"):
                     prioritize_pin["probe"] = None
@@ -11990,6 +16327,162 @@ def main():
                         + "Each probe's degree is its own learned lift, recomputed every turn; a negative-lift "
                         + "probe desteers. :steer auto to unpin." + (f" (ignored unknown: {', '.join(bad)})" if bad else "")
                         + (f" (ignored released: {', '.join(released_names)})" if released_names else "")
+                        + Style.RESET_ALL
+                    )
+                    continue
+                # :steer band -- Hooke restoring tethers (pull, push, spring, drop)
+                if sargs and sargs[0].lower() in ("band", "bands"):
+                    bodies = steer_bodies()
+                    bands = bodies.setdefault("bands", {})
+                    if len(sargs) == 1:
+                        if not bands:
+                            print(Fore.CYAN + "[Steer] no Hooke band tethers." + Style.RESET_ALL)
+                        for bname, bcfg in sorted(bands.items()):
+                            whens = band_when_list(bcfg)
+                            when_desc = format_band_when_desc(whens)
+                            print(
+                                Fore.CYAN
+                                + f"[Steer] band:{bname}: {bcfg.get('mode', 'pull')} -> {bcfg.get('node', '(none)')} "
+                                + f"rest={bcfg.get('rest', 0.5)} give={bcfg.get('give', 0.2)} "
+                                + f"strength={format_field_source(bcfg.get('strength'))}{when_desc}"
+                                + Style.RESET_ALL
+                            )
+                        continue
+
+                    bname = re.sub(r"[^a-z0-9_]", "_", sargs[1].lower()).strip("_")
+                    action = sargs[2].lower() if len(sargs) > 2 else "status"
+
+                    if action in ("drop", "off", "remove", "delete"):
+                        existed = bands.pop(bname, None) is not None
+                        save_steer_bodies()
+                        print(
+                            (Fore.GREEN if existed else Fore.YELLOW)
+                            + (f"[Steer] band:{bname} dropped." if existed else f"[Steer] no band named '{bname}'.")
+                            + Style.RESET_ALL
+                        )
+                        continue
+
+                    if action == "status" or len(sargs) == 2:
+                        bcfg = bands.get(bname)
+                        if not bcfg:
+                            print(Fore.YELLOW + f"[Steer] no band named '{bname}'.{did_you_mean(bname, bands)}" + Style.RESET_ALL)
+                        else:
+                            whens = band_when_list(bcfg)
+                            when_desc = format_band_when_desc(whens)
+                            print(
+                                Fore.CYAN
+                                + f"[Steer] band:{bname}: {bcfg.get('mode', 'pull')} -> {bcfg.get('node')} "
+                                + f"rest={bcfg.get('rest')} give={bcfg.get('give')} "
+                                + f"strength={format_field_source(bcfg.get('strength'))}{when_desc}"
+                                + Style.RESET_ALL
+                            )
+                        continue
+
+                    mode = "pull"
+                    if action in ("pull", "push", "spring"):
+                        mode = action
+                        node_idx = 3
+                    else:
+                        node_idx = 2
+
+                    if len(sargs) <= node_idx:
+                        print(Fore.YELLOW + "[Steer] Usage: :steer band <name> [pull|push|spring] <node> [rest <r>] [give <g>] [strength <s>] [when <source> <op> <val>] | drop" + Style.RESET_ALL)
+                        continue
+
+                    node = sargs[node_idx]
+                    rest_val = 0.5
+                    give_val = 0.2
+                    strength_spec = parse_field_source("1")
+                    when_conditions = []
+
+                    tail = sargs[node_idx + 1:]
+                    ti = 0
+                    while ti < len(tail):
+                        tok = tail[ti].lower()
+                        if tok == "rest" and ti + 1 < len(tail):
+                            try: rest_val = float(tail[ti + 1])
+                            except ValueError: pass
+                            ti += 2
+                        elif tok == "give" and ti + 1 < len(tail):
+                            try: give_val = float(tail[ti + 1])
+                            except ValueError: pass
+                            ti += 2
+                        elif tok == "strength" and ti + 1 < len(tail):
+                            st_tok = tail[ti + 1]
+                            st_scale = 1.0
+                            st_offset = 0.0
+                            ti_adv = 2
+                            if ti + 2 < len(tail):
+                                try:
+                                    st_scale = float(tail[ti + 2])
+                                    ti_adv = 3
+                                    if ti + 3 < len(tail):
+                                        st_offset = float(tail[ti + 3])
+                                        ti_adv = 4
+                                except ValueError:
+                                    pass
+                            strength_spec = parse_field_source(st_tok, st_scale, st_offset)
+                            ti += ti_adv
+                        elif tok == "when":
+                            when_toks = tail[ti + 1:]
+                            wi = 0
+                            while wi < len(when_toks):
+                                if when_toks[wi].lower() == "and":
+                                    wi += 1
+                                    continue
+                                if wi + 2 < len(when_toks):
+                                    w_src_tok = when_toks[wi]
+                                    w_op = when_toks[wi + 1].lower()
+                                    w_val_tok = when_toks[wi + 2]
+                                    wi += 3
+
+                                    tempo = "token"
+                                    if wi < len(when_toks) and when_toks[wi].lower() in ("turn", "each", "token"):
+                                        if when_toks[wi].lower() == "turn":
+                                            tempo = "turn"
+                                            wi += 1
+                                        elif when_toks[wi].lower() == "each" and wi + 1 < len(when_toks) and when_toks[wi + 1].lower() == "turn":
+                                            tempo = "turn"
+                                            wi += 2
+                                        elif when_toks[wi].lower() == "token":
+                                            tempo = "token"
+                                            wi += 1
+
+                                    try:
+                                        w_num = float(w_val_tok)
+                                        cond = {
+                                            "source": parse_field_source(w_src_tok),
+                                            "op": w_op,
+                                            "value": w_num,
+                                            "tempo": tempo,
+                                        }
+                                    except ValueError:
+                                        cond = {
+                                            "source": parse_field_source(w_src_tok),
+                                            "op": w_op,
+                                            "threshold_source": parse_field_source(w_val_tok),
+                                            "tempo": tempo,
+                                        }
+                                    when_conditions.append(cond)
+                                else:
+                                    break
+                            break
+                        else:
+                            ti += 1
+
+                    bands[bname] = {
+                        "node": node,
+                        "mode": mode,
+                        "rest": rest_val,
+                        "give": give_val,
+                        "strength": strength_spec,
+                        "when": when_conditions,
+                    }
+                    save_steer_bodies()
+                    when_summary = format_band_when_desc(when_conditions)
+                    print(
+                        Fore.GREEN
+                        + f"[Steer] band:{bname} -> {mode} {node} rest={rest_val} give={give_val} strength={format_field_source(strength_spec)}{when_summary}."
                         + Style.RESET_ALL
                     )
                     continue
@@ -12463,15 +16956,15 @@ def main():
                             print(Fore.CYAN + "[Steer] no anchors. ':steer anchor <name> here' pins the last reply's state; ':steer anchor <name> from <probe>' copies a probe direction." + Style.RESET_ALL)
                         for an, a in sorted(bodies["anchors"].items()):
                             poles_txt = ", ".join(f"{f}{'+' if s > 0 else '-'}" for f, s in sorted((a.get("poles") or {}).items())) or "untyped"
-                            print(Fore.CYAN + f"[Steer] @{an}: mass {a.get('mass', 1.0):+g}, {'frozen' if a.get('frozen', True) else 'MOBILE'}, poles [{poles_txt}], {len(a.get('dirs') or {})} layer(s)" + Style.RESET_ALL)
+                            print(Fore.CYAN + f"[Steer] ${an}: mass {a.get('mass', 1.0):+g}, {'frozen' if a.get('frozen', True) else 'MOBILE'}, poles [{poles_txt}], {len(a.get('dirs') or {})} layer(s)" + Style.RESET_ALL)
                         continue
-                    aname = re.sub(r"[^a-z0-9_]", "_", sargs[1].lower()).strip("_")
+                    aname = re.sub(r"[^a-z0-9_]", "_", sargs[1].lstrip("@$").lower()).strip("_")
                     sub = sargs[2].lower() if len(sargs) > 2 else "here"
                     if sub == "drop":
                         if bodies["anchors"].pop(aname, None) is not None:
                             bodies["fields"].pop(f"anchor:{aname}", None)
                             save_steer_bodies()
-                            print(Fore.GREEN + f"[Steer] anchor @{aname} dropped." + Style.RESET_ALL)
+                            print(Fore.GREEN + f"[Steer] anchor ${aname} dropped." + Style.RESET_ALL)
                         else:
                             print(Fore.YELLOW + f"[Steer] no anchor named '{aname}'." + Style.RESET_ALL)
                         continue
@@ -12485,7 +16978,7 @@ def main():
                             print(Fore.YELLOW + "[Steer] Usage: :steer anchor <name> mass <number>" + Style.RESET_ALL)
                             continue
                         save_steer_bodies()
-                        print(Fore.GREEN + f"[Steer] anchor @{aname} mass = {float(sargs[3]):+g}." + Style.RESET_ALL)
+                        print(Fore.GREEN + f"[Steer] anchor ${aname} mass = {float(sargs[3]):+g}." + Style.RESET_ALL)
                         continue
                     if sub == "from" and len(sargs) > 3:
                         src = sargs[3]
@@ -12498,7 +16991,7 @@ def main():
                             dirs[int(L)] = vt.detach().float().cpu()
                         bodies["anchors"][aname] = {"dirs": dirs, "mass": 1.0, "frozen": True, "poles": {}}
                         save_steer_bodies()
-                        print(Fore.GREEN + f"[Steer] anchor @{aname} pinned from probe '{src}' ({len(dirs)} layer(s)); frozen; ':steer freeze @{aname} off' makes it mobile under laws." + Style.RESET_ALL)
+                        print(Fore.GREEN + f"[Steer] anchor ${aname} pinned from probe '{src}' ({len(dirs)} layer(s)); frozen; ':steer freeze ${aname} off' makes it mobile under laws." + Style.RESET_ALL)
                         continue
                     if sub in ("here", "last"):
                         last_reply = next(
@@ -12509,7 +17002,7 @@ def main():
                         if not last_reply:
                             print(Fore.YELLOW + "[Steer] no archived assistant turn to capture yet." + Style.RESET_ALL)
                             continue
-                        print(Fore.CYAN + f"[Steer] capturing @{aname} from the last reply (one forward)..." + Style.RESET_ALL)
+                        print(Fore.CYAN + f"[Steer] capturing ${aname} from the last reply (one forward)..." + Style.RESET_ALL)
                         try:
                             dirs = capture_anchor_dirs(model, last_reply)
                         except Exception as e:
@@ -12517,7 +17010,7 @@ def main():
                             continue
                         bodies["anchors"][aname] = {"dirs": dirs, "mass": 1.0, "frozen": True, "poles": {}}
                         save_steer_bodies()
-                        print(Fore.GREEN + f"[Steer] anchor @{aname} pinned at the last reply's state ({len(dirs)} layer(s)), mass +1, frozen." + Style.RESET_ALL)
+                        print(Fore.GREEN + f"[Steer] anchor ${aname} pinned at the last reply's state ({len(dirs)} layer(s)), mass +1, frozen." + Style.RESET_ALL)
                         continue
                     print(Fore.YELLOW + "[Steer] Usage: :steer anchor <name> [here|from <probe>|mass <m>|drop]" + Style.RESET_ALL)
                     continue
@@ -12529,7 +17022,7 @@ def main():
                             tok, probes, model=model, config=config, action_name="steer pole"),
                     )
                     bodies = steer_bodies()
-                    bname_raw = pole_ns.body.lstrip("@")
+                    bname_raw = pole_ns.body.lstrip("@$")
                     fam, sign = parse_pole_spec(pole_ns.pole)
                     if not fam:
                         STEER_POLE_SPEC.fail(f"pole must be family[+|-], got '{pole_ns.pole}'")
@@ -12540,9 +17033,9 @@ def main():
                         shown = bname_raw
                     elif aname in bodies["anchors"]:
                         poles = bodies["anchors"][aname].setdefault("poles", {})
-                        shown = f"@{aname}"
+                        shown = f"${aname}"
                     else:
-                        cands = set(probes) | {f"@{a}" for a in bodies["anchors"]}
+                        cands = set(probes) | {f"${a}" for a in bodies["anchors"]}
                         print(Fore.YELLOW + f"[Steer] '{pole_ns.body}' is neither a probe nor an anchor.{did_you_mean(pole_ns.body, cands)}" + Style.RESET_ALL)
                         continue
                     if turn_off:
@@ -12569,7 +17062,7 @@ def main():
                         for (fa, fb), k in sorted(bodies["laws"].items()):
                             print(Fore.CYAN + f"[Steer] law {fa} <-> {fb}: k={k:+g}" + Style.RESET_ALL)
                         step_now = tuner.get("gravity_law_step", 0.0)
-                        print(Fore.CYAN + f"[Steer] law step = {step_now:g} per turn (':tune gravity_law_step <s>'; moves only unfrozen anchors)." + Style.RESET_ALL)
+                        print(Fore.CYAN + f"[Steer] law step = {step_now:g} per turn (':tune gravity_law_step <s>'; moves unfrozen anchors and unfrozen typed probes)." + Style.RESET_ALL)
                         continue
                     if law_ns.famB is None or law_ns.k is None:
                         STEER_LAW_SPEC.fail("a law needs famA, famB, and k (bare :steer law lists)")
@@ -12743,7 +17236,7 @@ def main():
                             print(Fore.GREEN + f"[Steer] {pname} mass bound to live source {format_field_source(src)}." + Style.RESET_ALL)
                     continue
                 # :steer freeze <probe> [off] -- inertial coefficient: the mass
-                # keeps pulling but its own rolling baseline stops moving.
+                # keeps pulling but its own rolling baseline and position stop moving.
                 if sargs and sargs[0].lower() in ("freeze", "unfreeze"):
                     freeze_ns = STEER_FREEZE_SPEC.parse(
                         " ".join(sargs[1:]),
@@ -12752,8 +17245,8 @@ def main():
                     )
                     pname = freeze_ns.body
                     thaw = sargs[0].lower() == "unfreeze" or bool(freeze_ns.flag)
-                    aname = re.sub(r"[^a-z0-9_]", "_", pname.lstrip("@").lower()).strip("_")
-                    if pname.startswith("@") or (pname not in probes and aname in steer_bodies()["anchors"]):
+                    aname = re.sub(r"[^a-z0-9_]", "_", pname.lstrip("@$").lower()).strip("_")
+                    if pname.startswith(("@", "$")) or (pname not in probes and aname in steer_bodies()["anchors"]):
                         anchors_now = steer_bodies()["anchors"]
                         if aname not in anchors_now:
                             print(Fore.YELLOW + f"[Steer] no anchor named '{aname}'." + Style.RESET_ALL)
@@ -12761,16 +17254,16 @@ def main():
                         anchors_now[aname]["frozen"] = not thaw
                         save_steer_bodies()
                         state_txt = "MOBILE under laws" if thaw else "frozen (a fixed pin again)"
-                        print(Fore.GREEN + f"[Steer] anchor @{aname} is now {state_txt}." + Style.RESET_ALL)
+                        print(Fore.GREEN + f"[Steer] anchor ${aname} is now {state_txt}." + Style.RESET_ALL)
                         continue
                     if pname not in probes:
                         print(Fore.YELLOW + f"[Steer] '{pname}' is not an active probe.{did_you_mean(pname, probes)}" + Style.RESET_ALL)
                         continue
                     set_probe_field(probes, pname, "frozen", not thaw)
                     if thaw:
-                        print(Fore.GREEN + f"[Steer] {pname} baseline unfrozen -- it drifts with observations again." + Style.RESET_ALL)
+                        print(Fore.GREEN + f"[Steer] {pname} unfrozen -- its baseline drifts with observations and it is MOBILE under ':steer law' when poled." + Style.RESET_ALL)
                     else:
-                        print(Fore.GREEN + f"[Steer] {pname} baseline FROZEN -- it still scores and still pulls, but its center no longer moves (it cannot habituate to its own gravity)." + Style.RESET_ALL)
+                        print(Fore.GREEN + f"[Steer] {pname} FROZEN -- it still scores and still pulls, but its baseline and latent position stay fixed (immune to law forces and self-habituation)." + Style.RESET_ALL)
                     continue
                 # :steer <probe> <alpha>  -> pin one probe (negative = steer AWAY).
                 if len(sargs) >= 2 and sargs[0] in probes:
@@ -12886,7 +17379,7 @@ def main():
                         )
                 continue
             if user_input.startswith(":probe"):
-                pargs = user_input[len(":probe"):].strip()
+                pargs = normalize_probe_definition_args(user_input[len(":probe"):].strip())
                 if not pargs:
                     if not probes:
                         print(Fore.CYAN + "[Probe] none active. Mint one: :probe <name> <framing WITH it> || <framing WITHOUT it>" + Style.RESET_ALL)
@@ -12895,7 +17388,9 @@ def main():
                         n_pairs = len(trig.outcomes) if trig else 0
                         exposed_note = ", exposed to the model" if pdata.get("exposed") else ""
                         released_note = ", released (visible/read-only)" if probe_is_released(pdata) else ""
-                        print(Fore.CYAN + f"[Probe] {pname}: {len(pdata['direction'])} layers, {n_pairs} paired turns{exposed_note}{released_note}." + Style.RESET_ALL)
+                        frozen_note = ", frozen" if pdata.get("frozen") else ""
+                        pos_note = f", positioned ({len(pdata['position'])}L)" if isinstance(pdata.get("position"), dict) and pdata.get("position") else ""
+                        print(Fore.CYAN + f"[Probe] {console_probe_name(pname)}: {len(pdata['direction'])} layers{pos_note}, {n_pairs} paired turns{exposed_note}{released_note}{frozen_note}." + Style.RESET_ALL)
                     continue
                 if pargs.lower().startswith("auto"):
                     vparts = pargs.split()
@@ -12916,7 +17411,9 @@ def main():
                     if len(rparts) < 2:
                         print(Fore.YELLOW + "[Probe] Usage: :probe release <name> [off]" + Style.RESET_ALL)
                         continue
-                    pname = re.sub(r"[^a-z0-9_]", "_", rparts[1].lower())[:40]
+                    pname = resolve_probe_choice(rparts[1], probes, model=model, config=config, action_name="release")
+                    if not pname:
+                        continue
                     if pname not in probes:
                         print(Fore.YELLOW + f"[Probe] no active probe named '{pname}'.{did_you_mean(pname, probes)}" + Style.RESET_ALL)
                         continue
@@ -12942,7 +17439,7 @@ def main():
                     continue
 
                 if pargs.lower() in ("choose", "choice"):
-                    active_probe_names = ", ".join(sorted(probes)) or "none"
+                    active_probe_names = ", ".join(probe_alias(name) for name in sorted(probes)) or "none"
                     print(Fore.CYAN + "[Probe] Asking the model to choose a useful probe definition..." + Style.RESET_ALL)
                     suggestion_prompt = (
                         f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
@@ -13014,6 +17511,9 @@ def main():
                             print(Fore.YELLOW + "[Probe Values] Usage: :probe values [name|all] [n]" + Style.RESET_ALL)
                             continue
 
+                    if print_cached_continuation_probe_values(tuner, probes, selected, limit):
+                        continue
+
                     recent_rows = []
                     for row in reversed(list(turn_log)):
                         vals = {}
@@ -13034,9 +17534,9 @@ def main():
                         for pname in selected:
                             sig, raw, n_hist = latest_probe_signal_from_history(probes[pname].get("history"))
                             if sig is None:
-                                print(Fore.CYAN + f"  {pname}: no reading yet" + Style.RESET_ALL)
+                                print(Fore.CYAN + f"  {console_probe_name(pname)}: no reading yet" + Style.RESET_ALL)
                             else:
-                                print(Fore.CYAN + f"  {pname}: {sig:+.3f} (raw {raw:+.3f}, history n={n_hist})" + Style.RESET_ALL)
+                                print(Fore.CYAN + f"  {console_probe_name(pname)}: {sig:+.3f} (raw {raw:+.3f}, history n={n_hist})" + Style.RESET_ALL)
                         continue
 
                     if limit == 1:
@@ -13046,13 +17546,25 @@ def main():
                         for pname in selected:
                             sig = vals.get(pname)
                             if sig is None:
-                                print(Fore.CYAN + f"  {pname}: no reading on that turn" + Style.RESET_ALL)
+                                print(Fore.CYAN + f"  {console_probe_name(pname)}: no reading on that turn" + Style.RESET_ALL)
                                 continue
                             _hist_sig, raw, n_hist = latest_probe_signal_from_history(probes[pname].get("history"))
                             trig = tuner.triggers.get(f"probe_{pname}")
                             parts = [f"{sig:+.3f}"]
                             if raw is not None:
                                 parts.append(f"raw {raw:+.3f}")
+                            prof = probes[pname].get("last_profile") if isinstance(probes[pname].get("last_profile"), dict) else None
+                            if prof:
+                                if prof.get("slab_coord") is not None:
+                                    parts.append(f"pos {prof['slab_coord']:+.3f}")
+                                if prof.get("normalized_distance") is not None:
+                                    parts.append(f"dist {prof['normalized_distance']:.3f}")
+                                if prof.get("peak_token") is not None:
+                                    parts.append(f"peak@{prof['peak_token']}={prof['peak_score']:+.3f}")
+                                by_l = prof.get("by_layer") or {}
+                                if by_l:
+                                    best_l = max(by_l, key=lambda k: abs(by_l[k]))
+                                    parts.append(f"peak_L{best_l}={by_l[best_l]:+.3f}")
                             parts.append(f"history n={n_hist}")
                             if trig is not None:
                                 fires = sig <= trig.value if trig.comparator == "<=" else sig >= trig.value
@@ -13062,12 +17574,12 @@ def main():
                                     parts.append(f"lift {st.get('lift'):+.3f} over {st.get('n_credited')} credited")
                             if probes[pname].get("exposed"):
                                 parts.append("exposed")
-                            print(Fore.CYAN + f"  {pname}: " + ", ".join(parts) + Style.RESET_ALL)
+                            print(Fore.CYAN + f"  {console_probe_name(pname)}: " + ", ".join(parts) + Style.RESET_ALL)
                     else:
                         print(Fore.CYAN + f"[Probe Values] {len(recent_rows)} most recent turn(s):" + Style.RESET_ALL)
                         for idx, (row, vals) in enumerate(recent_rows, 1):
                             ts = row.get("ts") or f"-{idx}"
-                            compact = "  ".join(f"{p}={vals[p]:+.3f}" for p in sorted(vals))
+                            compact = "  ".join(f"{console_probe_name(p)}={vals[p]:+.3f}" for p in sorted(vals))
                             print(Fore.CYAN + f"  {ts}: {compact}" + Style.RESET_ALL)
                     continue
                 if pargs.lower().startswith("drop "):
@@ -13171,68 +17683,390 @@ def main():
                     _save_probe_matches()
                     print(Fore.GREEN + f"[Match] {pn} <-> knob '{knob}'. Then ':probe match {pn} drive [mult]' (servo) or ':probe match {pn} validate' (credit)." + Style.RESET_ALL)
                     continue
-                # :probe define <name> -- share the INITIAL BREAKDOWN: the WITH/WITHOUT
-                # framings the probe was minted from (the operator-authored definition).
+                # Geometric diagnostics never choose, activate, mint, or generate a probe.
+                if pargs.lower() == "define2" or pargs.lower().startswith("define2 "):
+                    from invariants.probe_definition_diagnostic import diagnostic_manager
+                    try:
+                        diagnostic = diagnostic_manager(plasticity_owners.for_tuner(tuner)[0])
+                        print(Fore.CYAN + diagnostic.command(pargs.split()[1:], probes, model) + Style.RESET_ALL)
+                    except Exception as exc:
+                        print(Fore.YELLOW + f'[Probe] Geometric diagnostic could not run: {exc}' + Style.RESET_ALL)
+                    continue
+                if pargs.lower() == 'defining' or pargs.lower().startswith('defining '):
+                    profile_args = pargs.split()[1:]
+                    if len(profile_args) > 1 or (profile_args and profile_args[0].lower() not in {'show', 'on', 'off'}):
+                        print(Fore.YELLOW + '[Probe] Usage: :probe defining [show|on|off]' + Style.RESET_ALL)
+                        continue
+                    profile = defining_profile_for(plasticity_owners.for_tuner(tuner)[0])
+                    if profile_args and profile_args[0].lower() in {'on', 'off'}:
+                        profile.enabled = profile_args[0].lower() == 'on'
+                        try:
+                            profile.save()
+                        except (OSError, RuntimeError, ValueError) as exc:
+                            print(Fore.YELLOW + f'[Probe] Profile reuse changed for this session, but could not be saved: {exc}' + Style.RESET_ALL)
+                    print(Fore.CYAN + '[Probe] ' + profile.summary() + Style.RESET_ALL)
+                    continue
+                # :probe define <name> | :probe <name> define -- inspect original stored definition
                 if pargs.lower().startswith("define "):
                     dname_raw = pargs[7:].strip()
-                    dname = resolve_probe_choice(dname_raw, probes, model=model, config=config, action_name="define")
+                    if not dname_raw:
+                        print(Fore.YELLOW + '[Probe] Usage: :probe define <name> | :probe <name> define' + Style.RESET_ALL)
+                        continue
+                    dname = resolve_probe_definition_target(dname_raw, probes, model=model, config=config, probe_dir=PROBE_DIR)
+                    if not dname:
+                        continue
+                    print_probe_original_definition(dname, probes, PROBE_DIR, tuner=tuner)
+                    continue
+                # Keep the prior activation-only controllers available for experiments.
+                if pargs.lower().startswith("define-experiment "):
+                    dname_raw = pargs[len("define-experiment "):].strip()
+                    dname = resolve_probe_definition_target(dname_raw, probes, model=model, config=config)
                     if not dname:
                         continue
                     if dname not in probes:
                         print(Fore.YELLOW + f"[Probe] no active probe named '{dname}'.{did_you_mean(dname, probes)}" + Style.RESET_ALL)
                         continue
-                    framings = probes[dname].get("framings")
-                    if framings and any(framings):
-                        print(Fore.CYAN + f"[Probe] {dname} was minted with framings:\n  WITH:    {framings[0]}\n  WITHOUT: {framings[1]}" + Style.RESET_ALL)
-                    else:
-                        print(Fore.CYAN + f"[Probe] {dname} has no stored framings (likely adopted from a raw vector)." + Style.RESET_ALL)
-                    continue
-                # :probe explain <name> [alpha|choose] [prompt] -- default is a PING,
-                # not a prompt: briefly steer along the probe's own direction
-                # (envelope-capped) and let the model verbalize whatever the
-                # nudge evokes; the information arrives through activations,
-                # the text asks nothing. The probe's baseline is frozen for
-                # the ping so it cannot habituate to its own motion. Append
-                # 'prompt' for a stored-definition explanation grounded in the
-                # probe's minted WITH/WITHOUT framings.
-                if pargs.lower().startswith("explain "):
-                    explain_ns = PROBE_EXPLAIN_SPEC.parse(pargs[len("explain"):])
-                    ename_raw = explain_ns.name
-                    alpha_tok = explain_ns.alpha
-                    mode_tok = explain_ns.mode
-                    # Tolerate ':probe explain fun prompt' -- mode in the alpha slot.
-                    if alpha_tok is not None and mode_tok is None and alpha_tok.lower() in ("prompt", "words", "verbal"):
-                        mode_tok, alpha_tok = alpha_tok.lower(), None
-                    explain_via_prompt = mode_tok is not None
-                    ping_alpha = 1.0
-                    if alpha_tok is not None:
-                        if alpha_tok.lower() in ("choose", "auto"):
-                            _live_g = float(tuner.get("prioritize_alpha", 0.0))
-                            ping_alpha = _live_g if _live_g > 0 else 1.0
-                            print(
-                                Fore.CYAN
-                                + (f"[Probe] alpha chosen from the live calibrated G (prioritize_alpha = {ping_alpha:g})."
-                                   if _live_g > 0 else
-                                   "[Probe] no calibrated G yet (prioritize_alpha <= 0); alpha defaults to 1. "
-                                   "Set one with :tune prioritize_alpha <v> or :steer field <G>.")
-                                + Style.RESET_ALL
-                            )
+                    from invariants.probe_behavior import definition_key, build_definition_handles, DEFINITION_MAX_TOKENS
+                    from invariants.probe_definition_task import mint_definition_task_axes, TASK_VERSION, DEFINITION_TASK_GAINS
+                    from invariants.probe_definition_check import assess_definition_attempt
+                    matrix = plasticity_owners.for_tuner(tuner)[0]
+                    matrix.other_reference.activate(probes, _other_mint)
+                    behavior = matrix.probe_behavior
+                    evidence = behavior.evidence(dname, probes[dname], probes)
+                    if evidence is None:
+                        print(Fore.CYAN + '[Probe] Definition needs at least four measured behavioral examples with varying readings. No meaning was inferred.' + Style.RESET_ALL)
+                        continue
+                    namespace = definition_key(dname, probes[dname])
+                    subject_layers = tuple(sorted(probes[dname]['direction']))
+                    process_mode = float(tuner.get('probe_define_process', 1.0))
+                    if not math.isfinite(process_mode) or process_mode not in (0, 1, 2, 3):
+                        raise ValueError('Definition process mode must be zero (legacy), one (fixed steps), two (relational conversion), or three (definition structure)')
+                    pipeline_result = None
+                    if process_mode == 3:
+                        if len(subject_layers) < 4:
+                            raise ValueError('Definition structure requires at least four probe layers for its ordered parts')
+                        from invariants.probe_definition_schema import (
+                            get_or_mint_definition_schema, SCHEMA_GAINS, SCHEMA_VERSION)
+                        from invariants.probe_definition_sequence import (
+                            DefinitionSchemaSequence, build_schema_sequence_handles)
+                        from invariants.definition_prefill import (
+                            DEFAULT_DEFINITION_PREFIX, prepare_assistant_continuation,
+                            finish_assistant_continuation)
+                        schema_prefill = float(tuner.get('probe_define_schema_prefill', 1.0))
+                        if not math.isfinite(schema_prefill) or schema_prefill not in (0, 1):
+                            raise ValueError('Definition structure prefill must be zero or one')
+                        schema_prefix = DEFAULT_DEFINITION_PREFIX if schema_prefill else ''
+                        schema_gains = {part: float(tuner.get('probe_define_schema_' + part, gain))
+                                        for part, gain in SCHEMA_GAINS.items()}
+                        print(Fore.CYAN + '[Probe] Preparing definition structure: genus -> core -> boundary -> compose.' + Style.RESET_ALL)
+                        schema_bank, schema_metadata = get_or_mint_definition_schema(
+                            model, subject_layers, Path(__file__).resolve().parent.parent / 'invariants/out/definition_schema',
+                            assistant_prefix=schema_prefix)
+                        schema_prompt, schema_prefill_metadata = prepare_assistant_continuation(
+                            model, evidence, schema_prefix)
+                        definition_controls = {'mode': 'structure', 'schema_version': SCHEMA_VERSION,
+                            'schema_profiles': schema_metadata, 'role_gains': schema_gains,
+                            'prefill': schema_prefill_metadata, 'subject_gain': .02,
+                            'max_tokens': DEFINITION_MAX_TOKENS, 'sequence': None}
+                    elif process_mode:
+                        from invariants.probe_definition_steps import get_or_mint_definition_steps, STEP_ORDER, STEP_GAINS, STEP_VERSION
+                        from invariants.probe_definition_pipeline import run_definition_pipeline, PIPELINE_VERSION
+                        step_gains = {step: float(tuner.get('probe_define_step_' + step, gain))
+                                      for step, gain in STEP_GAINS.items()}
+                        if process_mode == 2:
+                            from invariants.probe_definition_relations import (
+                                get_or_mint_definition_relations, resolve_definition_relations, RELATION_VERSION)
+                            print(Fore.CYAN + '[Probe] Preparing relational conversions: compare -> isolate -> distill -> verify.' + Style.RESET_ALL)
+                            relation_bank, relation_metadata = get_or_mint_definition_relations(
+                                model, subject_layers, Path(__file__).resolve().parent.parent / 'invariants/out/definition_relations')
+                            definition_controls = {'mode': 'relational', 'relation_version': RELATION_VERSION,
+                                'pipeline_version': PIPELINE_VERSION, 'step_gains': step_gains,
+                                'stage_max_tokens': DEFINITION_MAX_TOKENS, 'subject_gain': .02,
+                                'task_position': 'decision', 'relation_profiles': relation_metadata,
+                                'relation_predictions': []}
+                            print(Fore.CYAN + f'[Probe] Relational profiles stored at {relation_metadata["path"]}; conversion adapts to each step\'s evidence.' + Style.RESET_ALL)
                         else:
+                            print(Fore.CYAN + '[Probe] Preparing stored operation steps: compare -> isolate -> distill -> verify.' + Style.RESET_ALL)
+                            step_bank, step_metadata = get_or_mint_definition_steps(
+                                model, subject_layers, Path(__file__).resolve().parent.parent / 'invariants/out/definition_steps')
+                            definition_controls = {'mode': 'steps', 'step_version': STEP_VERSION,
+                                'pipeline_version': PIPELINE_VERSION, 'step_gains': step_gains,
+                                'stage_max_tokens': DEFINITION_MAX_TOKENS, 'subject_gain': .02,
+                                'step_vectors': step_metadata}
+                            print(Fore.CYAN + f'[Probe] Step-vectors stored at {step_metadata["path"]}; each step must pass its evidence check before the next starts.' + Style.RESET_ALL)
+                    else:
+                        axes = getattr(behavior, '_definition_task_axes', {})
+                        behavior._definition_task_axes = axes
+                        model_scope = (subject_layers, TASK_VERSION, getattr(model, 'd_model', None), id(model.model))
+                        if model_scope not in axes:
+                            print(Fore.CYAN + '[Probe] Preparing probe question and definition activation controls.' + Style.RESET_ALL)
+                            axes[model_scope] = mint_definition_task_axes(model, subject_layers)
+                        task_gains = {axis: float(tuner.get('probe_define_' + axis, gain))
+                                      for axis, gain in DEFINITION_TASK_GAINS.items()}
+                        subtraction = float(tuner.get('probe_define_subtract', 0.0))
+                        if not math.isfinite(subtraction) or not 0 <= subtraction <= 1:
+                            raise ValueError('Definition subtraction must be finite and between zero and one')
+                        definition_axes = dict(axes[model_scope])
+                        operation_version = None
+                        operation_evidence_hash = None
+                        operation_scope = None
+                        if task_gains.get('operation'):
+                            from invariants.probe_definition_operation import mint_definition_operation_axis, OPERATION_VERSION
+                            import hashlib
+                            operation_version = OPERATION_VERSION
+                            operation_evidence_hash = hashlib.sha256(evidence.encode('utf-8')).hexdigest()
+                            operation_cache = getattr(behavior, '_definition_operation_axes', {})
+                            behavior._definition_operation_axes = operation_cache
+                            operation_scope = (model_scope, OPERATION_VERSION, operation_evidence_hash)
+                            if operation_scope not in operation_cache:
+                                print(Fore.CYAN + '[Probe] Measuring definition versus recap for these memories at the assistant decision position.' + Style.RESET_ALL)
+                                operation_direction = mint_definition_operation_axis(model, subject_layers, evidence=evidence)
+                                if len(operation_cache) >= 8:
+                                    expired_scope = next(iter(operation_cache))
+                                    operation_cache.pop(expired_scope)
+                                    prior_nuisances = getattr(behavior, '_definition_nuisance_axes', {})
+                                    for prior_scope in list(prior_nuisances):
+                                        if len(prior_scope) == 3 and prior_scope[0] == expired_scope:
+                                            prior_nuisances.pop(prior_scope)
+                                operation_cache[operation_scope] = operation_direction
+                            definition_axes['operation'] = operation_cache[operation_scope]
+                        refinement = {}
+                        refinement_version = None
+                        if subtraction:
+                            from invariants.probe_definition_refinement import (
+                                mint_definition_nuisance_axes, refine_definition_axes, REFINEMENT_VERSION)
+                            refinement_version = REFINEMENT_VERSION
+                            nuisance_cache = getattr(behavior, '_definition_nuisance_axes', {})
+                            behavior._definition_nuisance_axes = nuisance_cache
+                            active_styles = {axis: definition_axes[axis] for axis in ('contrast', 'abstraction')
+                                             if task_gains.get(axis)}
+                            if active_styles:
+                                nuisance_scope = (model_scope, REFINEMENT_VERSION)
+                                if nuisance_scope not in nuisance_cache:
+                                    print(Fore.CYAN + '[Probe] Measuring verbosity, list format, topic, and generic framing components.' + Style.RESET_ALL)
+                                    nuisance_cache[nuisance_scope] = mint_definition_nuisance_axes(model, subject_layers, definition_axes)
+                                cleaned_styles, refinement = refine_definition_axes(
+                                    active_styles, nuisance_cache[nuisance_scope], strength=subtraction)
+                                definition_axes.update(cleaned_styles)
+                            if operation_scope is not None:
+                                from invariants.probe_definition_operation import mint_definition_operation_nuisances
+                                decision_scope = (operation_scope, REFINEMENT_VERSION, 'decision')
+                                if decision_scope not in nuisance_cache:
+                                    print(Fore.CYAN + '[Probe] Measuring the same nuisance components at the assistant decision position.' + Style.RESET_ALL)
+                                    nuisance_cache[decision_scope] = mint_definition_operation_nuisances(model, subject_layers, evidence=evidence)
+                                operation_axes, operation_refinement = refine_definition_axes(
+                                    {'contrast': definition_axes['operation']}, nuisance_cache[decision_scope], strength=subtraction)
+                                definition_axes['operation'] = operation_axes['contrast']
+                                refinement['operation'] = operation_refinement['contrast']
+                            if refinement:
+                                retained = min(item['retained_fraction'] for layers in refinement.values() for item in layers.values())
+                                print(Fore.CYAN + f'[Probe] Definition subtraction={subtraction:g}; minimum retained signal={retained:.1%}. Precision still requires checking the output.' + Style.RESET_ALL)
+                            else:
+                                print(Fore.CYAN + '[Probe] Subtraction skipped: no comparison controls are enabled.' + Style.RESET_ALL)
+                        definition_controls = {'mode': 'legacy', 'task_version': TASK_VERSION,
+                            'task_gains': task_gains, 'subject_gain': .02, 'subtraction': subtraction,
+                            'task_positions': {'operation': 'decision'}, 'operation_version': operation_version,
+                            'operation_evidence_hash': operation_evidence_hash,
+                            'refinement_version': refinement_version, 'refinement': refinement}
+                    import hashlib
+                    definition_controls['namespace'] = namespace
+                    definition_controls['evidence_sha256'] = hashlib.sha256(evidence.encode('utf-8')).hexdigest()
+                    handles = []
+                    cache_before = (config.cache_enabled, config.cache_write_enabled)
+                    definition_saved = apply_config_overrides(config, {
+                        'max_routing_events': 0, 'max_synthesis_events': 0,
+                        'max_synthesis_steps': 0, 'max_loops': 0})
+                    config.cache_enabled = config.cache_write_enabled = False
+                    try:
+                        if process_mode == 3:
+                            schema_sequence = DefinitionSchemaSequence()
+                            handles = build_schema_sequence_handles(
+                                model, probes[dname]['direction'], schema_bank,
+                                role_gains=schema_gains, sequence=schema_sequence)
+                            print(Fore.CYAN + '[Probe] Definition structure active; the model continues from its assistant prefix.' + Style.RESET_ALL)
+                            schema_reply = _engine_generate(model, instruction=schema_prompt, config=config, vecs={},
+                                pre_formatted=True, max_new_tokens=DEFINITION_MAX_TOKENS, chatty_log=False,
+                                return_telemetry=True)
+                            if not isinstance(schema_reply, tuple) or len(schema_reply) != 2:
+                                raise ValueError('Definition structure requires generated-token telemetry')
+                            from invariants.probe_definition_pipeline import _generated_tokens
+                            _generated_tokens(schema_reply[1])
+                            definition_reply = (finish_assistant_continuation(schema_prefix, schema_reply[0]), schema_reply[1])
+                            definition_controls['sequence'] = schema_sequence.trace()
+                        elif process_mode:
+                            def generate_definition_step(step, stage_evidence, budget):
+                                step_handles = []
+                                try:
+                                    step_options = {}
+                                    if process_mode == 2:
+                                        step_direction, relation_diagnostics = resolve_definition_relations(
+                                            model, relation_bank, step, stage_evidence)
+                                        definition_controls['relation_predictions'].append({
+                                            'step': step,
+                                            'evidence_sha256': hashlib.sha256(stage_evidence.encode('utf-8')).hexdigest(),
+                                            'diagnostics': relation_diagnostics})
+                                        step_options = {'task_positions': {step: 'decision'},
+                                                        'task_layer_scales': {step: relation_diagnostics['layer_scales']}}
+                                    else:
+                                        step_direction = step_bank[step]
+                                    step_handles = build_definition_handles(
+                                        model, probes[dname]['direction'], {step: step_direction},
+                                        task_gains={step: step_gains[step]}, **step_options)
+                                    if len(step_handles) != len(subject_layers):
+                                        raise ValueError('Definition step must cover every subject layer')
+                                    print(Fore.CYAN + f'[Probe] {step}: activation active on {len(subject_layers)}/{len(subject_layers)} probe layers.' + Style.RESET_ALL)
+                                    return _engine_generate(model, instruction=stage_evidence, config=config, vecs={},
+                                        pre_formatted=False, max_new_tokens=budget, chatty_log=False,
+                                        return_telemetry=True)
+                                finally:
+                                    for step_handle in step_handles:
+                                        step_handle.remove()
+                            pipeline_result = run_definition_pipeline(
+                                evidence, behavior.definition_memories(dname, probes[dname]),
+                                generate_definition_step, step_gains=step_gains,
+                                stage_max_tokens=DEFINITION_MAX_TOKENS)
+                            definition_controls['pipeline'] = pipeline_result
+                            if pipeline_result['failed_step']:
+                                print(Fore.CYAN + f'[Probe] Stopped at {pipeline_result["failed_step"]}; later steps were not run.' + Style.RESET_ALL)
+                        else:
+                            handles = build_definition_handles(model, probes[dname]['direction'], definition_axes,
+                                                               task_gains=task_gains,
+                                                               task_positions={'operation': 'decision'})
+                            if len(handles) != len(subject_layers):
+                                raise ValueError('Definition activation controls must cover every subject layer')
+                            print(Fore.CYAN + f'[Probe] Definition inquiry active on {len(subject_layers)}/{len(subject_layers)} probe layers.' + Style.RESET_ALL)
+                            definition_reply = _engine_generate(model, instruction=evidence, config=config, vecs={},
+                                pre_formatted=False, max_new_tokens=DEFINITION_MAX_TOKENS, chatty_log=False,
+                                return_telemetry=True)
+                    finally:
+                        for handle in handles:
+                            handle.remove()
+                        config.cache_enabled, config.cache_write_enabled = cache_before
+                        restore_config_overrides(config, definition_saved)
+                    if pipeline_result is not None:
+                        text = pipeline_result['text']
+                        status = pipeline_result['status']
+                        qualification = pipeline_result['qualification']
+                        budget_reached = status == 'incomplete'
+                    else:
+                        text = definition_reply[0] if isinstance(definition_reply, tuple) else definition_reply
+                        definition_stats = definition_reply[1] if isinstance(definition_reply, tuple) else {}
+                        budget_reached = definition_stats.get('tokens_generated', 0) >= DEFINITION_MAX_TOKENS
+                        text = (text or '').strip()
+                        qualification = assess_definition_attempt(text, selected=behavior.definition_memories(dname, probes[dname]))
+                        if process_mode == 3:
+                            from invariants.definition_schema_check import assess_schema_definition
+                            qualification = assess_schema_definition(
+                                text, selected=behavior.definition_memories(dname, probes[dname]))
+                            budget_reached = budget_reached or definition_stats.get('finish_reason') in ('length', 'max_tokens')
+                        status = 'incomplete' if budget_reached else 'hypothesis' if qualification['accepted'] else 'unqualified'
+                    if text or pipeline_result is not None:
+                        behavior.record_interpretation(dname, probes[dname], text, status=status,
+                                                       controls=definition_controls, qualification=qualification)
+                        observed = len(behavior.records.get(namespace, []))
+                        matrix.exposure_language.record_namespace_summary(dname, probes[dname], text, observed,
+                                                                          status=status, qualification=qualification)
+                        definition_query = extract_probe_query(text)
+                        if status == 'hypothesis' and definition_query and definition_query.strip().lower().startswith('rename '):
+                            language = matrix.exposure_language
+                            language.sync(probes, tuner)
                             try:
-                                ping_alpha = float(alpha_tok)
-                            except ValueError:
-                                PROBE_EXPLAIN_SPEC.fail(f"alpha must be a number or choose, got '{alpha_tok}'")
-                    ename_resolved = resolve_probe_choice(ename_raw, probes, model=model, config=config, action_name="explain")
+                                target = definition_query.split('||', 1)[0].split()
+                                if len(target) != 2 or target[1] != probe_alias(dname):
+                                    raise ValueError('Definition naming must address the selected sensor hash')
+                                _, naming_result = language.naming_query(definition_query, probes)
+                            except (ValueError, OSError) as exc:
+                                naming_result = f'Naming refused: {exc}'
+                            print(Fore.CYAN + f'[Probe] {console_probe_name(dname)}: {naming_result}' + Style.RESET_ALL)
+                    heading = ('Definition reached its token limit; output retained as incomplete' if budget_reached else
+                               'Namespace interpretation hypothesis' if status == 'hypothesis' else
+                               'Definition attempt retained as unqualified: ' + qualification['reason'])
+                    display_text = behavior.annotate_definition_memories(dname, probes[dname], text)
+                    print(Fore.CYAN + f'[Probe] {heading}:\n{display_text}' + Style.RESET_ALL)
+                    continue
+                # Blank native continuation with activation arithmetic by default.
+                # Explicit logits/evidence/prompt/ping modes retain their own input contracts.
+                if pargs.lower().startswith("explain "):
+                    explain_raw = pargs[len("explain"):].strip()
+                    if not explain_raw:
+                        print(Fore.YELLOW + "[Probe] Usage: :probe explain <name> [activation|logits|evidence|prompt|ping [alpha]] | :probe <name> explain" + Style.RESET_ALL)
+                        continue
+                    tokens = explain_raw.split()
+                    ename_raw = tokens[0]
+                    rest = [t.lower() for t in tokens[1:]]
+
+                    try:
+                        mode_tok, alpha_tok = parse_probe_explain_mode(rest)
+                    except ValueError as exc:
+                        print(Fore.YELLOW + f"[Probe] {exc}" + Style.RESET_ALL)
+                        continue
+                    is_ping = mode_tok == 'ping'
+
+                    if mode_tok == 'logits':
+                        logit_target = ename_raw.strip().strip('[]')
+                        if logit_target.startswith('probe:'):
+                            logit_target = logit_target[len('probe:'):]
+                        if logit_target.lstrip('?').lower() in ('choice', 'choose', 'auto') and logit_target not in probes:
+                            print(Fore.YELLOW + '[Probe Logits] Select a named probe or displayed ID; this diagnostic does not generate a target choice.' + Style.RESET_ALL)
+                            continue
+                    ename_resolved = resolve_probe_definition_target(ename_raw, probes, model=model, config=config, probe_dir=PROBE_DIR)
                     if not ename_resolved:
                         continue
                     if ename_resolved not in probes:
                         print(Fore.YELLOW + f"[Probe] no active probe named '{ename_resolved}'.{did_you_mean(ename_resolved, probes)}" + Style.RESET_ALL)
                         continue
-                    ping_dirs = probes[ename_resolved].get("direction") or {}
-                    if not explain_via_prompt and not ping_dirs:
-                        print(Fore.YELLOW + f"[Probe] '{ename_resolved}' has no stored direction; falling back to the prompt explanation." + Style.RESET_ALL)
-                        explain_via_prompt = True
-                    if not explain_via_prompt:
+
+                    if mode_tok == 'logits':
+                        # Counterfactuals share a fresh, unsteered native header;
+                        # this measurement does not read the live steered history.
+                        from invariants.probe_logit_distance import (
+                            measure_probe_logit_distance, render_probe_logit_distance,
+                        )
+                        from invariants.activation_explanation_output import record_activation_explanation
+                        try:
+                            epsilon = float(tuner.get('probe_explain_logits_epsilon', .01))
+                            if not math.isfinite(epsilon) or not 0 < epsilon <= .1:
+                                raise ValueError('probe_explain_logits_epsilon must be finite, positive, and no larger than 0.1')
+                            report = measure_probe_logit_distance(
+                                model, probes[ename_resolved].get('direction') or {}, '', epsilon=epsilon)
+                            rendered = render_probe_logit_distance(report)
+                        except Exception as exc:
+                            print(Fore.RED + f'[Probe Logits] Diagnostic failed: {exc}' + Style.RESET_ALL)
+                            continue
+                        print(Fore.CYAN + rendered + Style.RESET_ALL)
+                        matrix = plasticity_owners.for_tuner(tuner)[0]
+                        try:
+                            trace_path = record_activation_explanation(matrix, {
+                                'probe': ename_resolved, 'mode': 'logits', 'status': 'diagnostic',
+                                'report': report, 'semantic_truth_checked': False,
+                            })
+                        except (OSError, TypeError, ValueError) as exc:
+                            trace_path = None
+                            print(Fore.YELLOW + f'[Probe Logits] Could not save operator trace: {exc}' + Style.RESET_ALL)
+                        if trace_path:
+                            print(Fore.CYAN + f'[Probe Logits] Operator trace: {trace_path}' + Style.RESET_ALL)
+                        continue
+
+                    if is_ping:
+                        ping_alpha = 1.0
+                        if alpha_tok is not None:
+                            if alpha_tok == "choose":
+                                _live_g = float(tuner.get("prioritize_alpha", 0.0))
+                                ping_alpha = _live_g if _live_g > 0 else 1.0
+                                print(
+                                    Fore.CYAN
+                                    + (f"[Probe] alpha chosen from the live calibrated G (prioritize_alpha = {ping_alpha:g})."
+                                       if _live_g > 0 else
+                                       "[Probe] no calibrated G yet (prioritize_alpha <= 0); alpha defaults to 1. "
+                                       "Set one with :tune prioritize_alpha <v> or :steer field <G>.")
+                                    + Style.RESET_ALL
+                                )
+                            else:
+                                ping_alpha = float(alpha_tok)
+                        ping_dirs = probes[ename_resolved].get("direction") or {}
+                        if not ping_dirs:
+                            print(Fore.YELLOW + f"[Probe] '{ename_resolved}' has no stored direction to ping." + Style.RESET_ALL)
+                            continue
                         ping_layers = sorted(int(l) for l in ping_dirs.keys())
                         print(
                             Fore.CYAN
@@ -13243,10 +18077,6 @@ def main():
                         from invariants.engine import _steer_handles as _ping_steer
                         was_frozen = probes[ename_resolved].get("frozen", False)
                         probes[ename_resolved]["frozen"] = True
-                        # A ping is a diagnostic nudge: cached task deltas are
-                        # the wrong authority for reading the probe's effect,
-                        # and its output must never be STORED -- the cache sits
-                        # at capacity, so every ping write evicts a real memory.
                         _ping_cache_before = (config.cache_enabled, config.cache_write_enabled)
                         config.cache_enabled = False
                         config.cache_write_enabled = False
@@ -13276,66 +18106,242 @@ def main():
                         print(Fore.CYAN + f"[Probe] {ename_resolved} under ping:\n{(ping_text or '').strip()}" + Style.RESET_ALL)
                         print(
                             Fore.CYAN
-                            + f"[Probe] If that reads generic/off-target, the activation nudge was not legible; "
-                              f"':probe define {ename_resolved}' shows the saved framings, and "
-                              f"':probe explain {ename_resolved} prompt' asks for a definition-grounded wording."
+                            + f"[Probe] ':probe {ename_resolved} explain' tries activation arithmetic, ':probe {ename_resolved} explain evidence' investigates measured behavior, and ':probe {ename_resolved} define' views its original definition."
                             + Style.RESET_ALL
                         )
                         continue
-                    framings = probes[ename_resolved].get("framings")
-                    if framings and any(framings):
-                        with_pole = (framings[0] or "(missing high-pole wording)").strip()
-                        without_pole = (framings[1] or "(missing low-pole wording)").strip()
-                        basis = (
-                            f"WITH / high pole: {with_pole}\n"
-                            f"WITHOUT / low pole: {without_pole}\n"
+
+                    if mode_tok == "prompt":
+                        # Model-perceived definition: NEVER inspects or passes stored framings/definitions.
+                        ping_dirs = probes[ename_resolved].get("direction") or {}
+                        from invariants.engine import _steer_handles as _prompt_steer
+                        default_explain_prompt = (
+                            "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
+                            "PROBE_MODEL_PERCEIVED_DEFINITION\n"
+                            "You are defining a cognitive distinction in your own activations for the operator.\n"
+                            "Probe identifier: $ename_resolved\n"
+                            "A cognitive probe is a direction in your own activations that scores each reply.\n"
+                            "Without referencing any external seed text or human-written framings, define the property "
+                            "that this activation direction represents in your internal state. "
+                            "State what lower versus higher readings express.\n"
+                            "<|eot_id|>\n"
+                            "<|start_header_id|>assistant<|end_header_id|>\n\n"
+                            "This probe measures "
                         )
-                    else:
-                        basis = (
-                            "NO STORED WITH/WITHOUT FRAMINGS: this probe was adopted from a raw vector, "
-                            "so there is no deterministic high/low wording beyond the saved vector/name.\n"
+                        xprompt = load_prompt(
+                            "probe_explain",
+                            default_explain_prompt,
+                            required_substring=(
+                                "PROBE_MODEL_PERCEIVED_DEFINITION",
+                                "Probe identifier: $ename_resolved",
+                                "This probe measures ",
+                            ),
+                            ename_resolved=ename_resolved,
                         )
-                    default_explain_prompt = (
-                        "<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n"
-                        "PROBE_EXPLAIN_CONTEXT_V2\n"
-                        "You are explaining one saved cognitive probe definition to the operator.\n"
-                        "Probe name: $ename_resolved\n"
-                        "A cognitive probe is a direction in your own activations that scores each reply.\n"
-                        "Stored definition for $ename_resolved:\n$basis\n"
-                        "Use the stored definition above. Do not explain the word \"this\", do not describe "
-                        "probes in general, and do not invent a new meaning for $ename_resolved.\n"
-                        "Answer in two or three sentences: what a high reading means, what a low reading "
-                        "means, and whether this is definition-grounded or only a raw-vector guess."
-                        "<|eot_id|>"
-                        "<|start_header_id|>assistant<|end_header_id|>\n\n"
-                    )
-                    xprompt = load_prompt(
-                        "probe_explain",
-                        default_explain_prompt,
-                        required_substring=(
-                            "PROBE_EXPLAIN_CONTEXT_V2",
-                            "Probe name: $ename_resolved",
-                            "Stored definition for $ename_resolved",
-                            "Do not explain the word \"this\"",
-                            "$basis",
-                        ),
-                        ename_resolved=ename_resolved,
-                        basis=basis
-                    )
-                    print(Fore.CYAN + f"[Probe] Asking the model to explain '{ename_resolved}' in its own words..." + Style.RESET_ALL)
-                    # Same diagnostic rule as the ping: meta-talk about a probe
-                    # must not read from or write into the cognitive cache.
-                    _explain_cache_before = (config.cache_enabled, config.cache_write_enabled)
-                    config.cache_enabled = False
-                    config.cache_write_enabled = False
-                    try:
-                        expl = generate_agentic_text(model, instruction=xprompt, config=config, pre_formatted=True, max_new_tokens=200, chatty_log=False)
-                    except Exception as e:
-                        print(Fore.RED + f"[Probe] explain failed: {e}" + Style.RESET_ALL)
+                        print(Fore.CYAN + f"[Probe] Asking the model to define '{ename_resolved}' from its own activations (zero stored definition inspection)..." + Style.RESET_ALL)
+                        _explain_cache_before = (config.cache_enabled, config.cache_write_enabled)
+                        config.cache_enabled = False
+                        config.cache_write_enabled = False
+                        prompt_handles = []
+                        try:
+                            if ping_dirs:
+                                prompt_handles = _prompt_steer(model, ping_dirs, list(ping_dirs.keys()), 1.0)
+                            expl = generate_agentic_text(model, instruction=xprompt, config=config, pre_formatted=True, max_new_tokens=150, chatty_log=False)
+                        except Exception as e:
+                            print(Fore.RED + f"[Probe] explain failed: {e}" + Style.RESET_ALL)
+                            continue
+                        finally:
+                            for h in prompt_handles:
+                                h.remove()
+                            config.cache_enabled, config.cache_write_enabled = _explain_cache_before
+                        expl_text = expl[0] if isinstance(expl, tuple) else expl
+                        full_def = "This probe measures " + (expl_text or "").strip()
+                        print(Fore.CYAN + f"[Probe Definition] Model-perceived definition for {ename_resolved}:\n{full_def}" + Style.RESET_ALL)
                         continue
+
+                    if mode_tok == 'activation':
+                        from invariants.probe_activation_explain import (
+                            EXPLAIN_GAINS, generate_activation_explanation,
+                        )
+                        from invariants.activation_explanation_output import (
+                            assess_activation_explanation, record_activation_explanation,
+                        )
+                        matrix = plasticity_owners.for_tuner(tuner)[0]
+                        axis_cache = getattr(matrix, 'activation_explanation_axes', None)
+                        if axis_cache is None:
+                            axis_cache = {}
+                            matrix.activation_explanation_axes = axis_cache
+                        try:
+                            gains = {axis: float(tuner.get('probe_explain_' + axis, default))
+                                     for axis, default in EXPLAIN_GAINS.items()}
+                            map_selection = float(tuner.get('probe_explain_map', 0.))
+                            if map_selection not in (0., 1.):
+                                raise ValueError('probe_explain_map must be 0 or 1')
+                            map_tokens = tuner.get('probe_explain_map_tokens', 24.)
+                            print(Fore.CYAN + f"[Probe Explain] Activation candidate for {console_probe_name(ename_resolved)} "
+                                  + f"(subject {gains['subject']:g}, operation {gains['operation']:g}, reference {gains['reference']:g}; "
+                                  + ("current-state map; " if map_selection else "")
+                                  + "no written request)..."
+                                  + Style.RESET_ALL)
+                            result = generate_activation_explanation(
+                                model, probes[ename_resolved].get('direction') or {}, '',
+                                generate=_engine_generate, config=config,
+                                subject_gain=gains['subject'], operation_gain=gains['operation'],
+                                reference_gain=gains['reference'], axis_cache=axis_cache,
+                                map_enabled=bool(map_selection), map_tokens=map_tokens,
+                            )
+                            text = str(result.get('text') or '').strip()
+                            qualification = assess_activation_explanation(
+                                text, result.get('telemetry'),
+                                result.get('metadata', {}).get('max_tokens', 384),
+                            )
+                        except Exception as exc:
+                            print(Fore.RED + f"[Probe Explain] Activation explanation failed: {exc}" + Style.RESET_ALL)
+                            continue
+                        # Keep operator diagnostics separate from qualified interpretations
+                        # and learned namespace summaries; no semantic truth was checked.
+                        attempts = getattr(matrix, 'activation_explanations', None)
+                        if attempts is None:
+                            attempts = []
+                            matrix.activation_explanations = attempts
+                        attempt = {'probe': ename_resolved, 'mode': 'activation',
+                                   'status': qualification['status'], 'text': text,
+                                   'controls': gains, 'metadata': result.get('metadata', {}),
+                                   'telemetry': result.get('telemetry', {}),
+                                   'qualification': qualification,
+                                   'semantic_truth_checked': False}
+                        attempts.append(attempt)
+                        del attempts[:-16]
+                        try:
+                            trace_path = record_activation_explanation(matrix, attempt)
+                        except (OSError, TypeError, ValueError) as exc:
+                            trace_path = None
+                            print(Fore.YELLOW + f"[Probe Explain] Could not save operator trace: {exc}"
+                                  + Style.RESET_ALL)
+                        if qualification['accepted']:
+                            print(Fore.CYAN + f"[Probe Explain] Activation explanation candidate for {console_probe_name(ename_resolved)}:\n{text}"
+                                  + "\nCandidate meaning and explanation quality are unverified." + Style.RESET_ALL)
+                        else:
+                            print(Fore.YELLOW + f"[Probe Explain] No activation explanation produced: {qualification['reason']}"
+                                  + Style.RESET_ALL)
+                            if text:
+                                print(Fore.YELLOW + f"[Probe Explain] Unqualified continuation:\n{text}"
+                                      + Style.RESET_ALL)
+                        if trace_path:
+                            print(Fore.CYAN + f"[Probe Explain] Operator trace: {trace_path}" + Style.RESET_ALL)
+                        continue
+
+                    # Explicit evidence mode: empirical measured-behavior explanation.
+                    dname = ename_resolved
+                    from invariants.probe_behavior import definition_key, build_definition_handles, DEFINITION_MAX_TOKENS
+                    from invariants.probe_definition_output import OUTPUT_PREFIX, run_definition_output
+                    from invariants.definition_prefill import prepare_assistant_continuation, finish_assistant_continuation
+                    matrix = plasticity_owners.for_tuner(tuner)[0]
+                    matrix.other_reference.activate(probes, _other_mint)
+                    behavior = matrix.probe_behavior
+                    evidence = behavior.evidence(dname, probes[dname], probes)
+                    if evidence is None:
+                        namespace = definition_key(dname, probes[dname])
+                        recorded = [it for it in behavior.interpretations.get(namespace, []) if it.get('qualified')]
+                        if recorded:
+                            print(Fore.CYAN + f"[Probe Explain] Definition hypothesis (recorded model-perceived) for {console_probe_name(dname)}:\n{recorded[-1]['text']}" + Style.RESET_ALL)
+                            continue
+                        print(Fore.CYAN + f"[Probe Explain] Explanation from measured behavior needs at least four measured examples with varying readings for '{dname}'. "
+                              + f"To import archived replies, run :probe backfill {dname}.\n"
+                              + f"To view original stored definition and framings, run :probe {dname} define." + Style.RESET_ALL)
+                        continue
+                    selected = behavior.definition_memories(dname, probes[dname])
+                    namespace = definition_key(dname, probes[dname])
+                    profile = defining_profile_for(matrix)
+                    from invariants.engine import get_steer_cap_fraction
+                    definition_settings = {
+                        'assistant_prefix': OUTPUT_PREFIX, 'subject_fraction': .02,
+                        'max_tokens': DEFINITION_MAX_TOKENS, 'decoding': 'greedy',
+                        'cap_fraction': get_steer_cap_fraction(),
+                        'config_overrides': {'cache_enabled': False, 'cache_write_enabled': False,
+                                             'max_routing_events': 0, 'max_synthesis_events': 0,
+                                             'max_synthesis_steps': 0, 'max_loops': 0,
+                                             'lookahead_processor': None}}
+                    defining_session = profile.session(model, tuple(sorted(probes[dname]['direction'])),
+                        evidence=evidence, namespace=namespace, settings=definition_settings)
+                    prefills = []
+                    cache_before = (config.cache_enabled, config.cache_write_enabled)
+                    generation_state_before = {
+                        key: (hasattr(config, key), getattr(config, key, None))
+                        for key in ('_generation_deadline', '_generation_budget_sec',
+                                    '_synthesis_events_used', 'committee', 'lookahead_processor')}
+                    definition_saved = apply_config_overrides(config, {
+                        'max_routing_events': 0, 'max_synthesis_events': 0,
+                        'max_synthesis_steps': 0, 'max_loops': 0})
+                    config.cache_enabled = config.cache_write_enabled = False
+                    config.lookahead_processor = None
+                    print(Fore.CYAN + f'[Probe Explain] Inferring model-perceived definition for {console_probe_name(dname)} from measured behavior...' + Style.RESET_ALL)
+                    try:
+                        def generate_definition_output(request, budget):
+                            handles = []
+                            try:
+                                defining_session.capture(request)
+                                prompt, prefill = prepare_assistant_continuation(model, request, OUTPUT_PREFIX)
+                                prefills.append(prefill)
+                                replay = defining_session.steering()
+                                axes, options = {}, {'task_gains': {}}
+                                if replay is not None:
+                                    replay_layer = replay['layer']
+                                    if replay_layer not in probes[dname]['direction']:
+                                        raise ValueError('Defining replay layer must belong to the selected probe')
+                                    axes = {'defining_profile': dict(probes[dname]['direction'])}
+                                    axes['defining_profile'][replay_layer] = replay['direction']
+                                    options = {'task_gains': {'defining_profile': replay['gain']},
+                                        'task_positions': {'defining_profile': 'decision'},
+                                        'task_layer_scales': {'defining_profile': {
+                                            layer: float(layer == replay_layer) for layer in probes[dname]['direction']}}}
+                                    print(Fore.CYAN + '[Probe] Reusing learned defining activation; checking output form.' + Style.RESET_ALL)
+                                handles = build_definition_handles(model, probes[dname]['direction'], axes, **options)
+                                reply = _engine_generate(model, instruction=prompt, config=config, vecs={},
+                                    pre_formatted=True, max_new_tokens=budget, chatty_log=False, return_telemetry=True)
+                                if not isinstance(reply, tuple) or len(reply) != 2:
+                                    raise ValueError('Definition generation requires text and token telemetry')
+                                return finish_assistant_continuation(OUTPUT_PREFIX, reply[0]), reply[1]
+                            finally:
+                                for handle in handles:
+                                    handle.remove()
+                        result = run_definition_output(evidence, selected, generate_definition_output,
+                            max_tokens=DEFINITION_MAX_TOKENS, request_factory=defining_session.request,
+                            on_attempt=defining_session.observe,
+                            retry_incomplete=defining_session.needs_explicit_fallback)
                     finally:
-                        config.cache_enabled, config.cache_write_enabled = _explain_cache_before
-                    print(Fore.CYAN + f"[Probe] {ename_resolved} -- in the model's words:\n{(expl or '').strip()}" + Style.RESET_ALL)
+                        config.cache_enabled, config.cache_write_enabled = cache_before
+                        restore_config_overrides(config, definition_saved)
+                        for key, (present, value) in generation_state_before.items():
+                            if present:
+                                setattr(config, key, value)
+                            elif hasattr(config, key):
+                                delattr(config, key)
+                    text, status, qualification = result['text'], result['status'], result['qualification']
+                    profile_metadata = defining_session.metadata()
+                    if profile_metadata.get('persistence_error'):
+                        print(Fore.YELLOW + '[Probe] Defining profile could not be saved; observations remain available '
+                              + 'in this session: ' + profile_metadata['persistence_error'] + Style.RESET_ALL)
+                    if profile_metadata.get('capture_error'):
+                        print(Fore.YELLOW + '[Probe] Defining activation capture was unavailable; request settings '
+                              + 'were still tracked: ' + profile_metadata['capture_error'] + Style.RESET_ALL)
+                    controls = {'mode': 'definition_output', 'output_version': result['version'],
+                                'namespace': namespace, 'subject_gain': .02,
+                                'evidence_sha256': result['evidence_sha256'],
+                                'max_tokens': DEFINITION_MAX_TOKENS,
+                                'tokens_generated': result['tokens_generated'],
+                                'attempts': result['attempts'], 'prefills': prefills,
+                                'defining_profile': profile_metadata}
+                    behavior.record_interpretation(dname, probes[dname], text, status=status,
+                                                   controls=controls, qualification=qualification)
+                    observed = len(behavior.records.get(namespace, []))
+                    matrix.exposure_language.record_namespace_summary(dname, probes[dname], text, observed,
+                                                                      status=status, qualification=qualification)
+                    if status == 'hypothesis':
+                        print(Fore.CYAN + f'[Probe Explain] Definition hypothesis for {console_probe_name(dname)}:\n{text}' + Style.RESET_ALL)
+                    else:
+                        print(Fore.YELLOW + '[Probe Explain] No definition produced: ' + qualification['reason']
+                              + ' The failed attempt was retained for inspection.' + Style.RESET_ALL)
                     continue
                 if pargs.lower().startswith("show ") or pargs.lower().startswith("hide "):
                     is_show = pargs.lower().startswith("show ")
@@ -13384,9 +18390,8 @@ def main():
                         os.makedirs(PROBE_DIR, exist_ok=True)
                         torch.save(
                             {
-                                "direction": probes[ename]["direction"],
-                                "framings": probes[ename].get("framings", ("", "")),
-                                "exposed": probes[ename]["exposed"],
+                                k: v for k, v in probes[ename].items()
+                                if k not in ("history", "last_profile")
                             },
                             os.path.join(PROBE_DIR, f"{ename}.pt"),
                         )
@@ -13399,12 +18404,12 @@ def main():
                         provenance={"probe": ename, "exposed": not turn_off},
                     )
                     if turn_off:
-                        print(Fore.CYAN + f"[Probe] {ename} is hidden from the model again." + Style.RESET_ALL)
+                        print(Fore.CYAN + f"[Probe] {console_probe_name(ename)} is hidden from the model again." + Style.RESET_ALL)
                     else:
                         print(
                             Fore.CYAN
-                            + f"[Probe] {ename} EXPOSED: the model may now consult it with "
-                            + f"<<PROBE: {ename}>> (its own reading) or <<PROBE: {ename} || candidate words>> "
+                            + f"[Probe] {console_probe_name(ename)} EXPOSED: the model may now consult it with "
+                            + f"<<PROBE: {probe_alias(ename)}>> (its own reading) or <<PROBE: {probe_alias(ename)} || candidate words>> "
                             + "(score hypothetical words). Reading only -- it still cannot mint, drop, or calibrate."
                             + Style.RESET_ALL
                         )
@@ -13426,17 +18431,19 @@ def main():
                                 err_msg = f"[Probe] no usable vector for '{stem}' (looked for invariants/{stem}_vector.pt and invariants/{stem}.pt)."
                             print(Fore.YELLOW + err_msg + Style.RESET_ALL)
                             continue
+                        stored_geom = load_stored_probe_geometry(model, stem, layers=adopt_layers)
                         probes[stem] = {
                             "direction": direction,
                             "history": deque(maxlen=40),
                             "framings": (f"adopted:{src_name}", ""),
                             "exposed": exposed_state,
+                            **stored_geom,
                         }
                         tuner.register(f"probe_{stem}", 0.0, kind="threshold", comparator=">=")
                         try:
                             os.makedirs(PROBE_DIR, exist_ok=True)
                             torch.save(
-                                {"direction": direction, "framings": probes[stem]["framings"]},
+                                {k: v for k, v in probes[stem].items() if k not in ("history", "last_profile")},
                                 os.path.join(PROBE_DIR, f"{stem}.pt"),
                             )
                         except Exception:
@@ -13477,24 +18484,42 @@ def main():
                         print(Fore.YELLOW + f"[Probe] could not parse term '{perr}' in the mix." + Style.RESET_ALL)
                         continue
                     resolved = []
+                    resolved_geom = {}
                     missing = None
                     for w, tname in terms:
                         if tname in probes and cband is None:
                             tdir = probes[tname]["direction"]
+                            tgeom = {
+                                k: probes[tname][k]
+                                for k in ("position", "scale")
+                                if k in probes[tname]
+                            }
                         else:
                             # An explicit band re-reads every term from its
                             # stored file at that depth; an active probe's
                             # in-memory direction is fixed at its mint band.
                             tdir, _, _, _ = load_stored_direction(model, tname, layers=cband)
+                            tgeom = load_stored_probe_geometry(model, tname, layers=cband)
                             if not tdir and tname in probes:
                                 tdir = {
                                     L: v for L, v in probes[tname]["direction"].items()
                                     if cband is None or int(L) in set(cband)
                                 }
+                                if isinstance(probes[tname].get("position"), dict):
+                                    tgeom["position"] = {
+                                        int(L): v for L, v in probes[tname]["position"].items()
+                                        if cband is None or int(L) in set(cband)
+                                    }
+                                if isinstance(probes[tname].get("scale"), dict):
+                                    tgeom["scale"] = {
+                                        int(L): float(s) for L, s in probes[tname]["scale"].items()
+                                        if cband is None or int(L) in set(cband)
+                                    }
                         if not tdir:
                             missing = tname
                             break
                         resolved.append((w, tname, tdir))
+                        resolved_geom[tname] = tgeom
                     if missing is not None:
                         print(
                             Fore.YELLOW
@@ -13519,14 +18544,36 @@ def main():
                         )
                         continue
                     direction = {}
+                    comp_position = {}
+                    comp_scale = {}
                     for L in sorted(common):
                         acc = None
-                        for w, _, d in resolved:
+                        pos_acc = None
+                        pos_wsum = 0.0
+                        scale_acc = 0.0
+                        for w, tname, d in resolved:
                             v = d[L].to(model.device).float().reshape(-1) * w
                             acc = v if acc is None else acc + v
+                            tg = resolved_geom.get(tname) or {}
+                            tpos = (tg.get("position") or {}).get(L)
+                            if tpos is None and isinstance(tg.get("position"), dict):
+                                tpos = tg["position"].get(int(L))
+                            if tpos is not None:
+                                pv = (tpos if torch.is_tensor(tpos) else torch.as_tensor(tpos)).to(model.device).float().reshape(-1)
+                                aw = abs(float(w))
+                                pos_acc = pv * aw if pos_acc is None else pos_acc + pv * aw
+                                pos_wsum += aw
+                            tsc = (tg.get("scale") or {}).get(L)
+                            if tsc is None and isinstance(tg.get("scale"), dict):
+                                tsc = tg["scale"].get(int(L))
+                            if tsc is not None:
+                                scale_acc += abs(float(w)) * float(tsc)
                         n = acc.norm()
                         if n.item() > 0:
                             direction[int(L)] = acc / n
+                            if pos_acc is not None and pos_wsum > 0:
+                                comp_position[int(L)] = pos_acc / pos_wsum
+                                comp_scale[int(L)] = float(scale_acc) if scale_acc > 0 else float(n.item())
                     if not direction:
                         print(Fore.YELLOW + "[Probe] the mix cancelled to zero on every shared layer; nothing to mint." + Style.RESET_ALL)
                         continue
@@ -13538,11 +18585,19 @@ def main():
                         "history": deque(maxlen=40),
                         "framings": (f"composed: {recipe}", ""),
                     }
+                    if comp_position:
+                        probes[cname]["position"] = comp_position
+                        probes[cname]["scale"] = comp_scale
+                    from invariants.other_probes import is_other_probe
+                    if any(is_other_probe(probes.get(name, {})) for _, name in terms):
+                        probes[cname]['other_related'] = True
+                        probes[cname]['other_composition'] = [(float(weight), name) for weight, name in terms]
+                        plasticity_owners.for_tuner(tuner)[0].other_reference.activate(probes, _other_mint)
                     tuner.register(f"probe_{cname}", 0.0, kind="threshold", comparator=">=")
                     try:
                         os.makedirs(PROBE_DIR, exist_ok=True)
                         torch.save(
-                            {"direction": direction, "framings": probes[cname]["framings"]},
+                            {key: value for key, value in probes[cname].items() if key not in ('history', 'last_profile')},
                             os.path.join(PROBE_DIR, f"{cname}.pt"),
                         )
                     except Exception:
@@ -13564,6 +18619,48 @@ def main():
                         + f"Pre-load the archive: :probe backfill {cname}"
                         + Style.RESET_ALL
                     )
+                    continue
+                recalc_args = CommandArgs(pargs).take("recalc")
+                if recalc_args is not None:
+                    recalc_ns = PROBE_RECALC_SPEC.parse(recalc_args.raw)
+                    target_raw = recalc_ns.name or "all"
+                    target_names = None
+                    if target_raw.lower() not in ("all", "*"):
+                        resolved_t = resolve_probe_definition_target(target_raw, probes, model=model, config=config, probe_dir=PROBE_DIR)
+                        if not resolved_t:
+                            print(Fore.YELLOW + f"[Probe] no active or stored probe named '{target_raw}'.{did_you_mean(target_raw, probes)}" + Style.RESET_ALL)
+                            continue
+                        target_names = [resolved_t]
+
+                    print(Fore.CYAN + f"[Probe] Recalculating probe(s) ({target_raw}) from creation definitions..." + Style.RESET_ALL)
+                    from invariants.probe_recalc import recalc_probes
+                    def _on_recalc_prog(pname, ptype, pdata):
+                        layers = sorted(pdata.get("direction", {}).keys())
+                        layer_span = f"L{layers[0]}-L{layers[-1]} ({len(layers)} layers)" if layers else "no layers"
+                        print(Fore.GREEN + f"  [Recalc] {pname:30s} [{ptype:8s}] -> {layer_span}" + Style.RESET_ALL)
+
+                    recalc_results = recalc_probes(
+                        model=model,
+                        probe_dir=PROBE_DIR,
+                        probe_names=target_names,
+                        layers=recalc_ns.band,
+                        in_place_probes=probes,
+                        save=True,
+                        on_progress=_on_recalc_prog,
+                    )
+                    for r_name in recalc_results.get("probes", {}):
+                        if f"probe_{r_name}" not in tuner.triggers:
+                            tuner.register(f"probe_{r_name}", 0.0, kind="threshold", comparator=">=")
+                    print(
+                        Fore.GREEN
+                        + f"[Probe] Recalculation complete: {recalc_results['total_recalculated']} recalculated "
+                        + f"({recalc_results['minted_count']} minted, {recalc_results['composed_count']} composed, {recalc_results['adopted_count']} adopted), "
+                        + f"{recalc_results['saved_count']} saved to disk."
+                        + Style.RESET_ALL
+                    )
+                    if recalc_results.get("errors"):
+                        for ename, err in sorted(recalc_results["errors"].items()):
+                            print(Fore.RED + f"  [Recalc Error] {ename}: {err}" + Style.RESET_ALL)
                     continue
                 backfill_args = CommandArgs(pargs).take("backfill")
                 if backfill_args is not None:
@@ -13606,6 +18703,19 @@ def main():
                     if not archive:
                         print(Fore.YELLOW + "[Probe] no stored assistant replies to backfill from." + Style.RESET_ALL)
                         continue
+                    # Pair only real preceding user turns in the same session.
+                    # An absent input stays absent rather than borrowing a later
+                    # question or another participant/session's prompt.
+                    bf_inputs_by_record = {}
+                    bf_pending_inputs = {}
+                    for record in memory.records:
+                        if record.scope != memory.scope or record.kind != "turn":
+                            continue
+                        session = getattr(record, "session_id", "") or ""
+                        if record.role == "user":
+                            bf_pending_inputs[session] = record.text or ""
+                        elif record.role == "assistant":
+                            bf_inputs_by_record[id(record)] = bf_pending_inputs.pop(session, "")
                     # Scoring re-encodes reply text, so the archive can be scored
                     # exactly as live turns were. The trigger stream is REBUILT,
                     # not appended: the archive is a superset of every turn this
@@ -13631,8 +18741,11 @@ def main():
                         bf_names_to_rebuild,
                         request_all=(bf_name_raw == "all"),
                     )
+                    prepare_probe_measurements({name: probes[name] for name in scoring_names}, tuner,
+                                               LEGACY_PROBE_SOURCE)
                     bf_rollings = {p: deque(maxlen=40) for p in scoring_names}
                     bf_scored = []  # (timestamp, {probe: (raw, sig)}, stored sense)
+                    bf_behavior = []
                     display_name = "all probes" if bf_name_raw == "all" else bf_names_to_rebuild[0]
                     print(
                         Fore.CYAN
@@ -13646,16 +18759,26 @@ def main():
                             b_ids = _bf_inputs(model, br.text[:600])
                             b_hs = _bf_hidden(model, b_ids["input_ids"], b_ids.get("attention_mask"))
                             per_probe = {}
+                            behavior_readings = {}
                             for _pn in scoring_names:
                                 _pd = probes[_pn]
                                 raw = _bf_score(b_hs, _pd["direction"])
                                 roll = bf_rollings[_pn]
                                 sig = raw - (sum(roll) / len(roll)) if roll else 0.0
+                                if roll:
+                                    behavior_readings[_pn] = sig
                                 roll.append(raw)
                                 per_probe[_pn] = (raw, sig)
                             bm = br.metrics if isinstance(br.metrics, dict) else {}
                             sense = bm.get("sense_score")
                             bf_scored.append((br.timestamp, per_probe, float(sense) if sense is not None else None))
+                            bf_behavior.append({
+                                "ts": br.timestamp,
+                                "reply": br.text,
+                                "input": bf_inputs_by_record.get(id(br), ""),
+                                "readings": behavior_readings,
+                                "outcome": sense,
+                            })
                             if (bf_i + 1) % 25 == 0:
                                 print(Fore.CYAN + f"  ...{bf_i + 1}/{len(archive)}" + Style.RESET_ALL, flush=True)
                     total_credited = {}
@@ -13676,6 +18799,11 @@ def main():
                         probes[_pn]["history"] = deque((pp[_pn][0] for _, pp, _ in bf_scored), maxlen=40)
                     save_probe_raw_histories(probes)
                     tuner.save()
+                    # Figure rows and definition examples share the same fresh
+                    # measurements; row deduplication must not block this import.
+                    bf_behavior_stats = plasticity_owners.for_tuner(tuner)[0].probe_behavior.backfill(
+                        bf_behavior, {name: probes[name] for name in scoring_names},
+                    )
                     
                     existing_ts = set()
                     try:
@@ -13686,8 +18814,11 @@ def main():
                                 except Exception:
                                     continue
                                 if _r.get("basis") == "backfill" and _r.get("ts"):
-                                    # if ANY of the rebuilt probes are already in this backfill row, consider it existing
-                                    if any(f"probe_{_pn}" in _r for _pn in bf_names_to_rebuild):
+                                    # A joint backfill is covered only by a row
+                                    # containing every requested probe together.
+                                    # Partial older rows may receive a complete
+                                    # appended row without rewriting the archive.
+                                    if all(f"probe_{_pn}" in _r for _pn in scoring_names):
                                         existing_ts.add(_r["ts"])
                     except OSError:
                         pass
@@ -13718,6 +18849,8 @@ def main():
                             "probes": bf_names_to_rebuild,
                             "turns_scored": len(bf_scored),
                             "paired_rows_added": rows_added,
+                            "behavior_examples_imported": bf_behavior_stats["imported"],
+                            "behavior_examples_updated": bf_behavior_stats["replaced"],
                         },
                     )
                     st = tuner.triggers[f"probe_{bf_names_to_rebuild[0]}"].outcome_stats() if bf_names_to_rebuild else {"lift": 0}
@@ -13726,9 +18859,27 @@ def main():
                         + f"[Probe] {display_name} backfilled: {len(bf_scored)} archived replies re-scored in order. "
                         + f"Trigger stream(s) rebuilt, "
                         + f"{rows_added} pre-mint paired rows added, rolling history seeded. "
+                        + f"{bf_behavior_stats['imported']} definition example(s) imported, "
+                        + f"{bf_behavior_stats['replaced']} updated. "
                         + f"Live scoring continues normally."
                         + Style.RESET_ALL
                     )
+                    continue
+                resolved_probe = console_probe_lookup(pargs.strip(), probes)
+                if resolved_probe and resolved_probe in probes and "||" not in pargs:
+                    pdata = probes[resolved_probe]
+                    trig = tuner.triggers.get(f"probe_{resolved_probe}")
+                    n_pairs = len(trig.outcomes) if trig else 0
+                    exposed_note = ", exposed to the model" if pdata.get("exposed") else ""
+                    released_note = ", released (visible/read-only)" if probe_is_released(pdata) else ""
+                    frozen_note = ", frozen" if pdata.get("frozen") else ""
+                    pos_note = f", positioned ({len(pdata['position'])}L)" if isinstance(pdata.get("position"), dict) and pdata.get("position") else ""
+                    framings_val = pdata.get("framings")
+                    framing_str = f" ({framings_val[0]} || {framings_val[1]})" if isinstance(framings_val, (tuple, list)) and len(framings_val) >= 2 and (framings_val[0] or framings_val[1]) else ""
+                    print(Fore.CYAN + f"[Probe] {console_probe_name(resolved_probe)}: {len(pdata.get('direction', {}))} layers{pos_note}, {n_pairs} paired turns{exposed_note}{released_note}{frozen_note}{framing_str}." + Style.RESET_ALL)
+                    continue
+                if re.fullmatch(r'\[?p_[0-9a-f]{24}\]?', pargs.strip()):
+                    print(Fore.YELLOW + f"[Probe] no active probe with hash '{pargs.strip()}'.{did_you_mean(pargs.strip(), probes)}" + Style.RESET_ALL)
                     continue
                 pname, _, framings = pargs.partition(" ")
                 pname = re.sub(r"[^a-z0-9_]", "_", pname.lower())[:40]
@@ -13781,24 +18932,39 @@ def main():
                             tuner.triggers[f"probe_{backup_name}"] = tuner.triggers.pop(f"probe_{base}")
 
                 b_text, mint_layers = strip_band_suffix(b_text)
-                from invariants.engine import _inputs, _hidden_states, probe_direction, steer_band_layers
+                from invariants.engine import _inputs, _hidden_states, probe_geometry, steer_band_layers
                 ids_a = _inputs(model, a_text[:600])
                 hs_a = _hidden_states(model, ids_a["input_ids"], ids_a.get("attention_mask"))
                 ids_b = _inputs(model, b_text[:600])
                 hs_b = _hidden_states(model, ids_b["input_ids"], ids_b.get("attention_mask"))
-                direction = probe_direction(
+                geom = probe_geometry(
                     hs_a, hs_b,
-                    mint_layers if mint_layers is not None else steer_band_layers(hs_a.shape[0]),
+                    mint_layers if mint_layers is not None else list(range(hs_a.shape[0])),
                 )
+                direction = geom["direction"]
                 if not direction:
                     print(Fore.YELLOW + "[Probe] framings produced no usable direction; try more contrastive text." + Style.RESET_ALL)
                     continue
-                probes[pname] = {"direction": direction, "history": deque(maxlen=40), "framings": (a_text, b_text)}
+                probes[pname] = {
+                    "direction": direction,
+                    "position": geom["position"],
+                    "scale": geom["scale"],
+                    "poles": geom["poles"],
+                    "mean_direction": geom["mean_direction"],
+                    "token_salience": geom["token_salience"],
+                    "peak_token_offset": geom["peak_token_offset"],
+                    "history": deque(maxlen=40),
+                    "framings": (a_text, b_text),
+                }
+                from invariants.other_probes import is_other_probe
+                if is_other_probe(probes[pname]):
+                    plasticity_owners.for_tuner(tuner)[0].other_reference.activate(probes, _other_mint)
+                    direction = probes[pname]['direction']
                 tuner.register(f"probe_{pname}", 0.0, kind="threshold", comparator=">=")
                 try:
                     os.makedirs(PROBE_DIR, exist_ok=True)
                     save_name = pname if getattr(model.model.config, "_name_or_path", "") == DEFAULT_MODEL else f"{pname}_d{model.d_model}"
-                    torch.save({"direction": direction, "framings": (a_text, b_text)}, os.path.join(PROBE_DIR, f"{save_name}.pt"))
+                    torch.save({key: value for key, value in probes[pname].items() if key not in ('history', 'last_profile')}, os.path.join(PROBE_DIR, f"{save_name}.pt"))
                 except Exception:
                     pass
                 model_definition = memory.find_definition(
@@ -13839,7 +19005,7 @@ def main():
                 )
                 print(
                     Fore.CYAN
-                    + f"[Probe] {pname} minted over {len(direction)} layers from your framings -- an UNVALIDATED "
+                    + f"[Probe] {console_probe_name(pname)} minted over {len(direction)} layers (with latent midpoint & pole scale) from your framings -- an UNVALIDATED "
                     + "hypothesis-sensor. It scores every turn from here (one extra forward per turn), centered "
                     + "against its own rolling history, paired with sense. Calibrate against it once evidence "
                     + f"accrues: :calibrate conversation_productive {pname}. Or pre-load evidence from the "
@@ -13912,26 +19078,42 @@ def main():
                         hs = _hidden_states(model, ids["input_ids"], ids.get("attention_mask"))
                         
                         probe_dir = probes[pname]["direction"]
+                        probe_pos = probes[pname].setdefault("position", {})
+                        probe_scale = probes[pname].setdefault("scale", {})
                         learning_rate = 0.15  # a noticeable nudge
                         updated_layers = 0
                         for L in list(probe_dir.keys()):
                             L_int = int(L)
                             if 0 <= L_int < hs.size(0):
-                                mean_hs = hs[L_int].mean(dim=0).to(model.device).reshape(-1)
-                                if mean_hs.norm().item() > 0:
-                                    mean_hs = mean_hs / mean_hs.norm()
-                                    current_dir = probe_dir[L].to(model.device).reshape(-1)
+                                raw_mean_hs = hs[L_int].mean(dim=0).to(model.device).float().reshape(-1)
+                                if raw_mean_hs.norm().item() > 0:
+                                    mean_hs = raw_mean_hs / raw_mean_hs.norm()
+                                    current_dir = probe_dir[L].to(model.device).float().reshape(-1)
                                     new_dir = current_dir + sign * learning_rate * mean_hs
                                     if new_dir.norm().item() > 0:
                                         probe_dir[L] = new_dir / new_dir.norm()
+                                        if L in probe_pos or L_int in probe_pos:
+                                            pk = L if L in probe_pos else L_int
+                                            cur_pos = (probe_pos[pk] if torch.is_tensor(probe_pos[pk]) else torch.as_tensor(probe_pos[pk])).to(model.device).float().reshape(-1)
+                                            probe_pos[pk] = (cur_pos + sign * learning_rate * (raw_mean_hs - cur_pos)).detach()
+                                        else:
+                                            probe_pos[L_int] = (raw_mean_hs * sign).detach()
+                                            probe_scale[L_int] = float(raw_mean_hs.norm().item())
                                         updated_layers += 1
-                                        
-                        print(Fore.GREEN + Style.BRIGHT + f"[Place] '{pname}' probe nudged {'toward' if sign > 0 else 'away from'} the last response over {updated_layers} layers." + Style.RESET_ALL)
+                        try:
+                            os.makedirs(PROBE_DIR, exist_ok=True)
+                            torch.save(
+                                {k: v for k, v in probes[pname].items() if k not in ("history", "last_profile")},
+                                os.path.join(PROBE_DIR, f"{pname}.pt"),
+                            )
+                        except Exception:
+                            pass
+                        print(Fore.GREEN + Style.BRIGHT + f"[Place] '{pname}' probe direction and latent position nudged {'toward' if sign > 0 else 'away from'} the last response over {updated_layers} layers." + Style.RESET_ALL)
                         probe_definition = memory.find_definition("probe", pname)
                         if probe_definition is not None:
                             memory.append_definition_feedback(
                                 probe_definition,
-                                f"direction nudged {'toward' if sign > 0 else 'away from'} the last response",
+                                f"direction and position nudged {'toward' if sign > 0 else 'away from'} the last response",
                                 verdict="positive" if sign > 0 else "negative",
                                 source="operator",
                                 metrics={"sign": sign, "layers": updated_layers},
@@ -14072,6 +19254,7 @@ def main():
                             hidden_commands=hidden_commands,
                             macro_aliases=macro_aliases,
                             solve_macros=list_solve_macros(),
+                            goal_text=goal_text,
                         )
                         reference_label = "live command catalog"
                         start_rule = "starting with ':'"
@@ -14108,13 +19291,51 @@ def main():
                     print(Fore.CYAN + f"[Suggest] Queuing one command{suffix} toward: {goal_text}" + Style.RESET_ALL)
                     queue_macro_text(prompt, input_queue)
                 
+                def _print_suggested_actions(actions, heading_suffix=""):
+                    if not actions:
+                        return
+                    seen_cats = []
+                    for cat, _, _ in actions:
+                        if cat not in seen_cats:
+                            seen_cats.append(cat)
+                    labels = {
+                        "field": "Gravity / field mechanics",
+                        "calibrate": "Calibrations ready",
+                        "commit": "Explored, not committed",
+                        "explore": "Capabilities never tried",
+                        "backfill": "Probes short on evidence",
+                        "expose": "Signals worth exposing",
+                        "band": "Hooke band tethers",
+                        "probe": "Probe management",
+                        "tune": "Tuner controls",
+                        "memory": "Memory & context",
+                        "clean": "Cleanup",
+                    }
+                    suffix_str = f" for '{heading_suffix}'" if heading_suffix else ""
+                    print(
+                        Fore.CYAN
+                        + f"[Suggest] {len(actions)} move(s){suffix_str} -- computed, not applied:"
+                        + Style.RESET_ALL
+                    )
+                    for cat in seen_cats:
+                        group = [(l, c) for k, l, c in actions if k == cat]
+                        cat_title = labels.get(cat, cat)
+                        print(Fore.CYAN + Style.BRIGHT + f"  [{cat_title}]" + Style.RESET_ALL)
+                        for line, cmd in group[:8]:
+                            if command_because:
+                                cmd += f" because {command_because}"
+                            print(Fore.CYAN + f"    {line}" + Style.RESET_ALL)
+                            print(Fore.GREEN + f"      -> {cmd}" + Style.RESET_ALL)
+                    print(
+                        Fore.CYAN
+                        + "  (Run any command directly, or run ':suggest apply' to auto-queue calibrations."
+                        + "\n   To narrow suggestions: :suggest <domain|entity>. To list all commands: :suggest commands)"
+                        + Style.RESET_ALL
+                    )
+
                 if len(sargs) > 1 and sargs[1].lower() not in ("apply", "suggestions"):
                     if sargs[1].lower() in ("commands", "help", "all", "catalog", "launcher"):
                         _print_user_facing_command_launcher(" ".join(sargs[2:]).strip() or None)
-                        continue
-                    if sargs[1].lower() in ("gravity", "field", "physics", "steer"):
-                        filter_text = " ".join(sargs[1:]).strip()
-                        _print_user_facing_command_launcher(filter_text)
                         continue
                     if sargs[1].startswith(":"):
                         prefix_cmd = user_input[len(":suggest"):].strip()
@@ -14176,6 +19397,11 @@ def main():
                         queue_macro_text(prompt, input_queue)
                         continue
 
+                    targeted = suggest_targeted_actions(sargs[1:], tuner, list(turn_log), probes=probes, archive_size=_arch)
+                    if targeted is not None:
+                        _print_suggested_actions(targeted, heading_suffix=" ".join(sargs[1:]).strip())
+                        continue
+
                     free_goal = user_input.strip()[len(":suggest"):].strip()
                     if sargs[1].lower() in ("command", "cmd"):
                         free_goal = " ".join(sargs[2:]).strip()
@@ -14192,36 +19418,32 @@ def main():
                 if not sugg:
                     print(
                         Fore.CYAN
-                        + "[Suggest] nothing ready yet: no lever has accrued enough evidence for a "
-                        + "data-backed move. Streams accrue every turn; :probe backfill pre-loads the archive."
+                        + "[Suggest] No urgent calibrations or threshold updates needed right now. Recommended next moves:"
+                        + Style.RESET_ALL
+                    )
+                    default_moves = []
+                    if not probes:
+                        default_moves.append(("Wake up baseline awareness and initialize standard probes", ":awake"))
+                        default_moves.append(("Mint a custom contrastive probe", ":probe <name> <positive phrasing> || <negative phrasing>"))
+                    else:
+                        pnames = sorted(probes.keys())
+                        default_moves.append((f"Inspect readings for probe '{pnames[0]}'", f":probe {pnames[0]}"))
+                        default_moves.append(("Pre-load probe observations across archived turns", f":probe backfill {pnames[0]}"))
+                    if tuner and tuner.get("prioritize_gravity", 0.0) <= 0:
+                        default_moves.append(("Initialize and enable the gravity/field physics schema", ":steer field init"))
+                    else:
+                        default_moves.append(("Inspect live gravity bodies and field geometry", ":steer bodies"))
+                    default_moves.append(("Ask for a command toward any free-form goal", ":suggest <what you want>"))
+                    for desc, cmd in default_moves:
+                        print(Fore.CYAN + f"    {desc}" + Style.RESET_ALL)
+                        print(Fore.GREEN + f"      -> {cmd}" + Style.RESET_ALL)
+                    print(
+                        Fore.CYAN
+                        + "  (Run any command directly. To list the full command catalog, run ':suggest commands'.)"
                         + Style.RESET_ALL
                     )
                 else:
-                    labels = {
-                        "field": "Gravity / field mechanics",
-                        "calibrate": "Calibrations ready",
-                        "commit": "Explored, not committed",
-                        "explore": "Capabilities never tried",
-                        "backfill": "Probes short on evidence",
-                        "expose": "Signals worth exposing",
-                    }
-                    print(
-                        Fore.CYAN
-                        + f"[Suggest] {len(sugg)} move(s) the accrued state supports -- computed, not applied:"
-                        + Style.RESET_ALL
-                    )
-                    for cat in ("field", "commit", "calibrate", "explore", "backfill", "expose"):
-                        group = [(l, c) for k, l, c in sugg if k == cat]
-                        if not group:
-                            continue
-                        print(Fore.CYAN + Style.BRIGHT + f"  [{labels[cat]}]" + Style.RESET_ALL)
-                        for line, cmd in group[:8]:
-                            if command_because:
-                                cmd += f" because {command_because}"
-                            print(Fore.CYAN + f"    {line}" + Style.RESET_ALL)
-                            print(Fore.GREEN + f"      -> {cmd}" + Style.RESET_ALL)
-                if len(sargs) == 1:
-                    _print_user_facing_command_launcher()
+                    _print_suggested_actions(sugg)
                 continue
             if user_input.startswith(":label"):
                 # Human-in-the-loop: judge the MOST RECENT turn on a probe's (or
@@ -14730,7 +19952,7 @@ def main():
                             print(Fore.CYAN + f"  command {command_exposure_display(word, rec)} mode={rec['mode']} activation={activation} steer={steer}" + Style.RESET_ALL)
                     else:
                         print(Fore.CYAN + "  command tools: none" + Style.RESET_ALL)
-                    print(Fore.CYAN + "  probe tools: " + (", ".join(exposed_probe_names) if exposed_probe_names else "none") + Style.RESET_ALL)
+                    print(Fore.CYAN + "  probe tools: " + (", ".join(console_probe_name(n) for n in exposed_probe_names) if exposed_probe_names else "none") + Style.RESET_ALL)
                     print(Fore.CYAN + "  knob tools: " + (", ".join(sorted(exposed_knobs)) if exposed_knobs else "none") + Style.RESET_ALL)
                     print(Fore.CYAN + f"  memory tool: {'on' if memory_tool_exposed else 'off'}; help tool: {'on' if help_exposed else 'off'}" + Style.RESET_ALL)
 
@@ -14898,7 +20120,7 @@ def main():
                     except ValueError:
                         dyn_idx = -1
                     if dyn_idx > 0 and dyn_idx < len(parts) - 1:
-                        target = parts[0]
+                        target = parts[0].lstrip("!").strip()
                         rest = parts[dyn_idx + 1:]
                         # Peel a trailing standalone multiplier (number|auto|pNN) off
                         # the end; whatever remains is the mix expression.
@@ -14967,6 +20189,9 @@ def main():
 
                 tune_ns = TUNE_SPEC.parse(user_input[len(":tune"):])
                 targs = ([tune_ns.knob] + (tune_ns.setting.split() if tune_ns.setting else [])) if tune_ns.knob else []
+                if targs and targs[0]:
+                    if targs[0].startswith("!"):
+                        targs[0] = targs[0][1:].strip()
                 if targs and targs[0].upper() in ("CHOICE", "CHOOSE", "AUTO"):
                     resolved = resolve_probe_choice(targs[0], calibratable_names(tuner), model=model, config=config, action_name="tune")
                     if not resolved:
@@ -15110,7 +20335,17 @@ def main():
                     elif targs[1].lower() == "off":
                         targs[1] = "0.0"
                         
-                    if targs[0].startswith("probe_") or (targs[0] in probes and targs[0] not in tuner.triggers):
+                    definition_controls = {'probe_define_' + axis for axis in DEFINITION_TASK_GAINS}
+                    definition_controls.update('probe_explain_' + axis for axis in ('subject', 'operation', 'reference'))
+                    definition_controls.update(('probe_explain_map', 'probe_explain_map_tokens',
+                                                'probe_explain_logits_epsilon'))
+                    definition_controls.add('probe_define_subtract')
+                    definition_controls.add('probe_define_process')
+                    definition_controls.update('probe_define_step_' + step for step in ('compare', 'isolate', 'distill', 'verify'))
+                    definition_controls.add('probe_define_schema_prefill')
+                    definition_controls.update('probe_define_schema_' + part for part in ('genus', 'core', 'boundary', 'compose'))
+                    if ((targs[0].startswith("probe_") and targs[0] not in definition_controls) or
+                            (targs[0] in probes and targs[0] not in tuner.triggers)):
                         pname = targs[0].replace("probe_", "")
                         if targs[1] == "0.0":
                             if pname in probes:
@@ -15153,14 +20388,31 @@ def main():
                                 continue
 
                         try:
-                            v = tuner.set(targs[0], float(targs[1]))
+                            proposed = float(targs[1])
+                            if targs[0] == 'probe_explain_logits_epsilon' and (
+                                    not math.isfinite(proposed) or not 0 < proposed <= .1):
+                                print(Fore.RED + '[Tune] probe_explain_logits_epsilon must be finite, positive, and no larger than 0.1.' + Style.RESET_ALL)
+                                continue
+                            if targs[0] == 'probe_explain_map' and proposed not in (0., 1.):
+                                print(Fore.RED + '[Tune] probe_explain_map must be 0 or 1.' + Style.RESET_ALL)
+                                continue
+                            if targs[0] == 'probe_explain_map_tokens' and (
+                                    not math.isfinite(proposed) or not 3 <= proposed <= 64 or proposed != int(proposed)):
+                                print(Fore.RED + '[Tune] probe_explain_map_tokens must be an integer between 3 and 64.' + Style.RESET_ALL)
+                                continue
+                            if targs[0] in {'probe_explain_subject', 'probe_explain_operation', 'probe_explain_reference'}:
+                                lower = 0.0 if targs[0] == 'probe_explain_subject' else -1.0
+                                if not math.isfinite(proposed) or not lower <= proposed <= 1.0:
+                                    print(Fore.RED + f"[Tune] {targs[0]} must be finite and between {lower:g} and 1." + Style.RESET_ALL)
+                                    continue
+                            v = tuner.set(targs[0], proposed)
                             print(Fore.GREEN + f"[Tune] {targs[0]} = {round(v, 4)}" + Style.RESET_ALL)
                         except ValueError:
                             print(Fore.RED + "[Tune] Value must be a number." + Style.RESET_ALL)
                 else:
                     print(Fore.YELLOW + "[Tune] Usage: :tune | :tune <name> <value> | :tune <name> auto [percentile]" + Style.RESET_ALL)
                 continue
-            if not user_input.strip():
+            if not user_input.strip() and not reading_turn_source:
                 continue
             # A :prefixed line that reached here matched no command handler.
             # Don't burn a generation deflecting into a generic essay: if it's a
@@ -15182,11 +20434,30 @@ def main():
                 continue
 
             autocomplete_turn = bool(
-                _pending_expect
+                not reading_turn_source and _pending_expect
                 and _pending_expect.get("type") == "autocomplete"
             )
-            utility_expect_profile = expect_generation_profile(_pending_expect)
+            utility_expect_profile = {} if reading_turn_source else expect_generation_profile(_pending_expect)
             utility_expect_turn = bool(utility_expect_profile)
+            # Commands and reader/utility work use their own generation paths;
+            # an enabled continuation mode owns ordinary conversational turns.
+            _continuation_owner = plasticity_owners.for_tuner(tuner)[0].indirect_controller
+            try:
+                _continued = run_enabled_continuation_turn(
+                    user_input, _continuation_owner, probes, model, memory,
+                    reading_turn=bool(reading_turn_source),
+                    utility_turn=bool(autocomplete_turn or utility_expect_turn),
+                    session_context=session_context if session_context_enabled else None,
+                    active_u_name=locals().get('_last_replace_name') or 'user',
+                    history_enabled=session_context_enabled,
+                )
+            except (ValueError, OSError, RuntimeError) as exc:
+                print(Fore.RED + f'[Continuation] {exc}; mode remains enabled. Use :relate indirect continue off to stop it.' + Style.RESET_ALL)
+                continue
+            if _continued is not None:
+                last_assistant_response = _continued['response']
+                present_continuation_result(_continued, probes, tuner)
+                continue
             # Autocomplete is an isolated utility generation. A staged document,
             # tool result, or conversational history belongs to the next real
             # turn; consuming it here both loses that context and lets an older
@@ -15212,6 +20483,15 @@ def main():
                 impact_state["pending"] = []
             sweep_state["fires"] = []  # single-layer steers applied this turn
             turn_row = {}              # this turn's stream values (paired calibration substrate)
+            model_config = getattr(getattr(model, 'model', None), 'config', None)
+            turn_row['probe_model_identity'] = {
+                'model': getattr(model_config, '_name_or_path', type(model).__name__),
+                'layers': getattr(model, 'n_layers', None),
+                'width': getattr(model, 'd_model', None),
+                'quantized_4bit': bool(getattr(getattr(model, 'model', None), 'is_loaded_in_4bit', False)),
+                'dtype': str(getattr(getattr(model, 'model', None), 'dtype', None)),
+            }
+            _response_memory_record = None
             if not autocomplete_turn:
                 pending_memory_tool_result = None
                 pending_orientation_tool_result = None
@@ -15222,6 +20502,34 @@ def main():
                 pending_sandbox_tool_result = None
                 pending_game_tool_result = None
                 pending_help_tool_result = None
+            if not autocomplete_turn and not reading_turn_source and user_input.strip():
+                try:
+                    shift_tracker.jump_threshold = float(tuner.get("memory_shift_gate", 0.85) or 0.85)
+                except Exception:
+                    pass
+                shift_info = shift_tracker.observe_turn(user_input, role="user")
+                if shift_info.get("is_shift"):
+                    regime_name = shift_info["regime"]
+                    shift_d = shift_info["delta"]
+                    lbl = shift_info.get("cluster_label", "")
+                    if regime_name == "hard_jump":
+                        print(Fore.CYAN + f"[Shift] Conversation shift detected ({regime_name}, Δ={shift_d:.2f}): heading -> '{lbl}'. Stale context attenuated." + Style.RESET_ALL)
+                    elif regime_name == "topic_return":
+                        print(Fore.CYAN + f"[Shift] Topic return detected (cluster #{shift_info['cluster_id']} '{lbl}', Δ={shift_d:.2f}). Anchors reinstated." + Style.RESET_ALL)
+                    elif regime_name == "pivot":
+                        print(Fore.CYAN + f"[Shift] Topic branching ({regime_name}, Δ={shift_d:.2f}): '{lbl}'." + Style.RESET_ALL)
+                    memory.append_event(
+                        "conversation_shift",
+                        text=f"regime={regime_name} delta={shift_d:.4f} label={lbl}",
+                        tags=["conversation_shift", regime_name],
+                        provenance=shift_info,
+                    )
+            extra_prompt_kwargs = {}
+            # Participant identity belongs to the turn even when transcript
+            # carryover is disabled; post-generation probe attribution uses it.
+            active_u_name = _last_replace_name if ('_last_replace_name' in locals() and _last_replace_name) else "user"
+            if autocomplete_turn:
+                extra_prompt_kwargs["field_context"] = None
             prompt = _build_live_prompt(
                 user_input,
                 memory_tool_result=memory_tool_result,
@@ -15232,17 +20540,19 @@ def main():
                 document_tool_result=document_tool_result,
                 game_tool_result=game_tool_result,
                 help_tool_result=help_tool_result,
+                reader_context=None if utility_expect_turn else _reader_context(),
                 session_context=(
                     session_context
                     if session_context_enabled and not autocomplete_turn
                     else None
                 ),
-                active_u_name=_last_replace_name if ('_last_replace_name' in locals() and _last_replace_name) else "operator",
+                active_u_name=active_u_name,
+                **extra_prompt_kwargs,
             )
             # Honest attribution in the permanent record: a reading turn is the
             # model's own act (it occupies the user slot in the chat template,
             # but the operator never typed it).
-            if not autocomplete_turn:
+            if not autocomplete_turn and not reading_turn_source:
                 memory.append_turn(
                     "user",
                     user_input,
@@ -15306,7 +20616,8 @@ def main():
                     provenance={"current_input": user_input[:240]},
                 )
 
-            print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
+            if not reading_turn_source:
+                print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
             synthesis_records = []
 
             # Evaluate dynamic tuner bindings before generation
@@ -15318,7 +20629,8 @@ def main():
                         # Resolve each mix term to last turn's stream: a probe
                         # (probe_<name>), a bare named stream, or a phenomenality
                         # dimension (phen_<name>).
-                        s = last_turn.get(f"probe_{name}")
+                        s = (last_turn.get(f"probe_{name}")
+                             if name not in probes or probe_row_matches_source(last_turn, probes[name]) else None)
                         if s is None:
                             s = last_turn.get(name)
                         if s is None:
@@ -15389,7 +20701,9 @@ def main():
             prio_steered = None
             if tuner.get("prioritize_gravity", 0.0) > 0 and not utility_expect_turn:
                 try:
-                    _g_handles, _g_desc = build_gravity_field_handles(model, probes, tuner)
+                    _g_handles, _g_desc = build_gravity_field_handles(model, probes, tuner,
+                            plasticity=plasticity_owners.for_tuner(tuner)[0],
+                            plasticity_signals=plasticity_owners.for_tuner(tuner)[1])
                 except Exception:
                     _g_handles, _g_desc = [], "field build failed"
                 if _g_handles:
@@ -15476,7 +20790,17 @@ def main():
                 # authority for a one-line parser completion.
                 config.cache_enabled = False
                 config.cache_write_enabled = False
+            _turn_generation_states = {"hidden_states": None}
+
+            def _capture_turn_generation_states(hidden_states):
+                _turn_generation_states["hidden_states"] = hidden_states
+
             try:
+                if lookahead_apparatus is not None and not utility_expect_turn and not autocomplete_turn:
+                    _ingest_lookahead(user_input, document_tool_result, sandbox_tool_result,
+                                     memory_tool_result, orientation_tool_result, methodmap_tool_result)
+                    steer_handles.extend(lookahead_apparatus.make_steer_handles(model))
+                    config.lookahead_processor = lookahead_apparatus.create_logits_processor()
                 response, telemetry = generate_agentic_text(
                     model,
                     instruction=prompt,
@@ -15487,14 +20811,22 @@ def main():
                         else max(64, int(tuner.get("response_tokens", 512)))
                     ),
                     synthesis_recorder=synthesis_records,
-                    chatty_log=True,  # Enables visible trace logging.
+                    chatty_log=not bool(reading_turn_source),
+                    document_reader=None if utility_expect_turn else _document_reader(),
+                    generation_channel="reader" if reading_turn_source else "speech",
                     pre_formatted=True,
                     mid_chunk_hook=(
-                        None if utility_expect_turn else tool_sense
+                        None if reading_turn_source else tool_sense
                     ),  # tools fire mid-thought, between conversational chunks
                     return_telemetry=True,
+                    generation_probes=probes,
+                    generation_probe_tuner=tuner,
+                    generation_state_sink=_capture_turn_generation_states,
                 )
             finally:
+                if hasattr(config, "lookahead_processor"):
+                    config.lookahead_processor = None
+                _save_lookahead()
                 if _generation_config_restore:
                     restore_config_overrides(config, _generation_config_restore)
                 else:
@@ -15502,6 +20834,27 @@ def main():
                     config.cache_write_enabled = _cache_write_before
                 for h in steer_handles:
                     h.remove()
+
+            _reading_was_active = doc_autoread is not None
+            doc_autoread = complete_document_reading(
+                memory, doc_library, document_tool_result, response, doc_autoread,
+            )
+            if reading_turn_source and _reading_was_active and doc_autoread is None:
+                if str(response or "").strip():
+                    print(Fore.CYAN + "[Doc] Reading run finished. ':doc reread' starts a fresh pass for new context." + Style.RESET_ALL)
+                else:
+                    print(Fore.YELLOW + "[Doc] Empty response; reading paused, passage remains unread. ':doc read' resumes." + Style.RESET_ALL)
+
+            if reading_turn_source:
+                retain_document_thought(memory, _reader_context(), doc_session, document_tool_result, response, _document_reader())
+                if _reader_should_stop(doc_autoread, response, synthesis_records, telemetry):
+                    doc_autoread = None
+                    print(Fore.CYAN + "[Doc] Requested stop condition reached; ':doc read' resumes unread passages." + Style.RESET_ALL)
+                if doc_autoread is None:
+                    print(Fore.CYAN + "[Doc] Reader phase ended; normal speaking resumes." + Style.RESET_ALL)
+                # Internal continuations never execute tool tags, appear as
+                # assistant speech, or receive conversational outcome labels.
+                continue
 
             def _generate_tool_followup(reply_prompt, *, extra_steer_handles=None, phase="tool follow-up"):
                 """Generate the answer after an explicit tool read with the same
@@ -15514,7 +20867,9 @@ def main():
                 prio_steered_now = None
                 if tuner.get("prioritize_gravity", 0.0) > 0:
                     try:
-                        _g_handles, _g_desc = build_gravity_field_handles(model, probes, tuner)
+                        _g_handles, _g_desc = build_gravity_field_handles(model, probes, tuner,
+                            plasticity=plasticity_owners.for_tuner(tuner)[0],
+                            plasticity_signals=plasticity_owners.for_tuner(tuner)[1])
                     except Exception:
                         _g_handles, _g_desc = [], "field build failed"
                     if _g_handles:
@@ -15570,17 +20925,28 @@ def main():
                                 + Style.RESET_ALL
                             )
                 try:
+                    _turn_generation_states["hidden_states"] = None
+                    if lookahead_apparatus is not None:
+                        followup_handles.extend(lookahead_apparatus.make_steer_handles(model))
+                        config.lookahead_processor = lookahead_apparatus.create_logits_processor()
                     return generate_agentic_text(
                         model,
                         instruction=reply_prompt,
+                        document_reader=_document_reader(),
                         config=config,
                         max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
                         synthesis_recorder=synthesis_records,
                         chatty_log=True,
                         pre_formatted=True,
                         return_telemetry=True,
+                        generation_probes=probes,
+                        generation_probe_tuner=tuner,
+                        generation_state_sink=_capture_turn_generation_states,
                     )
                 finally:
+                    if hasattr(config, "lookahead_processor"):
+                        config.lookahead_processor = None
+                    _save_lookahead()
                     for h in followup_handles:
                         h.remove()
 
@@ -15598,12 +20964,14 @@ def main():
                 model_game_exposed, model_game_hidden = [], []
             else:
                 model_game_exposed, model_game_hidden = extract_game_expose_hide(response)
-            if (not utility_expect_turn) and extract_help_request(response):
-                pending_help_tool_result = build_model_help_text(
-                    list_solve_macros(),
-                    exposed_commands,
-                    exposed_knobs,
-                    hidden_commands,
+            help_query = extract_help_request(response)
+            if (not utility_expect_turn) and help_query is not None:
+                pending_help_tool_result = command_help_tool_result(
+                    help_query,
+                    macros=list_solve_macros(),
+                    exposed_commands=exposed_commands,
+                    exposed_knobs=exposed_knobs,
+                    hidden_commands=hidden_commands,
                     memory_tool_exposed=memory_tool_exposed,
                     memory_lanes=_enabled_memory_lanes(),
                 )
@@ -15686,6 +21054,9 @@ def main():
             model_doc_tool_result = None
             model_probe_tool_result = None
             model_cmd_tool_result = None
+            allow_tool_reprompting = (
+                os.environ.get("ENABLE_TOOL_REPROMPTING", "0").strip() in {"1", "true", "yes"}
+            )
             if model_cmd_requests:
                 model_cmd_tool_result = _run_exposed_command_tool(model_cmd_requests)
                 turn_impacts.append({
@@ -15693,80 +21064,34 @@ def main():
                     "effect": "command request was staged or queued according to exposure mode",
                 })
                 print(Fore.CYAN + "\n[Runtime Tool]\n" + model_cmd_tool_result + Style.RESET_ALL + "\n")
-                prompt = _build_live_prompt(
-                    user_input,
-                    memory_tool_result=memory_tool_result,
-                    orientation_tool_result=orientation_tool_result,
-                    claimmap_tool_result=claimmap_tool_result,
-                    methodmap_tool_result=methodmap_tool_result,
-                    sandbox_tool_result=sandbox_tool_result,
-                    document_tool_result=document_tool_result,
-                    probe_tool_result=None,
-                    command_tool_result=model_cmd_tool_result,
-                    game_tool_result=game_tool_result,
-                    help_tool_result=help_tool_result,
-                    session_context=session_context if session_context_enabled else None,
+                if allow_tool_reprompting:
+                    prompt = _build_live_prompt(
+                        user_input,
+                        memory_tool_result=memory_tool_result,
+                        orientation_tool_result=orientation_tool_result,
+                        claimmap_tool_result=claimmap_tool_result,
+                        methodmap_tool_result=methodmap_tool_result,
+                        sandbox_tool_result=sandbox_tool_result,
+                        document_tool_result=document_tool_result,
+                        probe_tool_result=None,
+                        command_tool_result=model_cmd_tool_result,
+                        game_tool_result=game_tool_result,
+                        help_tool_result=help_tool_result,
+                        session_context=session_context if session_context_enabled else None,
+                    )
+                    print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
+                    response, telemetry = _generate_tool_followup(prompt, phase="runtime tool follow-up")
+                    model_memory_query = extract_memory_query(response)
+                    model_claimmap_payload = extract_claimmap_payload(response)
+                    model_methodmap_query = extract_methodmap_query(response)
+                    model_doc_query = extract_doc_query(response)
+                    model_probe_query = extract_probe_query(response)
+            if model_doc_query and doc_library and document_tool_result is None and not reading_turn_source:
+                request, _ = parse_doc_read_request("read", probes)
+                doc_autoread = configure_document_reading(
+                    memory, doc_library, request, context=model_doc_query,
                 )
-                print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                response, telemetry = _generate_tool_followup(prompt, phase="runtime tool follow-up")
-                model_memory_query = extract_memory_query(response)
-                model_claimmap_payload = extract_claimmap_payload(response)
-                model_methodmap_query = extract_methodmap_query(response)
-                model_doc_query = extract_doc_query(response)
-                model_probe_query = extract_probe_query(response)
-            if model_doc_query and doc_library and document_tool_result is None:
-                # The model asked to keep reading, in its own words -- and its
-                # words pick the chunk (reply-mode selection over the query
-                # text; honest order-fallback when nothing overlaps). Then a
-                # same-turn regeneration, the house pattern for model tags, so
-                # it answers WITH the text in hand instead of losing it.
-                pick = select_next_chunk(doc_library, model_doc_query, "reply")
-                if pick is not None:
-                    doc_session = doc_library[pick["session_index"]]
-                    doc_session["cursor"] = pick["chunk_index"]
-                    doc_session.setdefault("read", set()).add(pick["chunk_index"])
-                    record_chunk_read(memory, doc_session, pick["chunk_index"])
-                    model_doc_tool_result = (
-                        impact_note(f'asked to read more ("{model_doc_query[:80]}")')
-                        + "\n"
-                        + stage_chunk(doc_session, index=pick["chunk_index"], reply_note=reading_reply_note(pick))
-                    )
-                    turn_impacts.append(
-                        {
-                            "cause": f'asked to read more ("{model_doc_query[:60]}")',
-                            "effect": f"{doc_session['source_name']} part {pick['chunk_index'] + 1}/"
-                                      f"{doc_session['chunk_count']} returned ({pick['mode']})",
-                        }
-                    )
-                    print(
-                        Fore.CYAN
-                        + f"\n[Doc] Model asked to read more -> {doc_session['source_name']} "
-                        + f"part {pick['chunk_index'] + 1}/{doc_session['chunk_count']} ({pick['mode']})."
-                        + Style.RESET_ALL
-                    )
-                else:
-                    model_doc_tool_result = (
-                        impact_note("asked to read more")
-                        + "\nThe library is fully read; nothing unread remains."
-                    )
-                    print(Fore.CYAN + "\n[Doc] Model asked to read more but the library is fully read." + Style.RESET_ALL)
-                prompt = _build_live_prompt(
-                    user_input,
-                    memory_tool_result=memory_tool_result,
-                    orientation_tool_result=orientation_tool_result,
-                    claimmap_tool_result=claimmap_tool_result,
-                    methodmap_tool_result=methodmap_tool_result,
-                    sandbox_tool_result=sandbox_tool_result,
-                    document_tool_result=model_doc_tool_result,
-                    command_tool_result=model_cmd_tool_result,
-                    session_context=session_context if session_context_enabled else None,
-                )
-                print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                response, telemetry = _generate_tool_followup(prompt, phase="document tool follow-up")
-                model_memory_query = extract_memory_query(response)
-                model_claimmap_payload = extract_claimmap_payload(response)
-                model_methodmap_query = extract_methodmap_query(response)
-                model_probe_query = extract_probe_query(response)
+                print(Fore.CYAN + "[Doc] Model requested a reading pass for: " + model_doc_query[:120] + Style.RESET_ALL)
 
             if model_memory_query is not None and memory_tool_result is None:
                 if _memory_model_available():
@@ -15807,20 +21132,33 @@ def main():
                     + Style.RESET_ALL
                     + "\n"
                 )
-                prompt = _build_live_prompt(
-                    user_input,
-                    memory_tool_result=model_memory_tool_result,
-                    orientation_tool_result=orientation_tool_result,
-                    claimmap_tool_result=claimmap_tool_result,
-                    methodmap_tool_result=methodmap_tool_result,
-                    command_tool_result=model_cmd_tool_result,
-                    session_context=session_context if session_context_enabled else None,
-                )
-                print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                response, telemetry = _generate_tool_followup(prompt, phase="memory tool follow-up")
-                model_claimmap_payload = extract_claimmap_payload(response)
-                model_methodmap_query = extract_methodmap_query(response)
-                model_probe_query = extract_probe_query(response)
+                if synaptic_engine and records:
+                    try:
+                        combined_mem_text = " ".join(r.text for r in records if getattr(r, "text", None))
+                        if combined_mem_text:
+                            synaptic_engine.integrate_text_memory(
+                                combined_mem_text,
+                                learning_rate=0.03,
+                                metadata={"query": display_query, "count": len(records)},
+                            )
+                            synaptic_engine.save_synaptic_weights()
+                    except Exception:
+                        pass
+                if allow_tool_reprompting:
+                    prompt = _build_live_prompt(
+                        user_input,
+                        memory_tool_result=model_memory_tool_result,
+                        orientation_tool_result=orientation_tool_result,
+                        claimmap_tool_result=claimmap_tool_result,
+                        methodmap_tool_result=methodmap_tool_result,
+                        command_tool_result=model_cmd_tool_result,
+                        session_context=session_context if session_context_enabled else None,
+                    )
+                    print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
+                    response, telemetry = _generate_tool_followup(prompt, phase="memory tool follow-up")
+                    model_claimmap_payload = extract_claimmap_payload(response)
+                    model_methodmap_query = extract_methodmap_query(response)
+                    model_probe_query = extract_probe_query(response)
             if model_claimmap_payload and claimmap_tool_result is None:
                 model_claimmap_steer = None
                 try:
@@ -15851,40 +21189,48 @@ def main():
                     + Style.RESET_ALL
                     + "\n"
                 )
-                prompt = _build_live_prompt(
-                    user_input,
-                    memory_tool_result=model_memory_tool_result or memory_tool_result,
-                    orientation_tool_result=orientation_tool_result,
-                    claimmap_tool_result=model_claimmap_tool_result,
-                    methodmap_tool_result=methodmap_tool_result,
-                    command_tool_result=model_cmd_tool_result,
-                    session_context=session_context if session_context_enabled else None,
-                )
-                print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                tag_alpha = field_governed_knob_value(
-                    "claimmap_alpha",
-                    tuner,
-                    probes,
-                    default=tuner.get("claimmap_alpha", 0.0),
-                )
-                tag_sweep_layers = None
-                if model_claimmap_steer and tag_alpha > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
-                    _tls, _tds, _tvar = _sweep_layers_for("claimmap", model_claimmap_steer)
-                    if _tls:
-                        tag_sweep_layers = _tls
-                        for _sl in _tls:
-                            sweep_state["fires"].append(("claimmap", _sl, tag_alpha, _tds.get(_sl), len(_tls), _tvar))
-                tag_steer_handles = (
-                    claimmap_steer_handles(model, model_claimmap_steer, alpha=tag_alpha, layers=tag_sweep_layers)
-                    if model_claimmap_steer else []
-                )
-                response, telemetry = _generate_tool_followup(
-                    prompt,
-                    extra_steer_handles=tag_steer_handles,
-                    phase="claimmap tool follow-up",
-                )
-                model_methodmap_query = extract_methodmap_query(response)
-                model_probe_query = extract_probe_query(response)
+                if model_claimmap_steer:
+                    pending_claimmap_steer_delta = model_claimmap_steer
+                    if lookahead_apparatus is not None:
+                        from invariants.claimmap import get_unified_tension_vector
+                        _c_axis = get_unified_tension_vector(cm)
+                        if _c_axis is not None:
+                            lookahead_apparatus.attach_claimmap(_c_axis, tension_score=cm.mean_sim, steer_delta=cm.steer_delta)
+                if allow_tool_reprompting:
+                    prompt = _build_live_prompt(
+                        user_input,
+                        memory_tool_result=model_memory_tool_result or memory_tool_result,
+                        orientation_tool_result=orientation_tool_result,
+                        claimmap_tool_result=model_claimmap_tool_result,
+                        methodmap_tool_result=methodmap_tool_result,
+                        command_tool_result=model_cmd_tool_result,
+                        session_context=session_context if session_context_enabled else None,
+                    )
+                    print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
+                    tag_alpha = field_governed_knob_value(
+                        "claimmap_alpha",
+                        tuner,
+                        probes,
+                        default=tuner.get("claimmap_alpha", 0.0),
+                    )
+                    tag_sweep_layers = None
+                    if model_claimmap_steer and tag_alpha > 0 and tuner.get("steer_layer_sweep", 0.0) > 0:
+                        _tls, _tds, _tvar = _sweep_layers_for("claimmap", model_claimmap_steer)
+                        if _tls:
+                            tag_sweep_layers = _tls
+                            for _sl in _tls:
+                                sweep_state["fires"].append(("claimmap", _sl, tag_alpha, _tds.get(_sl), len(_tls), _tvar))
+                    tag_steer_handles = (
+                        claimmap_steer_handles(model, model_claimmap_steer, alpha=tag_alpha, layers=tag_sweep_layers)
+                        if model_claimmap_steer else []
+                    )
+                    response, telemetry = _generate_tool_followup(
+                        prompt,
+                        extra_steer_handles=tag_steer_handles,
+                        phase="claimmap tool follow-up",
+                    )
+                    model_methodmap_query = extract_methodmap_query(response)
+                    model_probe_query = extract_probe_query(response)
             if model_methodmap_query and methodmap_tool_result is None:
                 model_methodmap_tool_result = (
                     impact_note(f'asked the method map about "{model_methodmap_query}"')
@@ -15907,18 +21253,35 @@ def main():
                     + Style.RESET_ALL
                     + "\n"
                 )
-                prompt = _build_live_prompt(
-                    user_input,
-                    memory_tool_result=model_memory_tool_result or memory_tool_result,
-                    orientation_tool_result=orientation_tool_result,
-                    claimmap_tool_result=model_claimmap_tool_result or claimmap_tool_result,
-                    methodmap_tool_result=model_methodmap_tool_result,
-                    command_tool_result=model_cmd_tool_result,
-                    session_context=session_context if session_context_enabled else None,
-                )
-                print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                response, telemetry = _generate_tool_followup(prompt, phase="methodmap tool follow-up")
+                if allow_tool_reprompting:
+                    prompt = _build_live_prompt(
+                        user_input,
+                        memory_tool_result=model_memory_tool_result or memory_tool_result,
+                        orientation_tool_result=orientation_tool_result,
+                        claimmap_tool_result=model_claimmap_tool_result or claimmap_tool_result,
+                        methodmap_tool_result=model_methodmap_tool_result,
+                        command_tool_result=model_cmd_tool_result,
+                        session_context=session_context if session_context_enabled else None,
+                    )
+                    print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
+                    response, telemetry = _generate_tool_followup(prompt, phase="methodmap tool follow-up")
             if model_probe_query and (probes or exposed_knobs):
+                naming_result = None
+                if model_probe_query.strip().lower() == 'other self':
+                    from invariants.other_probes import is_other_probe
+                    if any(p.get('exposed') and is_other_probe(p) for p in probes.values()):
+                        naming_result = _select_other('self')
+                    else:
+                        naming_result = 'Other selection requires an exposed Other-related probe.'
+                    model_probe_query = 'all'
+                if model_probe_query.strip().lower().startswith('rename '):
+                    language = plasticity_owners.for_tuner(tuner)[0].exposure_language
+                    try:
+                        identifier, naming_result = language.naming_query(model_probe_query, probes)
+                        model_probe_query = identifier
+                    except (ValueError, OSError) as exc:
+                        naming_result = f'Naming refused: {exc}'
+                        model_probe_query = 'unavailable_naming_request'
                 # READ-ONLY self-measurement: the model may consult sensors the
                 # operator has exposed (:probe expose <name> or :expose <name>)
                 # and scalar knobs the operator exposed with :expose <knob>.
@@ -15928,6 +21291,8 @@ def main():
                 name_part, _, cand_text = _partition_unescaped_pipes(model_probe_query)
                 cand_text = cand_text.strip()
                 req_names = [re.sub(r"[^a-z0-9_]", "_", n.strip().lower())[:40] for n in name_part.split(",") if n.strip()]
+                from invariants.exposure_language import resolve_probe_alias
+                req_names = [resolve_probe_alias(n, probes) or n for n in req_names]
                 exposed_probe_all = sorted(n for n in probes if probes[n].get("exposed"))
                 exposed_knob_all = sorted(k for k in exposed_knobs if k in tuner.triggers and not _is_shadow_trigger(k, tuner))
                 if req_names == ["all"]:
@@ -15935,32 +21300,37 @@ def main():
                 readable = [n for n in req_names if n in probes and probes[n].get("exposed")]
                 readable_knobs = [n for n in req_names if n in exposed_knob_all]
                 blocked = [n for n in req_names if n not in readable and n not in readable_knobs]
-                probe_lines = []
+                probe_lines = [naming_result] if naming_result else []
                 if cand_text and readable:
                     from invariants.engine import _inputs as _q_inputs, _hidden_states as _q_hidden, probe_score as _q_score
-                    with torch.no_grad():
-                        q_ids = _q_inputs(model, cand_text[:600])
-                        q_hs = _q_hidden(model, q_ids["input_ids"], q_ids.get("attention_mask"))
-                    for n in readable:
-                        hist = probes[n]["history"]
-                        raw = _q_score(q_hs, probes[n]["direction"])
-                        if hist:
-                            sig = raw - (sum(hist) / len(hist))
-                            probe_lines.append(f"- {n} reads {sig:+.3f} on those words, against my recent baseline.")
-                        else:
+                    try:
+                        with torch.no_grad():
+                            q_ids = _q_inputs(model, cand_text[:600])
+                            q_hs = _q_hidden(model, q_ids["input_ids"], q_ids.get("attention_mask"))
+                        for n in readable:
+                            raw = _q_score(q_hs, probes[n]["direction"])
                             probe_lines.append(
-                                f"- {n}: no centered reading yet (raw projection {raw:+.3f}; baseline not initialized)."
+                                f"- {probe_alias(n)}: text-replay raw projection {raw:+.3f} on those words; "
+                                "this is a text diagnostic, separate from live generation readings."
                             )
+                    finally:
+                        if 'q_hs' in locals():
+                            del q_hs
+                        if 'q_ids' in locals():
+                            del q_ids
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
                 else:
                     for n in readable:
                         p_trig = tuner.triggers.get(f"probe_{n}")
                         last_sig = next(
-                            (r[f"probe_{n}"] for r in reversed(turn_log) if f"probe_{n}" in r),
+                            (r[f"probe_{n}"] for r in reversed(turn_log)
+                             if f"probe_{n}" in r and probe_row_matches_source(r, probes[n])),
                             None,
                         )
                         seg = (
-                            f"- {n}: {float(last_sig):+.3f} on my last turn"
-                            if last_sig is not None else f"- {n}: no reading yet"
+                            f"- {probe_alias(n)}: {float(last_sig):+.3f} on my last turn"
+                            if last_sig is not None else f"- {probe_alias(n)}: no reading yet"
                         )
                         if p_trig is not None:
                             p_st = p_trig.outcome_stats()
@@ -15990,11 +21360,12 @@ def main():
                     else:
                         probe_lines.append(seg + ".")
                 for n in blocked:
-                    probe_lines.append(f"- {n}: not a sensor I can consult.")
+                    identifier = probe_alias(n) if n in probes else n
+                    probe_lines.append(f"- {identifier}: not a sensor I can consult.")
                 if not probe_lines:
                     exposed_bits = []
                     if exposed_probe_all:
-                        exposed_bits.append("probes: " + ", ".join(exposed_probe_all))
+                        exposed_bits.append("probes: " + ", ".join(probe_alias(name) for name in exposed_probe_all))
                     if exposed_knob_all:
                         exposed_bits.append("knobs: " + ", ".join(exposed_knob_all))
                     probe_lines.append(
@@ -16003,7 +21374,7 @@ def main():
                     )
                 consulted_parts = []
                 if readable:
-                    consulted_parts.append(f'{", ".join(readable)} probe(s)')
+                    consulted_parts.append(f'{", ".join(probe_alias(name) for name in readable)} probe(s)')
                 if readable_knobs:
                     consulted_parts.append(f'{", ".join(readable_knobs)} knob(s)')
                 probe_cause = (
@@ -16026,23 +21397,24 @@ def main():
                 )
                 print(
                     Fore.CYAN
-                    + f"\n[Probe] Model consulted sensors: {model_probe_query[:120]}\n"
-                    + model_probe_tool_result
+                    + f"\n[Probe] Model consulted sensors: {console_format_probe_text(model_probe_query[:120], probes, color=Fore.CYAN)}\n"
+                    + console_format_probe_text(model_probe_tool_result, probes, color=Fore.CYAN)
                     + Style.RESET_ALL
                     + "\n"
                 )
-                prompt = _build_live_prompt(
-                    user_input,
-                    memory_tool_result=memory_tool_result or model_memory_tool_result,
-                    orientation_tool_result=orientation_tool_result,
-                    claimmap_tool_result=claimmap_tool_result or model_claimmap_tool_result,
-                    methodmap_tool_result=methodmap_tool_result or model_methodmap_tool_result,
-                    probe_tool_result=model_probe_tool_result,
-                    command_tool_result=model_cmd_tool_result,
-                    session_context=session_context if session_context_enabled else None,
-                )
-                print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
-                response, telemetry = _generate_tool_followup(prompt, phase="probe tool follow-up")
+                if allow_tool_reprompting:
+                    prompt = _build_live_prompt(
+                        user_input,
+                        memory_tool_result=memory_tool_result or model_memory_tool_result,
+                        orientation_tool_result=orientation_tool_result,
+                        claimmap_tool_result=claimmap_tool_result or model_claimmap_tool_result,
+                        methodmap_tool_result=methodmap_tool_result or model_methodmap_tool_result,
+                        probe_tool_result=model_probe_tool_result,
+                        command_tool_result=model_cmd_tool_result,
+                        session_context=session_context if session_context_enabled else None,
+                    )
+                    print(Fore.GREEN + Style.BRIGHT + "\nMe: " + Style.RESET_ALL, end="")
+                    response, telemetry = _generate_tool_followup(prompt, phase="probe tool follow-up")
             if response:
                 active_memory_tool_result = memory_tool_result or model_memory_tool_result
                 active_orientation_tool_result = orientation_tool_result
@@ -16053,7 +21425,8 @@ def main():
                 active_probe_tool_result = model_probe_tool_result
                 active_command_tool_result = model_cmd_tool_result
                 if (
-                    (active_memory_tool_result or active_claimmap_tool_result or active_methodmap_tool_result or active_document_tool_result or active_probe_tool_result or active_command_tool_result)
+                    allow_tool_reprompting
+                    and (active_memory_tool_result or active_claimmap_tool_result or active_methodmap_tool_result or active_document_tool_result or active_probe_tool_result or active_command_tool_result)
                     and is_tool_only_response(response)
                 ):
                     memory.append_event(
@@ -16202,11 +21575,10 @@ def main():
 
                 if show_timestamps:
                     print(Fore.GREEN + Style.BRIGHT + f"\n[{datetime.datetime.now().strftime('%H:%M:%S')}] Me: " + Style.RESET_ALL)
-                print(response, end="")
+                print(console_format_probe_text(response, probes, color=Fore.GREEN), end="")
                 if session_context_enabled:
                     s_score = sense_score(synthesis_records) if synthesis_records else 0.0
                     if s_score is None: s_score = 0.0
-                    active_u_name = _last_replace_name if '_last_replace_name' in locals() and _last_replace_name else "user"
                     session_context.append(("user", active_u_name, user_input, s_score))
                     session_context.append(("assistant", "assistant", response, s_score))
                     if len(session_context) > MAX_SESSION_TURNS * 2:
@@ -16237,6 +21609,13 @@ def main():
                     _sys_doc_library = doc_library
                     _sys_pending_doc = pending_document_tool_result
                     _sys_doc_autoread = doc_autoread
+                    _agent_generation_restore = {
+                        "agent": ja, "tuner": tuner, "probes": probes,
+                        "tuner_bindings": tuner_bindings, "prioritize_pin": prioritize_pin,
+                        "queued_calibrations": queued_calibrations, "queued_commands": queued_commands,
+                        "doc_session": doc_session, "doc_library": doc_library,
+                        "pending_document_tool_result": pending_document_tool_result, "doc_autoread": doc_autoread,
+                    }
                     tuner = ja.tuner
                     probes = ja.probes
                     tuner_bindings = ja.tuner_bindings
@@ -16250,21 +21629,16 @@ def main():
 
                     agent_document_tool_result = pending_document_tool_result
                     pending_document_tool_result = None
+                    agent_reading_focus = (doc_autoread or {}).pop("focus", "") or last_assistant_response
                     if agent_document_tool_result is None and doc_autoread and doc_autoread.get("remaining", 0) > 0:
-                        pick = _select_autoread_chunk(doc_library, doc_autoread)
+                        pick = _select_autoread_chunk(doc_library, doc_autoread, agent_reading_focus)
                         if pick is not None:
                             doc_session = doc_library[pick["session_index"]]
-                            doc_session["cursor"] = pick["chunk_index"]
-                            doc_session.setdefault("read", set()).add(pick["chunk_index"])
-                            record_chunk_read(memory, doc_session, pick["chunk_index"])
-                            agent_document_tool_result = stage_chunk(doc_session, index=pick["chunk_index"])
-                            doc_autoread["remaining"] -= 1
-                            if doc_autoread["remaining"] <= 0:
-                                doc_autoread = None
+                            agent_document_tool_result = stage_document_read(doc_session, pick["chunk_index"])
 
                     agent_state_report = _spawn_state_report(ja.name, tuner, probes)
                     ja_prompt = _build_live_prompt(
-                        agent_state_report + "\n\n[Please respond]",
+                        "" if agent_document_tool_result else agent_state_report + "\n\n[Please respond]",
                         document_tool_result=agent_document_tool_result,
                         session_context=session_context if session_context_enabled else None,
                         active_u_name="system",
@@ -16272,15 +21646,19 @@ def main():
                     )
                     _ja_handles, _ja_prio = _priority_steer_handles(probes, tuner, prioritize_pin)
                     try:
-                        ja_response = generate_agentic_text(
+                        ja_response, ja_telemetry = generate_agentic_text(
                             model,
                             instruction=ja_prompt,
+                            document_reader=_document_reader(),
+                            generation_channel="reader" if agent_document_tool_result else "speech",
                             config=config,
                             max_new_tokens=max(64, int(tuner.get("response_tokens", 512))),
                             synthesis_recorder=None,
                             chatty_log=False,
                             pre_formatted=True,
-                            return_telemetry=False,
+                            return_telemetry=True,
+                            generation_probes=probes,
+                            generation_probe_tuner=tuner,
                         )
                     finally:
                         for _h in _ja_handles:
@@ -16289,9 +21667,17 @@ def main():
                             except Exception:
                                 pass
 
-                    print(ja_response, end="")
+                    doc_autoread = complete_document_reading(
+                        memory, doc_library, agent_document_tool_result, ja_response, doc_autoread,
+                    )
+                    if agent_document_tool_result:
+                        retain_document_thought(memory, _reader_context(), doc_session, agent_document_tool_result, ja_response, _document_reader())
+                        if _reader_should_stop(doc_autoread, ja_response, None, ja_telemetry):
+                            doc_autoread = None
+                    else:
+                        print(console_format_probe_text(ja_response, probes, color=Fore.GREEN), end="")
 
-                    if session_context_enabled:
+                    if session_context_enabled and not agent_document_tool_result:
                         session_context.append(("assistant", ja.name, ja_response, 0.0))
 
                     ja.tuner = tuner
@@ -16314,20 +21700,25 @@ def main():
                     doc_library = _sys_doc_library
                     pending_document_tool_result = _sys_pending_doc
                     doc_autoread = _sys_doc_autoread
+                    _agent_generation_restore = None
                     
+                    if agent_document_tool_result:
+                        continue
                     memory.append_turn(
                         "assistant",
                         ja_response,
                         tags=["model_output", ja.name],
+                        provenance={"channel": "speech", "spoken": True},
                         metrics={
                             "chars": len(ja_response),
                         }
                     )
 
-                memory.append_turn(
+                _response_memory_record = memory.append_turn(
                     "assistant",
                     response,
                     tags=["model_output", "main_assistant"],
+                    provenance={"channel": "speech", "spoken": True},
                     metrics={
                         "chars": len(response),
                         "sense_score": float(s_score) if session_context_enabled else 0.0,
@@ -16505,42 +21896,73 @@ def main():
                 + Style.RESET_ALL,
                 flush=True,
             )
-            # Minted probes score every turn: raw projection of the reply
-            # state on each probe direction, centered against the probe's own
-            # rolling history, paired with sense via the credit channel.
-            if probes and response:
-                from invariants.engine import _inputs as _p_inputs, _hidden_states as _p_hidden, probe_score
-                p_ids = _p_inputs(model, response[:600])
-                p_hs = _p_hidden(model, p_ids["input_ids"], p_ids.get("attention_mask"))
-                seeded_probes = []
-                for pname, pdata in probes.items():
-                    raw = probe_score(p_hs, pdata["direction"])
-                    sig = centered_probe_observation(pdata, raw)
-                    if sig is None:
-                        seeded_probes.append(pname)
-                        continue
-                    tuner.observe(f"probe_{pname}", sig)
-                    turn_row[f"probe_{pname}"] = float(sig)
-                    if pdata.get("chatty", True):
-                        print(Fore.CYAN + f"  [Probe Score] {pname}: {sig:+.3f}" + Style.RESET_ALL, flush=True)
-                    if turn_sense is not None:
-                        tuner.credit(f"probe_{pname}", sig, turn_sense)
-                    # A validate-mode match records (knob value, probe reading) so
-                    # its correlation can credit the knob it is matched to.
-                    _pm = probe_matches.get(pname)
-                    if _pm and _pm.get("mode") == "validate" and _pm.get("knob"):
-                        match_hist.setdefault(pname, deque(maxlen=200)).append(
-                            (float(tuner.get(_pm["knob"], 0.0)), float(sig))
-                        )
-                save_probe_raw_histories(probes)
-                if seeded_probes:
-                    print(
-                        Fore.CYAN
-                        + f"  [Probe Seed] initialized raw baselines for {len(seeded_probes)} probe(s); "
-                        + "centered readings begin next turn."
-                        + Style.RESET_ALL,
-                        flush=True,
-                    )
+            p_hs = _turn_generation_states.get("hidden_states")
+            resp_vec = None
+            try:
+                # Observe the states that actually predicted this reply, with its
+                # original context and intervention. Never re-encode its wording.
+                if probes and response:
+                    score_generation_probes(probes, tuner, telemetry, turn_row, turn_sense)
+                    if p_hs is not None:
+                        from invariants.engine import probe_score
+                        reference = plasticity_owners.for_tuner(tuner)[0].other_reference
+                        participants = {'self', 'user'} | {agent.name for agent in joined_agents}
+                        if reference.current:
+                            participants.add(reference.current)
+                        if active_u_name:
+                            participants.add(active_u_name)
+                        other_readings = reference.participant_readings(probes, participants, _other_mint,
+                            lambda direction: probe_score(p_hs, direction))
+                        turn_row['other_probe_readings'] = other_readings
+                        for other_name in other_readings:
+                            torch.save({key: value for key, value in probes[other_name].items() if key != 'history'},
+                                       os.path.join(PROBE_DIR, other_name + '.pt'))
+                    for pname, pdata in probes.items():
+                        sig = turn_row.get(f"probe_{pname}")
+                        if sig is None:
+                            continue
+                        # A validate-mode match records (knob value, probe reading) so
+                        # its correlation can credit the knob it is matched to.
+                        _pm = probe_matches.get(pname)
+                        if _pm and _pm.get("mode") == "validate" and _pm.get("knob"):
+                            match_hist.setdefault(pname, deque(maxlen=200)).append(
+                                (float(tuner.get(_pm["knob"], 0.0)), float(sig))
+                            )
+                    # Step CEN with this turn's thought activations across layer band (if enabled)
+                    if cen_enabled:
+                        try:
+                            cen_sub, cen_net, dmn_net, cen_adp = ensure_cen_active(main, probes=probes, synaptic_engine=synaptic_engine)
+                            if cen_adp and p_hs is not None:
+                                cen_snap = cen_adp.step_with_activation(
+                                    p_hs,
+                                    token_string=response[:30],
+                                    extra_metadata={"turn": turn_counter, "user_input": user_input[:100], "response": response[:100]},
+                                )
+                                turn_row["cen_friction"] = float(cen_snap.friction_gradient)
+                                turn_row["cen_derivative"] = float(cen_snap.derivative_magnitude)
+                                if hasattr(tuner, "observe"):
+                                    tuner.observe("cen_friction", float(cen_snap.friction_gradient))
+                                    tuner.observe("cen_derivative", float(cen_snap.derivative_magnitude))
+                        except Exception:
+                            pass
+                if response and not autocomplete_turn and not reading_turn_source:
+                    try:
+                        resp_vec = p_hs.mean(dim=1).squeeze(0).detach().cpu() if p_hs is not None else None
+                        shift_tracker.observe_turn(response, vector=resp_vec, role="assistant")
+                        from invariants.vector_travel import VectorTravelEngine
+                        v_eng = VectorTravelEngine.get_instance()
+                        if resp_vec is not None:
+                            v_eng.observe_turn(resp_vec, utility_feedback=turn_sense)
+                    except Exception:
+                        pass
+            finally:
+                if p_hs is not None:
+                    del p_hs
+                if resp_vec is not None:
+                    del resp_vec
+                _turn_generation_states.clear()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
             # Easter egg: the turn the self-sensor overtakes the user-model.
             _egg = consciousness_over_user_intent(probes, tuner, egg_state)
@@ -16608,44 +22030,6 @@ def main():
                         tuner.credit("intent_settling", intent_signal, turn_sense)
                 prev_unsettledness = unsettled_now
 
-            # "Read until satisfied": a reading turn counts as settled when its
-            # sense clears the conversation_productive bar (or needed no
-            # deliberation at all); enough settled turns in a row end the
-            # auto-read early, honestly, with the remainder still unread.
-            if doc_autoread and doc_autoread.get("until_probe") and reading_turn_source:
-                up = doc_autoread["until_probe"]
-                trig = tuner.triggers.get(f"probe_{up}")
-                sig = turn_row.get(f"probe_{up}")
-                if trig and sig is not None and sig >= trig.value:
-                    unread_left = sum(s["chunk_count"] - len(s.get("read") or ()) for s in doc_library)
-                    print(
-                        Fore.CYAN
-                        + f"[Doc] Reading stopped: probe '{up}' thresholded ({sig:+.3f} >= {trig.value:.3f}). "
-                        + f"Stopping with {unread_left} chunk(s) unread -- ':doc read' resumes anytime."
-                        + Style.RESET_ALL
-                    )
-                    doc_autoread = None
-
-            elif doc_autoread and doc_autoread.get("until_settled") and reading_turn_source:
-                settled_turn = turn_sense is None or turn_sense >= float(
-                    tuner.get("conversation_productive", 0.0)
-                )
-                doc_autoread["settled_streak"] = (
-                    doc_autoread.get("settled_streak", 0) + 1 if settled_turn else 0
-                )
-                needed = max(1, int(tuner.get("reading_settled_streak", 2)))
-                if doc_autoread["settled_streak"] >= needed:
-                    unread_left = sum(
-                        s["chunk_count"] - len(s.get("read") or ()) for s in doc_library
-                    )
-                    print(
-                        Fore.CYAN
-                        + f"[Doc] Reading settled: {needed} productive turn(s) in a row. "
-                        + f"Stopping with {unread_left} chunk(s) unread -- ':doc read' resumes anytime."
-                        + Style.RESET_ALL
-                    )
-                    doc_autoread = None
-
             # Agency ledger: was this turn's context really caused by the
             # model's own words? Observed every turn (so the contingency rate
             # is visible) and credited with the turn's sense, so :tune lift on
@@ -16658,6 +22042,20 @@ def main():
                 impact_state["log"].extend(turn_impacts)
             if turn_sense is not None:
                 tuner.credit("words_had_impact", impact_signal, turn_sense)
+            # Learn only from scored conversation turns; utility completions carry no credit.
+            if not utility_expect_turn and not autocomplete_turn:
+                try:
+                    behavior_row = dict(turn_row)
+                    if _response_memory_record is not None:
+                        behavior_row["source_ts"] = _response_memory_record.timestamp
+                    plasticity_owners.for_tuner(tuner)[0].probe_behavior.observe(response, user_input, behavior_row, probes)
+                    from invariants.probe_definition_diagnostic import poll_probe_diagnostics
+                    for diagnostic_message in poll_probe_diagnostics(plasticity_owners.for_tuner(tuner)[0], probes, model):
+                        print(Fore.CYAN + diagnostic_message + Style.RESET_ALL)
+                    plasticity_owners.for_tuner(tuner)[0].exposure_language.observe(response, turn_row, probes)
+                    plasticity_owners.observe(tuner, turn_row, turn_sense, probes=probes)
+                except OSError as exc:
+                    print(Fore.YELLOW + f"[Plasticity] {exc}" + Style.RESET_ALL)
             turn_row["words_had_impact"] = float(impact_signal)
             # Outcome evidence for strength/budget knobs: pair each knob's
             # value-in-force with this turn's sense (batched; one save).
@@ -16722,25 +22120,25 @@ def main():
                 pending_claimmap_credit = None
 
             if (
-                os.environ.get("CLAIMMAP_AUTO_TRIGGER", "1").strip() not in {"0", "false", "no"}
-                and pending_claimmap_tool_result is None
+                claimmap_auto_enabled
+                and pending_claimmap_steer_delta is None
             ):
                 a, b, tension_score = framing_tension_score(response or "")
                 # Log the tension signal EVERY turn (even 0) so :tune can read the
                 # distribution; fire on the live-tuned threshold, not a fixed cutoff.
                 fired = tuner.observe("claimmap_tension", tension_score)
                 pending_claimmap_credit = tension_score  # credited by next turn's sense
-                if fired and a is not None:
+                # Enforce sanity floor (>= 0.12) so low-confidence lexical noise never auto-triggers ClaimMap
+                if fired and a is not None and tension_score >= 0.12:
                     try:
                         cm = analyze_claim_pair(f"{a} || {b}", model=model)
-                        # No attribution prefix: the felt map's own first line
-                        # ("I just held two framings against each other: ...")
-                        # already carries the causation, in the model's own
-                        # quoted words -- adding a standardized vocabulary line
-                        # ("tension") would teach the lexical association we
-                        # later want to MEASURE (see SEMANTIC_NEUTRALIZATION).
-                        pending_claimmap_tool_result = cm.felt
+                        pending_claimmap_tool_result = None  # pure latent steering, zero prompt injection
                         pending_claimmap_steer_delta = cm.steer_delta
+                        if lookahead_apparatus is not None:
+                            from invariants.claimmap import get_unified_tension_vector
+                            _c_axis = get_unified_tension_vector(cm)
+                            if _c_axis is not None:
+                                lookahead_apparatus.attach_claimmap(_c_axis, tension_score=tension_score, steer_delta=cm.steer_delta)
                         impact_state["pending"].append(
                             {"cause": "answer held a framing tension", "effect": "a felt comparison was measured and staged"}
                         )
@@ -16752,7 +22150,7 @@ def main():
                         )
                         print(
                             Fore.MAGENTA
-                            + f"\n[ClaimMap] Sensed a tension (score {tension_score:.2f}) in that answer -- it will shape the next turn."
+                            + f"\n[ClaimMap] Sensed tension ({tension_score:.2f}) -- applying physical steering delta to next turn (zero prompt injection)."
                             + Style.RESET_ALL
                         )
                     except Exception as exc:
@@ -16837,8 +22235,10 @@ def main():
                     if not success:
                         survived.append(qcmd)
                 queued_calibrations = survived
+            _flush_process_memory()
             
         except (KeyboardInterrupt, EOFError):
+            _pause_swapped_reader(_agent_generation_restore)
             memory.append_event("shell_closed", tags=["session"])
             print("\nInteractive shell closed.")
             break
@@ -16851,6 +22251,12 @@ def main():
             print(Fore.YELLOW + msg + Style.RESET_ALL)
             continue
         except Exception as _turn_exc:
+            _failed_swapped_reader = _pause_swapped_reader(_agent_generation_restore)
+            _agent_generation_restore = None
+            if doc_autoread and not _failed_swapped_reader:
+                doc_autoread = None
+                pending_document_tool_result = None
+                print(Fore.YELLOW + "[Doc] Reading paused after an error. Unprocessed passages remain unread; ':doc read' resumes." + Style.RESET_ALL)
             # A bug in ONE command (or a typo that reaches bad code) must not end
             # the session -- abort the turn, report, and keep going. The full
             # traceback is logged so the fault is still discoverable.
@@ -16866,7 +22272,7 @@ def main():
                     "turn_error_recovered",
                     text=f"{type(_turn_exc).__name__}: {_turn_exc}",
                     tags=["error"],
-                    provenance={"traceback": _tb.format_exc()[-1500:]},
+                    provenance={"traceback": traceback.format_exc()[-1500:]},
                 )
             except Exception:
                 pass

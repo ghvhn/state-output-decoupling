@@ -1,0 +1,146 @@
+{
+  "coverage": [
+    {
+      "id": "01a0f3a1-86a7-7ae1-8c86-58cf86f02146",
+      "title": "Complete Antigravity initiative",
+      "pages": 2,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019f43ac-611d-7f83-a964-313586c7047f",
+      "title": "Expand G controls and alignment",
+      "pages": 4,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019f429b-02d9-7cc0-a5c6-f85dce2488f5",
+      "title": "Fix documentation prioritization",
+      "pages": 1,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019f09c9-03a0-7d83-8f96-ff6ed6d4dc72",
+      "title": "Check layer memory persistence",
+      "pages": 4,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019f0b99-c1dc-7581-b85e-2c8b804e41bb",
+      "title": "Inspect repo and run test",
+      "pages": 22,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019f00ee-361f-7b53-b739-16f59e1cedd6",
+      "title": "Refactor reflexive experiment to use",
+      "pages": 6,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019eff85-b04b-7970-b8a4-cc26cc631362",
+      "title": "Re-run self-controller sweep",
+      "pages": 2,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019efb87-b875-7332-b383-311591d7bdc3",
+      "title": null,
+      "pages": 6,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019efb87-4516-71b0-a5c5-52a85667e655",
+      "title": "Handoff continuation",
+      "pages": 6,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019efb87-4512-78a1-ad17-ad8ee02635c3",
+      "title": "Continuation session",
+      "pages": 8,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019efb87-4524-7322-9306-75eb312a44a3",
+      "title": "Unified Manifold Theory protocol",
+      "pages": 22,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019f0977-fd69-74e0-9ef7-5f5455704e57",
+      "title": "Build frontier model",
+      "pages": 1,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019f6186-28bc-7b51-be89-3d0ea78c5291",
+      "title": "Steer toward accuracy",
+      "pages": 4,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "019f3c28-0908-79b2-9341-c94152c604f4",
+      "title": "Compare paper to timeline",
+      "pages": 5,
+      "complete": true,
+      "available": true
+    },
+    {
+      "id": "01a07869-bc74-7932-b9ed-80f59a021b3d",
+      "title": "Integrate and trim UI layout",
+      "pages": 2,
+      "complete": true,
+      "available": true
+    }
+  ],
+  "matches": [
+    {
+      "id": "019f43ac-611d-7f83-a964-313586c7047f",
+      "title": "Expand G controls and alignment",
+      "turn": "019f43af-b90e-7711-9a0a-24d1834d6a7e",
+      "date": null,
+      "text": "make sure that I can do more than freeze mass. i should be able to set personal Gs, and have G families. Gs can also be set to a probe, knob, or status (like ram). and then i can align time for any particular node with anything, such as layer, probe, etc. further than that, the impact it has on systems doesnt have to be a point, it could be shaped. picture em diagrams for oddly shaped metal holloids... lol\n"
+    },
+    {
+      "id": "019f0b99-c1dc-7581-b85e-2c8b804e41bb",
+      "title": "Inspect repo and run test",
+      "turn": "019f16d9-592c-7721-b01c-ee7685b23f18",
+      "date": null,
+      "text": "but i want to like somehow store the movement in a latent space. do you get what I'm saying? a vector map, not a matrix\n"
+    },
+    {
+      "id": "019f0b99-c1dc-7581-b85e-2c8b804e41bb",
+      "title": "Inspect repo and run test",
+      "turn": "019f15c9-a9d3-7f01-8170-978ed1d03e3b",
+      "date": null,
+      "text": "then we can probably build a relation map between the vectors, a vector latent space of sorts\n"
+    },
+    {
+      "id": "019f6186-28bc-7b51-be89-3d0ea78c5291",
+      "title": "Steer toward accuracy",
+      "turn": "019f6409-dbf1-7a43-8c48-f7ee4b86061e",
+      "date": null,
+      "text": "I've added bands. now i need to be able to relate G, mass, time, space etc off of object position/position derivatives\n"
+    },
+    {
+      "id": "019f3c28-0908-79b2-9341-c94152c604f4",
+      "title": "Compare paper to timeline",
+      "turn": "019f3c41-dfa2-7ee0-b0e6-35135f0c332a",
+      "date": null,
+      "text": "Flexible generalization. The same representation serves as a valid argument to many different downstream computations. In other words, a workspace vector lifted from one context and placed in another is correctly operated on by whatever function the new context supplies.\n\ncompare this to what i said about how one dimension might not always refer to the same concept\n"
+    }
+  ]
+}

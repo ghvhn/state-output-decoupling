@@ -49,12 +49,31 @@ class AgenticConfig:
     """Global configuration for the Agentic Engine."""
     
     # Feature Flags
+    base_model_only: bool = False
+    cognitive_cache: Optional[Any] = None
+    allow_organic_fallback: bool = True
     synthesis_enabled: bool = True
     use_expert_vectors: bool = True
     cache_enabled: bool = True
     cache_write_enabled: bool = False
     cache_verified_only: bool = True
     cache_write_scope: str = "default"
+    # Activation associations use experienced hidden states, not target answers.
+    activation_memory_enabled: bool = True
+    activation_memory_write_enabled: bool = True
+    activation_memory_autosave: bool = True
+    activation_memory_strength: float = 1.0
+    activation_memory_hops: int = 2
+    activation_memory_threshold: float = 0.5
+    activation_memory_navigation_gain: float = 1.0
+    activation_memory_max_norm_ratio: float = 0.05
+    activation_memory_absolute_budget: float = 0.25
+    activation_memory_max_writes_per_forward: int = 4
+    activation_memory_capacity: int = 256
+    activation_memory_episode_binding: bool = True
+    activation_memory_link_gain: float = 0.5
+    activation_memory_top_k: int = 4
+    activation_memory_isolate: bool = False
     ignore_oracle_cache: bool = False
     exclude_same_question_cache: bool = False
     exclude_same_question_oracle_cache: bool = False
@@ -123,6 +142,12 @@ class AgenticConfig:
     max_synthesis_events: int = 1
     max_synthesis_steps: int = 60
     max_routing_events: int = 4
+    # Sequential branch/select stages within one routing event. One preserves
+    # the original single-stage route; zero disables routing.
+    routing_depth: int = 1
+    # Zero replays the detected plateau-to-boundary region. A positive span
+    # replays its last N layers, clamped to the available region.
+    routing_layer_span: int = 0
     max_tool_calls: int = 8
     # Proven-expert routing: the ToT winner is chosen by branch entropy, but
     # when this weight > 0 the choice is nudged by each expert's accrued route
@@ -168,6 +193,7 @@ class AgenticConfig:
     repair_token_multiplier: float = 2.0
     max_attempt_tokens: Optional[int] = None
     verifier_time_reserve_sec: float = 20.0
+    repetition_penalty: float = 1.05
     
     @classmethod
     def from_preset(cls, preset_name: str) -> "AgenticConfig":

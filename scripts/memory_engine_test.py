@@ -16,23 +16,32 @@ from invariants.trigger_tuner import TriggerTuner
 from scripts.interactive_phenomenality import (
     AgenticConfig,
     add_watch_items,
+    automatic_command_help_entries,
     apply_config_overrides,
     backfill_scoring_names,
     build_command_autocomplete_reference,
     build_goal_command_reference,
+    build_model_help_text,
+    command_generation_help_context,
+    command_help_tool_result,
+    COMMAND_CHECK_AVAILABILITY,
     build_prompt,
     command_takes_colon_command_arg,
+    choose_calibration_target,
     _split_macro_commands,
     macro_create_lines,
     macro_safe_block,
     EXPOSE_TARGET_SPEC,
     expect_generation_profile,
     expected_macro_parts,
+    explain_command,
     extract_memory_query,
+    extract_help_request,
     field_source_error,
     load_watch_groups,
     macro_arg_header_items,
     normalize_watch_item,
+    parse_probe_backfill_tail,
     parse_field_source,
     parse_suggest_goal_request,
     queue_macro_text,
@@ -40,6 +49,7 @@ from scripts.interactive_phenomenality import (
     resolve_expose_choice_target,
     resolve_field_source,
     resolve_probe_choice,
+    remove_help_tags,
     restore_config_overrides,
     save_watch_groups,
     scrub_unstaged_memory_status,
@@ -47,6 +57,7 @@ from scripts.interactive_phenomenality import (
     suggest_command_catalog,
     validate_command_autocomplete,
     watch_choose_pool,
+    backfill_outcome_from_terms,
     watch_group_lines,
 )
 
@@ -306,6 +317,44 @@ def test_named_backfill_scores_only_named_probe():
     assert backfill_scoring_names(probes, ["neutral"], request_all=True) == list(probes)
 
 
+def test_backfill_tail_accepts_remapped_outcome_expression():
+    probes = {"accuracy_d4096": {}, "reality": {}, "illeism_d4096": {}}
+
+    limit, terms, label, error = parse_probe_backfill_tail(
+        "200 outcome +accuracy_d4096 +reality -illeism_d4096",
+        probes,
+    )
+    assert error is None
+    assert limit == 200
+    assert terms == [(1.0, "accuracy_d4096"), (1.0, "reality"), (-1.0, "illeism_d4096")]
+    assert label == "+accuracy_d4096 +reality -illeism_d4096"
+
+    limit, terms, label, error = parse_probe_backfill_tail(
+        "outcome 0.5*accuracy_d4096 -2*probe_illeism_d4096",
+        probes,
+    )
+    assert error is None
+    assert limit is None
+    assert terms == [(0.5, "accuracy_d4096"), (-2.0, "illeism_d4096")]
+    assert label == "+0.5*accuracy_d4096 -2*illeism_d4096"
+
+    _limit, _terms, _label, error = parse_probe_backfill_tail("outcome +missing", probes)
+    assert "unknown outcome probe" in error
+
+
+def test_backfill_outcome_from_terms_uses_centered_probe_signals():
+    per_probe = {
+        "accuracy_d4096": (0.7, 0.2),
+        "reality": (0.8, 0.1),
+        "illeism_d4096": (0.6, 0.3),
+    }
+    terms = [(1.0, "accuracy_d4096"), (1.0, "reality"), (-1.0, "illeism_d4096")]
+    # (0.2 + 0.1 - 0.3) / 3 = 0.0
+    assert abs(backfill_outcome_from_terms(per_probe, terms) - 0.0) < 1e-12
+    assert backfill_outcome_from_terms(per_probe, None, stored_sense=0.42) == 0.42
+    assert backfill_outcome_from_terms(per_probe, [(1.0, "missing")]) is None
+
+
 def test_suggest_command_catalog_lists_all_visible_user_facing_commands():
     catalog = suggest_command_catalog(
         hidden_commands={"hide"},
@@ -333,6 +382,78 @@ def test_suggest_command_catalog_lists_all_visible_user_facing_commands():
     assert any(cmd.startswith(":steer family ") for cmd in gravity)
     assert any(cmd.startswith(":steer quality ") for cmd in gravity)
     assert any(cmd.startswith(":steer shape ") for cmd in gravity)
+
+
+def test_declared_command_specs_automatically_drive_help_and_suggestions():
+    all_help_entries = automatic_command_help_entries()
+    assert sum(
+        entry[0].startswith(":steer band")
+        for entry in all_help_entries
+    ) == 1
+
+    help_entries = automatic_command_help_entries(":steer band")
+    help_text = "\n".join(line for entry in help_entries for line in entry)
+    assert len(help_entries) == 1
+    assert help_entries[0][0].startswith(":steer band [name]")
+    assert "one-sided Hooke tether" in help_text
+    assert "[rest <r>]" in help_text
+
+    catalog = suggest_command_catalog(filter_text="one-sided Hooke tether")
+    band_entries = [entry for entry in catalog if entry["command"].startswith(":steer band")]
+    assert len(band_entries) == 1
+    assert band_entries[0]["command"].startswith(":steer band [name]")
+    assert "one-sided Hooke tether" in band_entries[0]["summary"]
+
+    reference = build_command_autocomplete_reference(":steer band")
+    assert ":steer band [name]" in reference
+    assert "one-sided Hooke tether" in reference
+    assert "Examples are grammar samples, not defaults" in reference
+
+
+def test_command_explainer_uses_parser_contract_and_model_help_payload():
+    checked = explain_command(":steer field on 0.1 because inspect the current field")
+    assert checked.startswith("[Command Explanation]")
+    assert "Plain-language effect: The field master switch" in checked
+    assert "- action: on" in checked
+    assert "- G: 0.1" in checked
+    assert "Stated reason: inspect the current field" in checked
+    assert "Check: valid under this command's registered parser" in checked
+
+    invalid = explain_command(":steer field sideways")
+    assert "Check: not valid" in invalid
+    assert "Expected form: :steer field" in invalid
+
+    legacy = explain_command(":clock")
+    assert "Plain-language effect:" in legacy
+    assert "no registered parser contract yet" in legacy
+
+    hidden = explain_command(":steer field on 0.1", hidden_commands={"steer"})
+    assert "hidden from the current model-facing reference" in hidden
+
+    assert extract_help_request("I need <<HELP>>") == ""
+    payload = ":steer field on 0.1"
+    assert extract_help_request(f"Check <<HELP: {payload}>>") == payload
+    assert remove_help_tags(f"Check <<HELP: {payload}>>") == "Check"
+    assert "<<HELP: :command args>>" in build_model_help_text()
+    assert "<<HELP: :command args>>" in COMMAND_CHECK_AVAILABILITY
+    assert "shell-state change" in COMMAND_CHECK_AVAILABILITY
+    utility_checked = command_help_tool_result(payload)
+    assert "valid under this command's registered parser" in utility_checked
+    assert command_help_tool_result("").startswith("[Help Tool Result]")
+
+
+def test_claimmap_reading_is_not_folded_into_the_model_prompt():
+    felt = 'I just held two framings against each other: "A" and "B".'
+    prompt = build_prompt("Answer the question.", claimmap_tool_result=felt)
+    assert "Answer the question." in prompt
+    assert felt not in prompt
+
+
+def test_command_checker_is_available_to_generators_not_ordinary_chat():
+    assert command_generation_help_context() is None
+    assert command_generation_help_context(pending_expect={"type": "autocomplete"}) == COMMAND_CHECK_AVAILABILITY
+    staged = "[Command Explanation]\nCheck: valid."
+    assert command_generation_help_context(staged) == staged
 
 
 def test_macro_queue_treats_hash_lines_as_comments():
@@ -419,6 +540,73 @@ def test_suggest_command_goal_prompt_queues_one_command_one_text_turn():
     assert len(queue) == 2
     assert "watch group" in queue[1][0]
     assert ":group" in queue[1][0]
+
+
+def test_goal_suggest_autocomplete_accepts_brief_planning_then_command():
+    response = (
+        "NEED: inspect current field geometry instead of copying a setup example\n"
+        "CHOICE: use the steer status surface\n"
+        "COMMAND: `:steer field status`"
+    )
+    completion, error = validate_command_autocomplete(
+        response,
+        ":steer",
+        known_commands={"steer", "probe", "tune"},
+        probe_names=set(),
+        knob_names=set(),
+    )
+    assert error is None
+    assert completion == ":steer field status"
+
+
+def test_goal_suggest_autocomplete_rejects_multiple_final_commands():
+    response = (
+        "CHOICE: two possible moves\n"
+        "COMMAND: :steer field status\n"
+        "COMMAND: :steer bodies"
+    )
+    completion, error = validate_command_autocomplete(
+        response,
+        ":steer",
+        known_commands={"steer"},
+        probe_names=set(),
+        knob_names=set(),
+    )
+    assert completion is None
+    assert "exactly one final command" in error
+
+
+def test_validate_autocomplete_uses_band_spec_clause_language():
+    bad, error = validate_command_autocomplete(
+        "CHOICE: pull\nCOMMAND: :steer band accuracy_tether pull accuracy rest 0.4 when.accuracy",
+        ":steer band",
+        known_commands={"steer"},
+        probe_names={"accuracy"},
+        knob_names={"probe_accuracy"},
+    )
+    assert bad is None
+    assert "argument language" in error
+    assert "when <source> below|above" in error
+
+    good, error = validate_command_autocomplete(
+        "COMMAND: :steer band accuracy_tether pull accuracy rest 0.4 when .accuracy below 0.0",
+        ":steer band",
+        known_commands={"steer"},
+        probe_names={"accuracy"},
+        knob_names={"probe_accuracy"},
+    )
+    assert error is None
+    assert good == ":steer band accuracy_tether pull accuracy rest 0.4 when .accuracy below 0.0"
+
+    listing, error = validate_command_autocomplete(
+        "CHOICE: no target was specified, so list existing bands\nCOMMAND: :steer band",
+        ":steer band",
+        known_commands={"steer"},
+        probe_names={"accuracy"},
+        knob_names={"probe_accuracy"},
+    )
+    assert error is None
+    assert listing == ":steer band"
 
 
 def test_suggest_goal_request_accepts_optional_prefix_after_goal_words():
@@ -686,6 +874,34 @@ def test_expect_autocomplete_prefix_survives_colon_splitter():
     assert " ".join(eargs[2:]) == ":steer pole"
 
 
+def test_colon_splitter_splits_newline_command_batches():
+    batch = (
+        ":probe release illeism_d4096\n"
+        ":clean priority apply\n"
+        ":probe backfill illeism_d4096 200 outcome +accuracy_d4096 +reality -illeism_d4096\n"
+        ":prioritize"
+    )
+    cmds = _split_macro_commands(
+        batch,
+        split_colon_commands=not command_takes_colon_command_arg(batch),
+    )
+    assert cmds == [
+        ":probe release illeism_d4096",
+        ":clean priority apply",
+        ":probe backfill illeism_d4096 200 outcome +accuracy_d4096 +reality -illeism_d4096",
+        ":prioritize",
+    ]
+
+    # Newline splitting is safe even for commands whose tail may contain an
+    # inline colon-command argument.
+    expect_batch = ":expect autocomplete :steer pole\n:prioritize"
+    cmds = _split_macro_commands(
+        expect_batch,
+        split_colon_commands=not command_takes_colon_command_arg(expect_batch),
+    )
+    assert cmds == [":expect autocomplete :steer pole", ":prioritize"]
+
+
 def test_validate_autocomplete_rejects_completion_failing_its_own_spec():
     # Generation awareness: a suggested completion is parsed by the SAME
     # CommandSpec that will execute it on :accept. Observed live: the model
@@ -771,6 +987,68 @@ def test_resolve_probe_choice_passthrough_leaves_concrete_names_without_model():
     assert resolve_probe_choice("choose", {}) is None
 
 
+def test_calibrate_choose_uses_trigger_evidence_without_generation():
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        tuner = TriggerTuner(path=Path(tmp.name) / "tuner.json")
+        for _ in range(12):
+            tuner.observe("probe_accuracy", 0.0, default=0.5)
+        for idx in range(20):
+            tuner.observe("probe_balanced", 1.0 if idx % 2 else 0.0, default=0.5)
+
+        picked, reason = choose_calibration_target(
+            tuner,
+            {"accuracy", "probe_accuracy", "balanced", "probe_balanced"},
+        )
+        assert picked == "accuracy"
+        assert "deterministic" in reason
+
+        picked, reason = choose_calibration_target(tuner, {"balanced", "probe_balanced"})
+        assert picked is None
+        assert "extreme fire rate" in reason
+
+        picked, reason = choose_calibration_target(
+            tuner,
+            {"balanced", "probe_balanced"},
+            refs=["+balanced"],
+        )
+        assert picked == "balanced"
+        assert "guidance" in reason
+    finally:
+        tmp.cleanup()
+
+
+def test_shift_aware_memory_search_attenuates_stale_and_boosts_destination():
+    tmp = tempfile.TemporaryDirectory()
+    try:
+        path = Path(tmp.name) / "memory.jsonl"
+        memory = MemoryEngine(path=path, scope="test_scope", load_existing=False)
+        from invariants.conversation_shift import ConversationShiftTracker
+        shift = ConversationShiftTracker(jump_threshold=0.85, stale_attenuation=0.05, anchor_boost=1.5)
+        memory.attach_shift_tracker(shift)
+
+        # Topic 0: GLM Quantization
+        memory.append_turn("user", "We are testing GLM Layer 3 quantization RMSE.")
+        shift.observe_turn("We are testing GLM Layer 3 quantization RMSE.", role="user")
+
+        memory.append_turn("assistant", "GLM Layer 3 additive subvalues reduce error.")
+        shift.observe_turn("GLM Layer 3 additive subvalues reduce error.", role="assistant")
+
+        # Older memory about games
+        old_game_rec = memory.append_turn("assistant", "The sandbox game rules specify commands and actions.")
+
+        # Hard Jump to Topic 1: Game Sandbox Rules
+        shift.observe_turn("Switch to the interactive sandbox game rules and terminal state.", role="user")
+        assert shift.active_regime == "hard_jump"
+
+        # Search for "game rules"
+        hits = memory.search("game rules", max_records=5)
+        assert hits
+        assert hits[0].record_id == old_game_rec.record_id
+    finally:
+        tmp.cleanup()
+
+
 TESTS = [
     test_memory_engine_is_tool_not_prompt_builder,
     test_turns_are_logged_with_provenance_and_reloaded,
@@ -786,11 +1064,20 @@ TESTS = [
     test_methodology_import_rejects_raw_clause_payloads,
     test_model_definition_and_feedback_persist_and_retrieve_together,
     test_named_backfill_scores_only_named_probe,
+    test_backfill_tail_accepts_remapped_outcome_expression,
+    test_backfill_outcome_from_terms_uses_centered_probe_signals,
     test_suggest_command_catalog_lists_all_visible_user_facing_commands,
+    test_declared_command_specs_automatically_drive_help_and_suggestions,
+    test_command_explainer_uses_parser_contract_and_model_help_payload,
+    test_claimmap_reading_is_not_folded_into_the_model_prompt,
+    test_command_checker_is_available_to_generators_not_ordinary_chat,
     test_macro_queue_treats_hash_lines_as_comments,
     test_macro_safe_block_quotes_columnar_grammar,
     test_suggest_autocomplete_prompt_queues_one_command_one_text_turn,
     test_suggest_command_goal_prompt_queues_one_command_one_text_turn,
+    test_goal_suggest_autocomplete_accepts_brief_planning_then_command,
+    test_goal_suggest_autocomplete_rejects_multiple_final_commands,
+    test_validate_autocomplete_uses_band_spec_clause_language,
     test_suggest_goal_request_accepts_optional_prefix_after_goal_words,
     test_macro_create_at_source_loads_existing_profile_without_text_turn,
     test_expect_macro_uses_low_memory_utility_profile_and_restores_config,
@@ -806,6 +1093,9 @@ TESTS = [
     test_watch_groups_round_trip_and_render_small_groups,
     test_watch_choose_pool_lists_probes_and_knobs_not_bars,
     test_resolve_probe_choice_passthrough_leaves_concrete_names_without_model,
+    test_calibrate_choose_uses_trigger_evidence_without_generation,
+    test_colon_splitter_splits_newline_command_batches,
+    test_shift_aware_memory_search_attenuates_stale_and_boosts_destination,
 ]
 
 

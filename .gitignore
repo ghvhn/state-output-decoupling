@@ -31,3 +31,6 @@ invariants/out/
 
 # Temporary caches
 *.tmp
+*.bak
+.pytest_cache/
+.pytest_temp*/

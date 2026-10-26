@@ -19,5 +19,5 @@
 
 # optional ~ comment-out as desired
 :listen on
-:memory status
-:suggest gravity
+:memory all on
+:context resume

@@ -17,10 +17,25 @@ Two front doors:
    synthesis, a cognitive cache, and a strict "egg gate" whose standard is
    honest non-equivocation, not raw accuracy.
 2. **The interactive shell** — a bare-prompt conversation loop (no system
-   prompt, no persona text) where the machinery lives in the activations:
+   prompt, no persona text) with activation interventions and explicit feedback:
    expert routing, test-time synthesis, felt claim-maps, document reading,
    a code sandbox, and a tuner where every threshold is a live, calibratable
    knob.
+
+## The idea in plain language
+
+A reply changes what can happen next: a question invites information, code
+produces a result, and a new distinction can change how later evidence is
+interpreted. That return becomes context for another reply. Continuity depends
+on what the system actually carries forward: retained conversation, retrieved
+records, and persisted controls.
+
+The research question is whether it uses that history to predict consequences
+and revise its behavior. A self-description alone does not answer it. Start
+with mechanisms and observable behavior, then test the functional interpretation.
+[WORDS_HAVE_IMPACT.md](WORDS_HAVE_IMPACT.md) connects this idea to the existing
+loop and its next controls; [vector travel](VECTOR_TRAVEL_AND_COMPRESSION.md)
+describes the narrower trajectory instrument and its implementation limits.
 
 ## Validated findings (pre-registered gates, permutation nulls)
 
@@ -46,9 +61,9 @@ and `docs/PERSONA_AUDIT.md` for the method that replaced them.
 run_phenomenality_shell.cmd
 ```
 
-Bare mode: the model sees only the conversation — everything else operates in
-activations or arrives as explicit, first-person-framed, one-turn tool
-results. Highlights (full reference: [SHELL_COMMANDS.md](SHELL_COMMANDS.md)):
+Bare mode has no system message or persona. The prompt includes retained
+conversation, staged tool results, and compact factual field context when
+configured. Highlights (full reference: [SHELL_COMMANDS.md](SHELL_COMMANDS.md)):
 
 - **Documents as conversation**: `:doc <path|folder|glob> [because <why>]`
   ingests with provenance (sha-deduped, progress persisted across sessions);
@@ -71,9 +86,9 @@ results. Highlights (full reference: [SHELL_COMMANDS.md](SHELL_COMMANDS.md)):
   understanding+ambiguity`); `:suggest` lists the moves the evidence already
   backs. `:probe expose` lets the model read (never shape) a sensor via
   `<<PROBE: name>>`.
-- **Agency ledger**: `:impact` — which turns were genuinely caused by the
-  model's own words, and whether experienced impact tracks better
-  deliberation ([WORDS_HAVE_IMPACT.md](WORDS_HAVE_IMPACT.md)).
+- **Agency ledger**: `:impact` — recorded consequences of the model's words
+  and their association with the internal sense score
+  ([WORDS_HAVE_IMPACT.md](WORDS_HAVE_IMPACT.md)).
 - **Emergent experts**: `:experts on` lets recurring self-correction
   directions mint new routing experts (bounded roster, benchmark lanes
   unaffected).

@@ -428,8 +428,16 @@ class SteerMapStore:
                 "best_entropy": record.get("best_entropy"),
                 "entropies": record.get("entropies", {}),
             }
-            start_layer = None
-            end_layer = None
+            metrics.update({
+                key: record[key]
+                for key in (
+                    "stage_index", "routing_depth", "routing_layer_span",
+                    "replay_start", "replay_end", "stop_reason",
+                )
+                if key in record
+            })
+            start_layer = record.get("replay_start")
+            end_layer = record.get("replay_end")
         elif metadata:
             action = f"synthesis_{metadata.get('reason') or 'unknown'}"
             step_index = metadata.get("steps")

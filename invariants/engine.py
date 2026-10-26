@@ -386,10 +386,14 @@ def _inputs(M: HF, instruction: str, pre_formatted: bool = False, system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": instruction})
     
-    d = M.tok.apply_chat_template(
-        messages,
-        add_generation_prompt=True, return_tensors="pt", return_dict=True,
-    )
+    if hasattr(M.tok, "apply_chat_template"):
+        d = M.tok.apply_chat_template(
+            messages,
+            add_generation_prompt=True, return_tensors="pt", return_dict=True,
+        )
+    else:
+        text = f"System: {system_prompt}\nUser: {instruction}\nAssistant:" if system_prompt else f"User: {instruction}\nAssistant:"
+        d = M.tok(text, return_tensors="pt")
     if hasattr(d, "to"):
         return d.to(M.device)
     return {k: v.to(M.device) if hasattr(v, "to") else v for k, v in d.items()}
@@ -864,38 +868,309 @@ def drift_at_layer(drift, layer):
     return (sum(touching) / len(touching)) if touching else None
 
 
-def probe_direction(hs_a, hs_b, layers):
-    """Mint a named-concept probe from two contrastive framings: per-layer
-    unit direction of (state_A - state_B) at the last token. The concept is
-    whatever separates the framings in the model's own geometry -- a
-    HYPOTHESIS of a sensor, not a validated one, until outcomes say so."""
+def _extract_layer_token_state(hs_layer, token_mode="last"):
+    """Extract a 1D [d] state vector from a layer tensor [seq, d] or [d]."""
+    t = hs_layer.float()
+    if t.ndim == 1:
+        return t
+    if t.shape[0] == 0:
+        return torch.zeros(t.shape[-1], dtype=torch.float32, device=t.device)
+    if isinstance(token_mode, int):
+        idx = max(-t.shape[0], min(t.shape[0] - 1, token_mode))
+        return t[idx, :]
+    mode = str(token_mode or "last").lower()
+    if mode == "mean":
+        return t.mean(dim=0)
+    if mode in ("profile", "blend"):
+        return 0.5 * t[-1, :] + 0.5 * t.mean(dim=0)
+    return t[-1, :]
+
+
+def probe_geometry(hs_a, hs_b, layers, *, token_mode="last"):
+    """Mint full probe geometry from two contrastive framings across `layers`.
+
+    Captures not just the 1D unit direction, but also:
+      - `direction`: {layer: unit_vec} pointing from B (-) to A (+)
+      - `position`: {layer: midpoint_vec} = 0.5 * (h_A + h_B), the probe's origin in latent space
+      - `scale`: {layer: float} = ||h_A - h_B||_2, the separation distance between poles
+      - `poles`: {layer: {"pos": h_A, "neg": h_B}}
+      - `mean_direction`: {layer: unit_vec} pooled across all sequence tokens
+      - `token_salience`: {layer: [float, ...]} per-token contrast norms across aligned tokens
+      - `peak_token_offset`: {layer: int} negative token offset from end where contrast peaks
+    """
     direction = {}
+    position = {}
+    scale = {}
+    poles = {}
+    mean_direction = {}
+    token_salience = {}
+    peak_token_offset = {}
+
     for layer in layers:
-        if not (0 <= layer < hs_a.shape[0] and layer < hs_b.shape[0]):
+        l_idx = int(layer)
+        if not (0 <= l_idx < hs_a.shape[0] and l_idx < hs_b.shape[0]):
             continue
-        diff = (hs_a[layer, -1, :] - hs_b[layer, -1, :]).float()
+        la = hs_a[l_idx].float()
+        lb = hs_b[l_idx].float()
+        if la.ndim == 1:
+            la = la.unsqueeze(0)
+        if lb.ndim == 1:
+            lb = lb.unsqueeze(0)
+        if la.shape[0] == 0 or lb.shape[0] == 0:
+            continue
+
+        # Compute token-level contrastive profile across right-aligned sequence positions
+        k_common = min(int(la.shape[0]), int(lb.shape[0]))
+        if k_common > 0:
+            aligned_diffs = la[-k_common:, :] - lb[-k_common:, :]
+            t_norms = aligned_diffs.norm(dim=-1)
+            salience_list = [float(x) for x in t_norms.detach().cpu().tolist()]
+            token_salience[l_idx] = salience_list
+            peak_idx = int(torch.argmax(t_norms).item())
+            peak_token_offset[l_idx] = peak_idx - k_common  # e.g. -1 is final token
+
+        mode = str(token_mode or "last").lower()
+        if mode == "contrast" and k_common > 1:
+            t_norms = (la[-k_common:, :] - lb[-k_common:, :]).norm(dim=-1)
+            w_sum = float(t_norms.sum().item())
+            if w_sum > 1e-12:
+                weights = (t_norms / w_sum).unsqueeze(-1)
+                ha_contrast = (la[-k_common:, :] * weights).sum(dim=0)
+                hb_contrast = (lb[-k_common:, :] * weights).sum(dim=0)
+                ha = 0.5 * la[-1, :] + 0.5 * ha_contrast
+                hb = 0.5 * lb[-1, :] + 0.5 * hb_contrast
+            else:
+                ha = la[-1, :]
+                hb = lb[-1, :]
+        else:
+            ha = _extract_layer_token_state(la, token_mode=mode)
+            hb = _extract_layer_token_state(lb, token_mode=mode)
+
+        diff = ha - hb
         norm = diff.norm()
-        if norm.item() > 0:
-            direction[int(layer)] = diff / norm
-    return direction
+        norm_val = float(norm.item())
+        if norm_val > 0 and math.isfinite(norm_val):
+            direction[l_idx] = diff / norm
+            position[l_idx] = 0.5 * (ha + hb)
+            scale[l_idx] = norm_val
+            poles[l_idx] = {"pos": ha.detach().clone(), "neg": hb.detach().clone()}
+
+        mean_diff = la.mean(dim=0) - lb.mean(dim=0)
+        mean_norm = mean_diff.norm()
+        if float(mean_norm.item()) > 0:
+            mean_direction[l_idx] = mean_diff / mean_norm
+
+    return {
+        "direction": direction,
+        "position": position,
+        "scale": scale,
+        "poles": poles,
+        "mean_direction": mean_direction,
+        "token_salience": token_salience,
+        "peak_token_offset": peak_token_offset,
+    }
 
 
-def probe_score(hs, direction):
-    """Score a state along a minted probe: mean cosine of the last-token
-    state with the probe direction across its layers. Raw and uncentered --
-    the caller centers against its own rolling history (the concept-map
-    lesson: common-mode must be removed before a projection means anything)."""
-    if not direction:
-        return 0.0
-    cosines = []
-    for layer, vec in direction.items():
-        if not (0 <= layer < hs.shape[0]):
+def probe_direction(hs_a, hs_b, layers, *, token_mode="last", return_geometry=False):
+    """Mint a named-concept probe from two contrastive framings: per-layer
+    unit direction of (state_A - state_B). The concept is whatever separates
+    the framings in the model's own geometry -- a HYPOTHESIS of a sensor, not
+    a validated one, until outcomes say so.
+
+    When `return_geometry=True`, returns the full `probe_geometry` dict
+    (including `direction`, `position` midpoint, `scale`, `poles`, and
+    per-token contrast salience). By default returns `{int(layer): unit_vec}`
+    for backward compatibility.
+    """
+    geom = probe_geometry(hs_a, hs_b, layers, token_mode=token_mode)
+    if return_geometry:
+        return geom
+    return geom["direction"]
+
+
+def probe_profile(hs, direction, *, position=None, scale=None, token_mode="last"):
+    """Compute a full positional, per-layer, and per-token score profile for a probe.
+
+    Accepts either a `{layer: vec}` direction mapping or a full probe dict
+    containing `direction` (and optional `position` and `scale`).
+    """
+    if isinstance(direction, dict) and "direction" in direction:
+        probe_obj = direction
+        direction = probe_obj.get("direction") or {}
+        if position is None:
+            position = probe_obj.get("position")
+        if scale is None:
+            scale = probe_obj.get("scale")
+
+    empty = {
+        "score": 0.0,
+        "raw_score": 0.0,
+        "position_score": 0.0,
+        "slab_coord": 0.0,
+        "token_profile_score": 0.0,
+        "mean_token_score": 0.0,
+        "last_token_score": 0.0,
+        "peak_token": -1,
+        "peak_score": 0.0,
+        "by_layer": {},
+        "by_layer_position": {},
+        "by_layer_distance": {},
+        "by_token": [],
+        "latent_distance": 0.0,
+        "normalized_distance": 0.0,
+    }
+    if not direction or hs is None or hs.shape[0] == 0:
+        return empty
+
+    pos_map = position if isinstance(position, dict) else {}
+    scale_map = scale if isinstance(scale, dict) else {}
+
+    by_layer = {}
+    by_layer_pos = {}
+    by_layer_slab = {}
+    by_layer_dist = {}
+    by_layer_norm_dist = {}
+    token_trajectories = []
+
+    for layer, vec in sorted(direction.items(), key=lambda kv: int(kv[0])):
+        l_idx = int(layer)
+        if not (0 <= l_idx < hs.shape[0]):
             continue
-        h = hs[layer, -1, :].float()
-        h_norm = h.norm().item()
+        layer_hs = hs[l_idx].float()
+        if layer_hs.ndim == 1:
+            layer_hs = layer_hs.unsqueeze(0)
+        if layer_hs.shape[0] == 0:
+            continue
+
+        v = vec.to(layer_hs.device).float().reshape(-1)
+        v_norm = float(v.norm().item())
+        if v_norm <= 0 or not math.isfinite(v_norm):
+            continue
+        v = v / v_norm
+
+        # Per-token cosine trajectory across sequence [seq]
+        t_norms = layer_hs.norm(dim=-1)
+        valid_mask = t_norms > 0
+        t_cos = torch.zeros(layer_hs.shape[0], dtype=torch.float32, device=layer_hs.device)
+        if bool(valid_mask.any()):
+            t_cos[valid_mask] = (layer_hs[valid_mask] @ v) / t_norms[valid_mask]
+        token_trajectories.append(t_cos)
+
+        # Layer representative state according to token_mode
+        h = _extract_layer_token_state(layer_hs, token_mode=token_mode)
+        h_norm = float(h.norm().item())
         if h_norm > 0:
-            cosines.append(float(h @ vec) / h_norm)
-    return (sum(cosines) / len(cosines)) if cosines else 0.0
+            by_layer[l_idx] = float(h @ v) / h_norm
+
+        # Latent-space position centering (relative to midpoint m_l)
+        m_vec = pos_map.get(l_idx)
+        if m_vec is None and str(l_idx) in pos_map:
+            m_vec = pos_map[str(l_idx)]
+        if m_vec is not None and hasattr(m_vec, "reshape"):
+            m = m_vec.to(layer_hs.device).float().reshape(-1)
+            if m.shape == h.shape:
+                delta = h - m
+                d_norm = float(delta.norm().item())
+                by_layer_dist[l_idx] = d_norm
+                proj = float(delta @ v)
+                if d_norm > 1e-12:
+                    by_layer_pos[l_idx] = proj / d_norm
+                else:
+                    by_layer_pos[l_idx] = 0.0
+                s_val = scale_map.get(l_idx, scale_map.get(str(l_idx)))
+                try:
+                    s_float = float(s_val) if s_val is not None else 0.0
+                except (TypeError, ValueError):
+                    s_float = 0.0
+                if s_float > 1e-12:
+                    # +1 at positive pole h_A, 0 at midpoint m, -1 at negative pole h_B
+                    by_layer_slab[l_idx] = proj / (0.5 * s_float)
+                    by_layer_norm_dist[l_idx] = d_norm / s_float
+
+    raw_score = (sum(by_layer.values()) / len(by_layer)) if by_layer else 0.0
+    pos_score = (sum(by_layer_pos.values()) / len(by_layer_pos)) if by_layer_pos else raw_score
+    slab_coord = (sum(by_layer_slab.values()) / len(by_layer_slab)) if by_layer_slab else pos_score
+    latent_dist = (sum(by_layer_dist.values()) / len(by_layer_dist)) if by_layer_dist else 0.0
+    norm_dist = (sum(by_layer_norm_dist.values()) / len(by_layer_norm_dist)) if by_layer_norm_dist else latent_dist
+
+    if token_trajectories:
+        mean_traj = torch.stack(token_trajectories, dim=0).mean(dim=0)
+        by_token = [float(x) for x in mean_traj.detach().cpu().tolist()]
+        last_token_score = by_token[-1]
+        mean_token_score = sum(by_token) / len(by_token)
+        token_profile_score = 0.5 * last_token_score + 0.5 * mean_token_score
+        peak_token = int(torch.argmax(mean_traj.abs()).item())
+        peak_score = by_token[peak_token]
+    else:
+        by_token = []
+        last_token_score = raw_score
+        mean_token_score = raw_score
+        token_profile_score = raw_score
+        peak_token = -1
+        peak_score = raw_score
+
+    primary_score = pos_score if position is not None and by_layer_pos else raw_score
+
+    return {
+        "score": primary_score,
+        "raw_score": raw_score,
+        "position_score": pos_score,
+        "slab_coord": slab_coord,
+        "token_profile_score": token_profile_score,
+        "mean_token_score": mean_token_score,
+        "last_token_score": last_token_score,
+        "peak_token": peak_token,
+        "peak_score": peak_score,
+        "by_layer": by_layer,
+        "by_layer_position": by_layer_pos,
+        "by_layer_distance": by_layer_dist,
+        "by_token": by_token,
+        "latent_distance": latent_dist,
+        "normalized_distance": norm_dist,
+    }
+
+
+def probe_score(hs, direction, *, position=None, scale=None, token_mode="last", return_details=False):
+    """Score a state along a minted probe across its layers.
+
+    Supports:
+      - Legacy direction-only scoring: `probe_score(hs, direction_dict)` -> float
+      - Latent-position-centered scoring: `probe_score(hs, direction, position=pos_dict, scale=scale_dict)`
+      - Sequence token modes: `token_mode="last" | "mean" | "profile"`
+      - Full per-layer & per-token breakdown: `return_details=True` -> dict
+    """
+    if (
+        position is None
+        and scale is None
+        and not return_details
+        and str(token_mode or "last").lower() == "last"
+        and isinstance(direction, dict)
+        and "direction" not in direction
+    ):
+        # Fast path for legacy direction-only callers
+        if not direction:
+            return 0.0
+        cosines = []
+        for layer, vec in direction.items():
+            if not (0 <= int(layer) < hs.shape[0]):
+                continue
+            h = hs[int(layer), -1, :].float()
+            h_norm = h.norm().item()
+            if h_norm > 0:
+                cosines.append(float(h @ vec.to(h.device).float().reshape(-1)) / h_norm)
+        return (sum(cosines) / len(cosines)) if cosines else 0.0
+
+    profile = probe_profile(
+        hs,
+        direction,
+        position=position,
+        scale=scale,
+        token_mode=token_mode,
+    )
+    if return_details:
+        return profile
+    return float(profile["score"])
+
 
 
 def pick_sweep_layers(band_layers, counts, width=1):

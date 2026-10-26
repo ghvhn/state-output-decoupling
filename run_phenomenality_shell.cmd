@@ -43,6 +43,15 @@ echo.
 echo === Launching Phenomenality Shell ===
 rem  Optional first argument: a model id/path to run the egg shell on, e.g.
 rem      run_phenomenality_shell.cmd Qwen/Qwen2.5-1.5B-Instruct
+rem  No default startup macro; open cleanly to prompt unless user explicitly sets PHENOMENALITY_STARTUP_PROMPT
+rem  (e.g., set PHENOMENALITY_STARTUP_PROMPT=:trajectory)
+
+if not defined CLAIMMAP_AUTO_TRIGGER (
+    set "CLAIMMAP_AUTO_TRIGGER=0"
+)
+if not defined ENABLE_TOOL_REPROMPTING (
+    set "ENABLE_TOOL_REPROMPTING=0"
+)
 "%PY%" "scripts\interactive_phenomenality.py" %*
 
 echo.

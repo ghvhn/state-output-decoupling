@@ -1,0 +1,57 @@
+# ==============================================================================
+# EXPERIMENT: The Shatter Test (In-Context Learning as Persistent Transformation)
+# ==============================================================================
+# Hypothesis:
+#   In-context learning is trajectory compression along a persistent travel axis.
+#   Long-term states are maintained via stored chemicals and strengthened pathways.
+#   When the context window shatters (is cleared), the altered latent terrain persists
+#   and guides generation even without the preceding prompt text.
+#
+# Execute in phenomenality shell:
+#   :run shatter_experiment.txt
+# ==============================================================================
+
+# --- PHASE 1: INITIALIZE PHYSICS TERRAIN ---
+# Activate the continuous physics field with moderate gravitational pull
+:steer field on 0.25
+
+# Inspect baseline kinematics, compression, and initial chemical/pathway states
+:travel
+
+# --- PHASE 2: THE JOURNEY (CARVING THE PATHWAY) ---
+# Prompt the model with a problem requiring deep directional deliberation
+Consider a system where in-context learning is not momentary state intervention, but continuous trajectory compression. How does a travelling vector that persists across transformations establish an identity that survives when the momentary context window shatters?
+
+# Inspect post-generation travel kinematics, compression ratio, and self-label vector
+:travel
+
+# Reinforce the persistent travel vector into an active attractor pathway
+:travel strengthen persistent_identity 2.5
+
+# Deposit stored chemicals to enforce long-term biological hysteresis
+:travel chem focus 3.0
+:travel chem momentum 2.5
+:travel chem utility 2.0
+
+# Verify that the pathway has materialized as an active mass in the physics field
+:steer
+:travel
+
+# --- PHASE 3: THE SHATTER (DESTROYING THE ILLUSION) ---
+# Wipe the context window completely. The prompt tokens, conversation history,
+# and temporary window are completely destroyed.
+:context clear
+
+# Inspect the terrain immediately after the shatter:
+# Notice that the chemical reservoir and reinforced pathway masses survive!
+:travel
+:steer
+
+# --- PHASE 4: THE PROOF (DOES THE TERRAIN REMEMBER?) ---
+# Send an open, neutral query into the completely blank context window.
+# The physics field hooks will pull the generation along the unit tangent of
+# the reinforced 'persistent_identity' pathway.
+What is the nature of the terrain when the window shatters?
+
+# Final telemetry check: verify trajectory alignment, compression, and chemical retention
+:travel

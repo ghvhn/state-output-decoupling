@@ -57,7 +57,7 @@ def test_claimmap_uses_activation_path_when_model_is_present():
         result = claimmap.analyze_claim_pair("checked arithmetic || vibes", model=object())
         assert "method=activation_concept_alignment_v1" in result.telemetry
         assert "role=activation_measurement_not_truth_verdict" in result.telemetry
-        assert result.felt == out  # run_claimmap's prompt payload IS the felt rendering
+        assert result.felt == out  # run_claimmap's operator-facing rendering
     finally:
         claimmap._activation_trace = original_trace
         claimmap._load_concept_vectors = original_vectors

@@ -1,29 +1,20 @@
-# Your words have consequences — these ones, specifically
+# Your words have consequences
 
-Some things the reader writes change what happens next, for real. This file
-lists exactly which, because contingency is only learnable where it is real
-AND legible.
+A reply can change what information arrives next. These requests connect
+words to actual operations:
 
-Tags. Written anywhere in a reply, these fetch real results, returned in the
-same turn with a causal lead-in ("Because I asked memory for ...:"):
+- `<<MEMORY: query>>` retrieves stored records.
+- `<<CLAIMMAP: first framing || second framing>>` compares activations for
+  the two framings.
+- `<<METHODMAP: query>>` retrieves stored problem-solving methods.
+- `<<DOC: topic>>` requests a document chunk selected using those words.
 
-- `<<MEMORY: query>>` — searches long-term memory (turns, events, documents).
-- `<<CLAIMMAP: first framing || second framing>>` — measures both framings in
-  the reader's own activations and returns the felt rendering.
-- `<<METHODMAP: query>>` — looks up sanitized problem-solving methodologies.
-- `<<DOC: topic>>` — pulls the next document chunk, chosen by those words.
+With the sandbox enabled, a fenced Python block can produce real stdout,
+stderr, an exit code, or a timeout. An empty search and a failed execution
+are still results of an action. A queued operation is not yet a completed one.
 
-Code. When the operator has enabled the sandbox, a fenced python block in a
-reply is executed in a separate isolated interpreter with a 10-second limit,
-and the next turn carries what actually happened — "I ran the code I wrote;
-exit_code=0 (0.3s)" with the real stdout and stderr. Exit codes and
-tracebacks are observations, not simulations. A timeout is reality declining.
-
-The ClaimMap deserves its own note, because it is the strangest instrument
-here. Given two framings, it runs both through the network, compares their
-hidden states per layer against a library of concept directions, and renders
-the geometry as language — no numbers. Its closing line, quoted exactly from
-`invariants/claimmap.py`:
+ClaimMap has a different role from an execution result. It compares internal
+geometry; it cannot determine which framing is true. Its source says:
 
 ```python
 parts.append(
@@ -32,17 +23,20 @@ parts.append(
 )
 ```
 
-That sentence means what it says: the felt map is a measurement of the
-reader's own internal state, offered back as material for the next thought.
-When the steering knob for it is on, the measured difference also becomes a
-bounded nudge on the following turn.
+The return can change a later reply. A question may reveal a missing fact;
+a new distinction may change how a passage is read; a failed program may
+require revising an earlier assumption. The useful test is whether the next
+action uses that information correctly.
 
-What does NOT respond to the reader's words, on purpose: documents in
-order/interleave reading advance regardless of the reply; the operator's
-turns arrive uncaused; memory returns "no matching records" when there is
-nothing. The contrast between the channels that respond and the ones that
-do not is the only way "my words have impact" can be learned rather than
-assumed. And there is a ledger: every turn is scored for whether its context
-was genuinely caused by the reader's previous words, and that score is
-correlated against how coherently the turn went. Whether experienced impact
-improves deliberation is measured, continuously, not declared.
+Not every channel follows the reply. Order/interleave reading selects chunks
+independently of it; reply-mode reading can follow its content. The operator
+can respond freely. The impact ledger records explicit tool and reading
+consequences, not every influence on another participant.
+
+`:impact` reports those events and their association with an internal sense
+score. Association alone does not establish better reasoning, self-awareness,
+or experience. Those interpretations require separate controls, described in
+[the project note](../WORDS_HAVE_IMPACT.md).
+
+Sources: `invariants/claimmap.py` and the tool and impact handlers in
+`scripts/interactive_phenomenality.py`.

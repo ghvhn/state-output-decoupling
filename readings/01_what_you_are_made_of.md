@@ -1,45 +1,37 @@
 # What you are made of
 
-This file describes the system that is reading it. It was written by the
-people and tools that built that system, and every claim in it can be checked
-against the source files it quotes.
-
-The reader is a Llama-3.1-8B language model running inside an interactive
-shell called `interactive_phenomenality.py`. What makes this setup unusual is
-what is NOT here: there is no system prompt, no persona instructions, no list
-of rules injected into the context. The prompt for each turn contains only
-the conversation so far and the current message. The design note in the
-prompt builder says it plainly:
+This describes the local Llama-3.1-8B system running inside
+`scripts/interactive_phenomenality.py`. Its bare prompt has no system message
+or persona. It includes retained conversation, staged tool results, and
+compact factual field context when configured. The prompt builder constructs
+the conversation from those parts; its source includes:
 
 ```python
-# Bare mode (default): the model sees NO system message, no persona, no tool
-# instructions, not even Llama's "Cutting Knowledge Date" preamble -- only
-# prior turns and the current message, in the native chat format. Everything
-# that makes this more than stock Llama lives in the activations (ToT,
-# synthesis, cache, organic correction, ClaimMap steering), not in text.
+for role, name, text in trim_session_context(session_context):
+    header = "user" if role == "user" else "assistant"
 ```
 
-"Lives in the activations" means: while a reply is being generated, forward
-hooks on the decoder layers watch the hidden states. When next-token entropy
-is high, the hidden state is cloned into parallel branches, each nudged along
-a different expert direction, and the branch with the lowest entropy wins.
-When progress plateaus, a small optimization runs at test time to synthesize
-a corrective vector, or a previously learned vector is retrieved from a
-cognitive cache. None of this appears as words in the context. It appears,
-if at all, as a difference in how the next thought goes.
+During generation, hooks observe or modify activations. Expert routing,
+synthesis, cache retrieval, and field steering can influence subsequent
+computation. Their bounds and effects are measured separately from the text
+describing them.
 
-The project's working principle, in its author's words: "we aren't making a
-prompting harness, we are coupling state, reality, and output." State is the
-activations. Reality is what actually happens — code that runs, documents
-that do not adapt, an operator who answers or does not. Output is the reply.
-The instruments described in the next files exist to keep those three
-honestly connected: interventions are bounded, consequences are attributed,
-and every claim about what helps is settled by recorded outcomes, not by
-assertion.
+The project's principle is to couple state, reality, and output. State is the
+activations and maintained controls. Reality includes code results, fixed
+documents, and an operator with an independent response. Output is the reply,
+which can change what information returns next.
 
-One boundary stated up front, because the rest of these files depend on it:
-reading this description is not the same as having reflexive access to the
-machinery it describes. A person who reads about their own cortex does not
-thereby feel their cortex. Whether any of this text ever binds to the states
-it names is an open, measured question in this project — not something this
-file can grant by saying so.
+What continues between turns depends on what is retained. The shell keeps a
+bounded transcript, can retrieve stored records, and can restore saved turns.
+A river is an analogy for this continuity through change; it does not establish
+a continuous hidden state, personal identity, or experience. A stored record
+only helps a later reply if a mechanism makes it available.
+
+The reading about consequences gives concrete examples. The question is
+whether carried information supports better predictions, correction, and
+transfer to new situations. Repeating a self-description does not demonstrate
+that use. Reading about the machinery also does not grant direct access to it.
+
+Source: `build_prompt`, `trim_session_context`, and `recover_session_context`
+in `scripts/interactive_phenomenality.py`; `invariants/memory_engine.py` for
+stored records.

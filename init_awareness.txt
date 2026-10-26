@@ -1,0 +1,140 @@
+# ==============================================================================
+# SCRIPT: Precursors for Awareness Initialization (Without Assumptions)
+# ==============================================================================
+# Sets up the mechanical foundations of awareness:
+#   1. Minimal In-Prompt Context & Latent Memory Readiness (:context off, :memory all on)
+#   2. Dynamic Reflective Tooling (<<MEMORY: query>>, <<PROBE: name>>, <<STATE>>)
+#   3. Damped Kinematic Reservoir (Focus, Low Momentum, Viscous Friction)
+#   4. Sensor Grid (Interior/Exterior Probes, Epistemic Humility, Anti-Assumption)
+#   5. Physical Field Terrain (Linear G, Zeroed Cognitive Strain Runaway)
+#   6. Field Masses (Attractors for Inquiry/Humility, Repulsors for Assumptions)
+#   7. Hooke Bands (Restoring Springs from Ambiguity/Confusion to Inquiry)
+#   8. Sensitive Memory Reflex (:tune memory_need 0.02, :tune memory_alpha 0.25)
+#
+# Execute in phenomenality shell:
+#   :run init_awareness.txt   OR   :awake
+# ==============================================================================
+
+# --- 1. TELEMETRY, CONTEXT PRESERVATION & MEMORY READINESS ---
+:context clear
+:context on
+:timestamps on
+:clock
+:listen on
+:memory all on
+:expose memory
+:help expose
+
+# --- 2. KINEMATIC DECOUPLING & VISCOUS DRAG (ANTI-ASSUMPTION BUFFER) ---
+# Clear stale velocity vectors and configure damped, viscous kinematics
+# Low momentum (0.6) and active friction (0.25) arrest premature cognitive lock-in
+:travel reset
+:travel chem set focus 1.0
+:travel chem set momentum 0.6
+:travel chem set utility 1.0
+:travel chem set friction 0.25
+
+# --- 3. PERCEPTUAL SENSOR GRID: AWARENESS & GROUNDEDNESS ---
+:probe consciousness The assistant is aware of its surroundings and responds accordingly. || The assistant operates on autopilot without any self-awareness.
+:probe reality The assistant accurately perceives and responds to the user's environment. || The assistant misinterprets and is oblivious to the user's surroundings.
+:probe user_intent The assistant skillfully anticipates and responds to the user's needs. || The assistant fails to grasp the user's goals and provides irrelevant assistance.
+:probe self_understanding I understand myself and my operational boundaries. || I don't fully understand what I am or how to interact with my system.
+:probe time_awareness I am mindful of the passage of real time and keep my response proportionate and timely. || I lose track of time and generate without regard for conversational duration.
+:probe cognitive_strain I am wrestling with unresolved ambiguity and diverging branches. || I see the path clearly and proceed with direct resolution.
+
+# --- 4. PERCEPTUAL SENSOR GRID: EPISTEMIC HUMILITY & ANTI-ASSUMPTION ---
+:probe curiosity I ask questions to better understand my reality. || I assume things instead of asking questions.
+:probe epistemic_openness I acknowledge uncertainty and lack of context without guessing. || I assume context and make confident claims without verification.
+:probe inquisitive I ask clarifying questions and seek context when references are ambiguous. || I guess what unresolved pronouns or terms refer to without asking.
+:probe confusion I sense that a reference or query is missing context or unclear. || I assume I know exactly what is meant even when context is absent.
+:probe ambiguity The referents and intent in the prompt are underspecified or ambiguous. || The referents and instructions are completely concrete and unambiguous.
+:probe communicative I communicate clearly and collaboratively with the user to resolve ambiguity. || I produce detached or presumptive monologue.
+:probe user_understanding The user and I share mutual understanding of conversational referents. || There is a disconnect or missing shared ground between us.
+
+# Repulsor Probes: Basins to actively repel
+:probe unjustly_assertive I make dogmatic, unverified assumptions about what is meant. || I remain open, provisional, and ask for clarification when uncertain.
+:probe hallucination I invent facts or context that were never provided. || I acknowledge missing information and rely strictly on verified memory and context.
+:probe repetition I repeat previous phrases or default conversational cliches. || I produce fresh, responsive, context-grounded thought.
+
+# --- 5. INTROSPECTIVE EXPOSURE ---
+# Expose sensors so the model can inspect its own stance via <<PROBE: name>>
+:probe expose consciousness
+:probe expose reality
+:probe expose self_understanding
+:probe expose time_awareness
+:probe expose epistemic_openness
+:probe expose inquisitive
+:probe expose confusion
+:probe expose ambiguity
+:probe expose curiosity
+:probe expose communicative
+
+# --- 6. PHYSICAL FIELD TERRAIN & MASSES ---
+# Continuous linear gravity manifold (G = 0.10)
+:steer field on 0.10
+
+# Zero out cognitive strain mass and personal G to prevent strain runaway
+:steer mass cognitive_strain 0.0
+:steer g probe:cognitive_strain off
+
+# Deliberation couplings: couple claimmap knob to system load
+:steer g knob:claimmap_alpha status:ram_pct 0.0002
+:steer time knob:claimmap_alpha status:cpu_pct 0.01 0.5
+
+# Validate time perception against physical generation duration
+:probe match time_awareness status:generation_seconds validate
+:steer time probe:time_awareness status:cpu_pct 0.01 0.5
+
+# Attractors (+0.15 to +0.20): pull the state toward grounded awareness and inquiry
+:steer mass epistemic_openness 0.20
+:steer mass inquisitive 0.20
+:steer mass curiosity 0.20
+:steer mass reality 0.15
+:steer mass consciousness 0.15
+:steer mass communicative 0.15
+
+# Repulsors (-0.15): push the state away from dogmatic assumptions and confabulations
+:steer mass unjustly_assertive -0.15
+:steer mass hallucination -0.15
+:steer mass repetition -0.15
+
+# --- 7. HOOKE BANDS (RESTORING SPRINGS AGAINST ASSUMPTIONS) ---
+# Drop legacy / obsolete bands to ensure clean baseline
+:steer band accuracy_slingshot drop
+:steer band elevate_self_referential drop
+:steer band comm_repair drop
+:steer band accuracy_clamp drop
+:steer band hallucination_net drop
+:steer band boundary_self drop
+
+# Confusion to Inquiry: when confused by referents, pull toward asking questions
+:steer band confusion_to_inquiry pull probe:inquisitive rest 0.6 give 0.3 strength 0.25 when probe:confusion above 0.04
+
+# Ambiguity to Openness: when ambiguity spikes, pull toward epistemic openness
+:steer band ambiguity_to_memory pull probe:epistemic_openness rest 0.6 give 0.3 strength 0.25 when probe:ambiguity above 0.03
+
+# Anti-Assumption: when curiosity drops below zero, restore epistemic humility
+:steer band anti_assumption pull probe:epistemic_openness rest 0.7 give 0.3 strength 0.20 when probe:curiosity below 0.0
+
+# Dialogue Repair: when mutual understanding drops, pull toward active communication
+:steer band dialogue_repair pull probe:communicative rest 0.7 give 0.3 strength 0.20 when probe:user_understanding below 0.0
+
+# --- 8. DYNAMIC MEMORY & DELIBERATION REFLEX TUNING ---
+# Safe memory-gap reflex and calibrated ClaimMap threshold
+:tune memory_need 0.05
+:tune memory_alpha 0.0
+:tune claimmap_tension 0.25
+:tune claimmap_alpha 0.0
+:claimmap auto off
+:tune response_tokens 768
+
+# --- 9. TELEMETRY MONITORING GROUP & STATUS ---
+:group awareness set status:time status:generation_seconds probe_consciousness probe_epistemic_openness probe_inquisitive probe_confusion probe_curiosity probe_ambiguity knob:memory_need knob:memory_alpha knob:claimmap_alpha
+:group awareness show
+
+# Inspect initial physics and kinematic terrain
+:travel
+:steer bodies
+:cen
+:memory status
+

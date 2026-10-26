@@ -4,6 +4,11 @@ Design record from the bare-prompt / activation-coupling thread. Captures how th
 system should learn that *interaction is productive*, because implementation
 depends on several probes that are not built yet.
 
+Current interpretation and proposed controls are consolidated in
+[WORDS_HAVE_IMPACT.md](../../WORDS_HAVE_IMPACT.md). The build-status notes below
+record the original design; current prompt construction also permits compact
+factual field context.
+
 ## The frame
 
 Pull the last things that live in prompt/control-flow down into state:
@@ -57,11 +62,12 @@ per-run. The reward we reach for is the one we already trust.
 
 `invariants/trigger_tuner.py` now records `(signal, outcome)` per trigger and
 reports, in `:tune`, `fired_outcome` vs `unfired_outcome` and their **lift**.
-Positive lift = firing (interacting) beat not-firing on the outcome = the honest
-"is interaction productive" readout. Observe-only: nothing drifts until you
-calibrate on it deliberately. This is the piece everything above plugs into --
-each probe (sense, then intent, then confidence) becomes an `outcome` fed to
-`tuner.credit(...)`, and the interaction knobs drift toward what actually resolves.
+Positive lift means a higher mean recorded outcome on fired turns. This is an
+observational association, not a causal estimate of whether interaction helps;
+task selection and tool availability can confound it. The tuner records evidence
+without changing thresholds until explicit calibration. Each probe becomes an
+`outcome` fed to `tuner.credit(...)`; an independently scored, controlled comparison
+is needed before interpreting the association as improved resolution.
 
 ## Remaining instrument work (in order)
 

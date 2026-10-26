@@ -1,0 +1,51 @@
+# ==============================================================================
+# SCRIPT: Lookahead Waypoint Predictor & Post-Mature Steering Initialization
+# ==============================================================================
+# Initializes:
+#   1. Clean telemetry & generation timing (:timestamps on, :clock)
+#   2. Damped kinematics reservoir (prevents stale momentum lock-in)
+#   3. Future Waypoint Predictor & Post-Mature Layer Adjustment (L14-L24)
+#   4. ClaimMap tension axis coupling & default horizon mapping
+#   5. Telemetry watch group for live monitoring
+#
+# Execute in phenomenality shell:
+#   :run init_lookahead.txt   (or simply: :lookahead init or :trajectory)
+# Explicitly resets travel chemistry and enables supported lookahead steering.
+# Does not attach ClaimMap by itself; use :claimmap to supply an actual axis.
+# Optional composition: :lookahead combine sinusoidal
+# ==============================================================================
+
+# --- 1. VISIBILITY & CLOCK ---
+:timestamps on
+:clock
+:cen off
+
+# --- 2. KINEMATIC TRAVEL RESET ---
+:travel reset
+:travel chem set focus 1.0
+:travel chem set momentum 0.5
+:travel chem set utility 1.0
+:travel chem set friction 0.20
+
+# --- 3. ACTIVATE LOOKAHEAD APPARATUS & HORIZONS ---
+# Turn on post-mature layer adjustment (alpha_self=0.15, alpha_ext=0.10)
+:lookahead on 0.15
+:lookahead k 5
+:tune lookahead_claimmap_weight 0.50
+
+# --- 4. CONFIGURE ANISOTROPIC DEGREE SCALES ---
+# All matured predictions remain unit-weight evidence regardless of these scales.
+:lookahead degree diff 1.50
+:lookahead degree horizon 1.80
+:lookahead degree direction 1.20
+:lookahead degree distance 2.00
+:lookahead degree logits 1.00
+:lookahead degree factor 1.00
+
+# --- 5. TELEMETRY MONITORING GROUP ---
+:group lookahead set knob:lookahead_alpha_self knob:lookahead_claimmap_weight knob:lookahead_default_k status:generation_seconds status:tokens_per_sec
+:group lookahead show
+
+# --- 6. STATUS CHECK ---
+:lookahead status
+:travel

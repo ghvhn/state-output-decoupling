@@ -214,6 +214,11 @@ class MemoryEngine:
             self.load()
         self.session_start_index = 0 if include_existing_in_session_view else len(self.records)
         self._turn_counter = 0
+        self.shift_tracker: Optional[Any] = None
+
+    def attach_shift_tracker(self, tracker: Any) -> None:
+        """Attach a conversation shift tracker to modulate retrieval scores."""
+        self.shift_tracker = tracker
 
     def load(self) -> None:
         self.records = []
@@ -643,11 +648,13 @@ class MemoryEngine:
         scope: Optional[str] = None,
         kinds: Optional[list[str]] = None,
         current_session_only: bool = False,
+        shift_tracker: Optional[Any] = None,
     ) -> list[MemoryRecord]:
         terms = {t for t in query.lower().replace("_", " ").split() if t}
         if not terms:
             return []
 
+        tracker = shift_tracker if shift_tracker is not None else self.shift_tracker
         allowed_kinds = set(kinds or [])
         source = self.records[self.session_start_index :] if current_session_only else self.records
         scored: list[tuple[float, int, MemoryRecord]] = []
@@ -669,8 +676,11 @@ class MemoryEngine:
             hits = sum(1 for term in terms if term in haystack)
             if hits <= 0:
                 continue
-            recency = idx / max(1, len(source))
-            score = hits + (0.15 * recency)
+            if tracker is not None:
+                score = tracker.modulate_score(float(hits), record.text or "", idx, len(source), query=query)
+            else:
+                recency = idx / max(1, len(source))
+                score = hits + (0.15 * recency)
             scored.append((score, idx, record))
 
         scored.sort(key=lambda item: (item[0], item[1]), reverse=True)

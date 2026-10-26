@@ -1,0 +1,8 @@
+# Initialize the flexible field system (gravity steering)
+:steer field flex
+
+# Enable the field to replace pin/mix steering
+:steer field on
+
+# Output the status of the field system
+:steer field status

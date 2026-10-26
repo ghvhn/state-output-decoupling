@@ -5,6 +5,7 @@ import io
 import os
 import re
 import torch.nn.functional as F
+from invariants.cache_probe_identity import migrate_probe_metadata
 
 DEFAULT_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 
@@ -35,12 +36,24 @@ def model_cache_file(model_name, d_model=None):
 
 
 class CognitiveCache:
-    def __init__(self, threshold=0.995, max_memories=512):
+    def __init__(self, threshold=0.995, max_memories=512, *, file=None, autoload=True, vector_travel=None):
         self.threshold = threshold
         self.max_memories = max_memories
         self.memory = [] # List of dicts: {trigger, delta, metadata}
-        self.file = CACHE_FILE
-        self.load()
+        self.file = Path(file) if file is not None else CACHE_FILE
+        self.vector_travel = vector_travel
+        if self.vector_travel is None and file is not None:
+            # A namespaced cache must never reinforce the legacy owner's paths.
+            from invariants.vector_travel import VectorTravelEngine
+            self.vector_travel = VectorTravelEngine(persistence_dir=self.file.parent, autoload=autoload)
+        if autoload:
+            self.load()
+
+    def _travel_engine(self):
+        if self.vector_travel is not None:
+            return self.vector_travel
+        from invariants.vector_travel import VectorTravelEngine
+        return VectorTravelEngine.get_instance()
 
     def use_file(self, path):
         """Re-point this cache at a model-specific file and reload its memories.
@@ -86,7 +99,7 @@ class CognitiveCache:
             return {
                 "trigger": self._last_token_vector(trigger),
                 "delta": self._last_token_vector(delta),
-                "metadata": metadata,
+                "metadata": migrate_probe_metadata(metadata),
             }
         except Exception:
             return None
@@ -156,7 +169,7 @@ class CognitiveCache:
             print("    [Cognitive Cache] Skipping store: trigger/vector shape mismatch.")
             return
 
-        metadata = dict(metadata or {})
+        metadata = migrate_probe_metadata(dict(metadata or {}))
         # Every entry is timestamped at the single choke point, so cache rows
         # can always be joined against the timestamped session/trace logs.
         # (Entries before 2026-07-09 predate this and need the order-preserving
@@ -181,6 +194,15 @@ class CognitiveCache:
         else:
             label = "Epiphany"
         print(f"    [Cognitive Cache] {label} stored! Total memories: {len(self.memory)}")
+
+        try:
+            p_label = metadata.get("concept") or metadata.get("tag") or f"cache_{len(self.memory)}"
+            utility = 2.0 if metadata.get("promoted_by") == "humble_verifier" else 1.0
+            travel = self._travel_engine()
+            travel.pathways.reinforce(str(p_label), vec, utility_score=utility)
+            travel.chemicals.deposit("utility", utility * 0.5)
+        except Exception:
+            pass
         
     def retrieve(
         self,
@@ -252,6 +274,10 @@ class CognitiveCache:
         if best_sim > self.threshold:
             reason = best_meta.get("reason", "cached_delta") if isinstance(best_meta, dict) else "cached_delta"
             print(f"    [Cognitive Cache] HIT! Found matching cognitive state (Sim: {best_sim:.4f}, reason: {reason})")
+            try:
+                self._travel_engine().chemicals.deposit("momentum", 0.5, best_vec)
+            except Exception:
+                pass
             return best_vec.to(current_state.device).to(current_state.dtype)
             
         return None
