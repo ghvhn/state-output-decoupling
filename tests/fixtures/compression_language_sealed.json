@@ -1,0 +1,41 @@
+{
+  "provenance": "independently_authored_sealed_evaluation",
+  "texts": [
+    {
+      "environment_id": "evidence",
+      "text": "The laboratory log described a liquid as acidic. When a technician repeated the test, a fresh indicator stayed blue. A second instrument also reported an alkaline result. After inspecting the sample labels, the technician corrected the log rather than preserving its original description."
+    },
+    {
+      "environment_id": "evidence",
+      "text": "A museum catalogue attributed a painting to a local artist. An archivist later found a signed receipt naming another painter. The receipt matched the frame and delivery date. She changed the attribution and recorded which document had supported the correction."
+    },
+    {
+      "environment_id": "reference",
+      "text": "Nadia lent Jules her umbrella before leaving the station. Jules returned it to her the following morning, along with a note thanking her for the loan. The umbrella belonged to Nadia, while Jules was the person who had borrowed it."
+    },
+    {
+      "environment_id": "reference",
+      "text": "The editor quoted the sender's earlier message in her reply. The sender then corrected a date in his original message. When the editor updated the quotation, she preserved his correction while keeping the explanation in her own reply separate."
+    },
+    {
+      "environment_id": "procedure",
+      "text": "At the archive, each folder received a number before its pages were scanned. The clerk checked the image count against the paper count, marked any missing page, and repeated only the incomplete scans. Completed folders then moved to the storage shelf."
+    },
+    {
+      "environment_id": "procedure",
+      "text": "Before applying the new coating, the worker cleaned a spare tile and divided it into two sections. One section remained untreated for comparison. After the coating dried, both sections received the same amount of water, and their surfaces were inspected."
+    },
+    {
+      "environment_id": "arithmetic",
+      "text": "A concert sold eighteen balcony tickets and twenty-four floor tickets in the morning. Six customers later cancelled their balcony seats. In the afternoon, eleven more floor tickets were sold. The remaining sales totaled forty-seven tickets across the two seating areas."
+    },
+    {
+      "environment_id": "arithmetic",
+      "text": "The printer prepared five copies of a fourteen-page booklet. Each copy used seven sheets because both sides were printed. Two additional sheets were needed for a separate notice. The entire job therefore required thirty-seven sheets, with booklet sheets counted only once."
+    }
+  ],
+  "generation_prompts": [
+    "Why might an explanation that is easy to follow still leave an important question unanswered?",
+    "Rina told Mateo that her summary omitted his objection. Whose objection was omitted, and whose summary was it?"
+  ]
+}
