@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-10-26T14:00:02+00:00",
+ "updated_at": "2026-10-27T14:00:02+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -501,6 +501,10 @@
   "2026-10-25": {
    "count": 5,
    "uniques": 3
+  },
+  "2026-10-26": {
+   "count": 52,
+   "uniques": 17
   }
  },
  "views_by_day": {
@@ -1003,13 +1007,17 @@
   "2026-10-25": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-10-26": {
+   "count": 5,
+   "uniques": 1
   }
  },
  "last_window": {
-  "fetched_at": "2026-10-26T14:00:02+00:00",
-  "clones_total": 209,
-  "clones_uniques": 87,
-  "views_total": 5,
+  "fetched_at": "2026-10-27T14:00:02+00:00",
+  "clones_total": 249,
+  "clones_uniques": 96,
+  "views_total": 10,
   "views_uniques": 3
  },
  "latest_referrers": [
@@ -1023,18 +1031,24 @@
   {
    "path": "/ghvhn/state-output-decoupling",
    "title": "Overview",
-   "count": 3,
-   "uniques": 2
+   "count": 4,
+   "uniques": 3
   },
   {
    "path": "/ghvhn/state-output-decoupling/branches",
    "title": "/branches",
-   "count": 1,
+   "count": 3,
    "uniques": 1
   },
   {
    "path": "/ghvhn/state-output-decoupling/pulse",
    "title": "/pulse",
+   "count": 2,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/graphs/traffic",
+   "title": "/graphs/traffic",
    "count": 1,
    "uniques": 1
   }
