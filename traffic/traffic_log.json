@@ -1,6 +1,6 @@
 {
  "repo": "ghvhn/state-output-decoupling",
- "updated_at": "2026-11-11T14:00:02+00:00",
+ "updated_at": "2026-11-12T14:00:02+00:00",
  "clones_by_day": {
   "2026-06-23": {
    "count": 0,
@@ -565,6 +565,10 @@
   "2026-11-10": {
    "count": 18,
    "uniques": 10
+  },
+  "2026-11-11": {
+   "count": 6,
+   "uniques": 4
   }
  },
  "views_by_day": {
@@ -1131,20 +1135,84 @@
   "2026-11-10": {
    "count": 0,
    "uniques": 0
+  },
+  "2026-11-11": {
+   "count": 15,
+   "uniques": 2
   }
  },
  "last_window": {
-  "fetched_at": "2026-11-11T14:00:02+00:00",
-  "clones_total": 199,
-  "clones_uniques": 74,
-  "views_total": 1,
-  "views_uniques": 1
+  "fetched_at": "2026-11-12T14:00:02+00:00",
+  "clones_total": 187,
+  "clones_uniques": 71,
+  "views_total": 16,
+  "views_uniques": 3
  },
- "latest_referrers": [],
+ "latest_referrers": [
+  {
+   "referrer": "Google",
+   "count": 1,
+   "uniques": 1
+  }
+ ],
  "latest_paths": [
   {
    "path": "/ghvhn/state-output-decoupling",
    "title": "Overview",
+   "count": 3,
+   "uniques": 3
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/pulse",
+   "title": "/pulse",
+   "count": 3,
+   "uniques": 2
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/actions/metrics/usage",
+   "title": "/actions/metrics/usage",
+   "count": 3,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/actions/workflows/dynamic/github-code-scanning/codeql",
+   "title": "/actions/workflows/dynamic/github-code-scanning/codeql",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/forks",
+   "title": "/forks",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/graphs/community",
+   "title": "/graphs/community",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/graphs/contributors",
+   "title": "/graphs/contributors",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/graphs/traffic",
+   "title": "/graphs/traffic",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/network",
+   "title": "/network",
+   "count": 1,
+   "uniques": 1
+  },
+  {
+   "path": "/ghvhn/state-output-decoupling/network/dependencies",
+   "title": "/network/dependencies",
    "count": 1,
    "uniques": 1
   }
